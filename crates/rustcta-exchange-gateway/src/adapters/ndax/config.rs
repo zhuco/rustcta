@@ -51,6 +51,17 @@ impl NdaxGatewayConfig {
                 .as_ref()
                 .is_some_and(|value| !value.trim().is_empty())
     }
+
+    pub fn private_rest_enabled(&self) -> bool {
+        self.enabled_private_rest
+            && self.private_credentials_available()
+            && self
+                .user_id
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
+            && self.account_id.is_some()
+            && self.oms_id > 0
+    }
 }
 
 fn non_empty_env(key: &str) -> Option<String> {

@@ -3,6 +3,7 @@ exchange: bitget
 adapter: rustcta_exchange_gateway::adapters::bitget
 market_types:
   - spot
+  - perpetual
 rest:
   base_url: https://api.bitget.com
   testnet_base_url: ""
@@ -59,12 +60,42 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: native
+    urls:
+      spot: wss://ws.bitget.com/v2/ws/public
+      perpetual: wss://ws.bitget.com/v2/ws/public
+    subscription_mode: json_subscribe
+    orderbook:
+      channels:
+        - name: books1
+          levels: 1
+          push_interval_ms: 10
+          message_type: snapshot
+        - name: books5
+          levels: 5
+          push_interval_ms: 200
+          message_type: snapshot
+        - name: books15
+          levels: 15
+          push_interval_ms: 200
+          message_type: snapshot
+        - name: books
+          levels: full
+          push_interval_ms: 200
+          message_type: snapshot_then_update
+      sequence_field: seq
+      checksum: crc32
+      resync: rest_order_book_snapshot_then_replay_delta
+      fixtures:
+        - tests/fixtures/exchanges/bitget/ws/public_depth_books5.json
+      implementation:
+        - crates/rustcta-exchange-gateway/src/adapters/bitget/streams.rs
+        - crates/rustcta-exchange-gateway/src/adapters/bitget/stream_tests.rs
     heartbeat:
-      required: false
-      direction: none
+      required: true
+      direction: server_ping
       interval_ms: null
-      timeout_ms: null
+      timeout_ms: 30000
     resync: rest_order_book_snapshot
   private:
     support: unsupported
@@ -72,6 +103,49 @@ websocket:
     renewal_ms: null
     relogin_on_reconnect: true
     fallback: rest_reconciliation
+unsupported:
+  - operation: usdc_futures_product
+    status: project_unimplemented
+    product_lines: [usdc_futures]
+    boundary: project_unimplemented_product_line
+    official_gap: bitget_usdc_futures_product_type
+    source_boundary_fixture: tests/fixtures/exchanges/bitget/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Bitget runtime hardcodes shared perpetual/futures requests to productType=USDT-FUTURES and marginCoin=USDT; USDC-FUTURES needs an explicit product profile, settlement coin policy, parser fixtures, and read/write reconciliation before promotion."
+    required_endpoints:
+      market_metadata: [usdc_futures_contracts, contract_specs, settlement_and_precision_rules]
+      public_market_data: [usdc_futures_order_book, usdc_futures_tickers, usdc_futures_trades, usdc_futures_funding]
+      private_account: [usdc_futures_accounts, usdc_futures_positions, usdc_futures_risk_or_leverage_state]
+      private_order_lifecycle: [usdc_futures_place_order, usdc_futures_cancel_order, usdc_futures_cancel_all, usdc_futures_query_order, usdc_futures_open_orders, usdc_futures_fills]
+    unsafe_to_promote_without: [productType_scope_guard, settlement_coin_mapping, metadata_and_order_book_fixtures, position_and_account_parser_fixtures, signed_order_request_specs, post_write_query_open_fills_reconciliation]
+    reason: "Official Bitget futures productType includes USDC-FUTURES, but this adapter currently wires only Spot and USDT-FUTURES."
+  - operation: coin_futures_product
+    status: project_unimplemented
+    product_lines: [coin_futures]
+    boundary: project_unimplemented_product_line
+    official_gap: bitget_coin_futures_product_type
+    source_boundary_fixture: tests/fixtures/exchanges/bitget/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Bitget runtime hardcodes shared perpetual/futures requests to productType=USDT-FUTURES and marginCoin=USDT; COIN-FUTURES needs coin-margined symbol, marginCoin, contract value, position, and order lifecycle separation."
+    required_endpoints:
+      market_metadata: [coin_futures_contracts, contract_specs, delivery_or_coin_settlement_rules]
+      public_market_data: [coin_futures_order_book, coin_futures_tickers, coin_futures_trades, coin_futures_funding_or_delivery]
+      private_account: [coin_futures_accounts, coin_futures_positions, coin_futures_risk_or_leverage_state]
+      private_order_lifecycle: [coin_futures_place_order, coin_futures_cancel_order, coin_futures_cancel_all, coin_futures_query_order, coin_futures_open_orders, coin_futures_fills]
+    unsafe_to_promote_without: [productType_scope_guard, coin_margin_and_contract_value_mapping, metadata_and_order_book_fixtures, position_and_account_parser_fixtures, signed_order_request_specs, post_write_query_open_fills_reconciliation]
+    reason: "Official Bitget futures productType includes COIN-FUTURES, but this adapter currently wires only Spot and USDT-FUTURES."
+  - operation: margin_product
+    status: project_unimplemented
+    product_lines: [margin]
+    boundary: project_unimplemented_product_line
+    official_gap: bitget_spot_margin_api
+    source_boundary_fixture: tests/fixtures/exchanges/bitget/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Bitget adapter exposes Spot and USDT-FUTURES trading only; Spot-Margin account, borrow/repay, liability, margin mode, and margin order semantics are not represented by the Spot or USDT perpetual runtime."
+    required_endpoints:
+      market_metadata: [margin_symbols_or_product_scope, borrowable_assets, collateral_or_liability_rules]
+      public_market_data: [margin_order_book_or_spot_book_scope_policy]
+      private_account: [margin_assets, liabilities, borrow_repay_state, margin_risk_state]
+      private_order_lifecycle: [margin_place_order, margin_cancel_order, margin_query_order, margin_open_orders, margin_fills]
+    unsafe_to_promote_without: [margin_account_mode_guard, borrow_liability_parser_fixtures, margin_order_request_specs, collateral_and_risk_mapping, post_write_query_open_fills_reconciliation]
+    reason: "Official Bitget Spot-Margin API exists, but this adapter does not expose margin trading or margin account semantics."
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -161,6 +235,48 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 1
     request_spec_required: true
+  - operation: batch_place_orders
+    transport: rest
+    product: spot
+    method: POST
+    path: /composed/bitget/batch_place_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential planner; futures native planning is recorded in capabilities_v2.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: spot
+    method: POST
+    path: /composed/bitget/batch_cancel_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential planner; futures native planning is recorded in capabilities_v2.
+  - operation: place_order_list
+    transport: rest
+    product: spot
+    method: POST
+    path: /unsupported/bitget/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bitget.order_list_unsupported
   - operation: query_order
     transport: rest
     product: spot
@@ -191,3 +307,161 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
+  - operation: get_symbol_rules
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/market/contracts
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/market/orderbook
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/account/accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/position/all-position
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/market/contracts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v2/mix/order/place-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v2/mix/order/cancel-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v2/mix/order/cancel-all-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: amend_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v2/mix/order/modify-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/order/detail
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/order/orders-pending
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v2/mix/order/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+streams:
+  - operation: public_order_book_books1
+    product: spot
+    channel: books1
+    transport: websocket
+    url: wss://ws.bitget.com/v2/ws/public
+    subscription_mode: json_subscribe
+    push_interval_ms: 10
+    depth: 1
+    sequence_field: seq
+    checksum: crc32
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book
+  - operation: public_order_book_books5
+    product: spot
+    channel: books5
+    transport: websocket
+    url: wss://ws.bitget.com/v2/ws/public
+    subscription_mode: json_subscribe
+    push_interval_ms: 200
+    depth: 5
+    sequence_field: seq
+    checksum: crc32
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book
+  - operation: public_order_book_books15
+    product: spot
+    channel: books15
+    transport: websocket
+    url: wss://ws.bitget.com/v2/ws/public
+    subscription_mode: json_subscribe
+    push_interval_ms: 200
+    depth: 15
+    sequence_field: seq
+    checksum: crc32
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book

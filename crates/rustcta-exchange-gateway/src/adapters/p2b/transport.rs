@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::private::P2bPrivateRequestSpec;
+
 #[derive(Clone)]
 pub struct P2bRest {
     exchange_id: ExchangeId,
@@ -48,6 +50,29 @@ impl P2bRest {
                 self.rest_base_url.trim_end_matches('/'),
                 build_path(endpoint, params)
             ))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_post(
+        &self,
+        spec: &P2bPrivateRequestSpec,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                spec.path
+            ))
+            .header("X-TXC-APIKEY", &spec.headers.api_key)
+            .header("X-TXC-PAYLOAD", &spec.headers.payload)
+            .header("X-TXC-SIGNATURE", &spec.headers.signature)
+            .json(&spec.body)
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

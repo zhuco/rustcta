@@ -10,9 +10,7 @@ use crate::cross_arb::CrossArbPanel;
 use crate::funding_arb::FundingArbPanel;
 use crate::i18n::{command_label, s, t};
 use crate::spot_arb::SpotArbPanel;
-use crate::storage::{
-    load_active_view, load_language, load_token, save_active_view, save_language, save_token,
-};
+use crate::storage::{load_active_view, load_language, save_active_view, save_language};
 use crate::types::{ControlPanelView, DashboardData, Language};
 use crate::ui::ControlActionPanel;
 use crate::workspace::StrategyWorkspacePanel;
@@ -38,7 +36,7 @@ struct DashboardRefreshContext {
 
 #[component]
 pub(crate) fn App() -> Element {
-    let mut token = use_signal(load_token);
+    let token = use_signal(String::new);
     let mut language = use_signal(load_language);
     let data = use_signal(DashboardData::default);
     let mut message = use_signal(String::new);
@@ -139,19 +137,6 @@ pub(crate) fn App() -> Element {
                         "English"
                     }
                 }
-                label { class: "token",
-                    span { {s(lang, "auth_token")} }
-                    input {
-                        r#type: "password",
-                        value: "{token()}",
-                        placeholder: s(lang, "bearer_token"),
-                        oninput: move |event| {
-                            let value = event.value();
-                            save_token(&value);
-                            token.set(value);
-                        }
-                    }
-                }
                 nav { class: "nav",
                     for view in ControlPanelView::ALL {
                         button {
@@ -195,29 +180,10 @@ pub(crate) fn App() -> Element {
                         button { class: "button danger", onclick: kill, {s(lang, "kill_switch")} }
                     }
                 }
-                if is_auth_error(&message()) {
-                    div { class: "modal-backdrop",
-                        div { class: "error-dialog", role: "alertdialog", "aria-modal": "true",
-                            div { class: "error-dialog-title", "认证 Token 错误" }
-                            p { "{message()}" }
-                            div { class: "row-actions",
-                                button {
-                                    class: "button danger",
-                                    onclick: move |_| message.set(String::new()),
-                                    "OK"
-                                }
-                            }
-                        }
-                    }
-                }
                 {render_active_view(active_view(), view_context, token(), lang)}
             }
         }
     }
-}
-
-fn is_auth_error(message: &str) -> bool {
-    message.contains("AUTH_TOKEN_ERROR") || message.contains("HTTP 401")
 }
 
 fn render_active_view(
@@ -272,6 +238,7 @@ fn render_active_view(
                     api_keys: snapshot.api_keys,
                     status: snapshot.status,
                     processes: snapshot.processes,
+                    strategy_logs: snapshot.strategy_logs,
                     token,
                     message,
                     lang,

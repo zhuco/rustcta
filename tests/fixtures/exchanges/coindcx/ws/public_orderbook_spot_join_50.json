@@ -1,0 +1,5 @@
+{
+  "event": "join",
+  "channelName": "BTCUSDT@orderbook@50",
+  "transport": "socket.io"
+}

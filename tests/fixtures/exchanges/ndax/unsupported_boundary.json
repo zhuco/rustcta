@@ -2,7 +2,8 @@
   "exchange": "ndax",
   "market_types": ["spot"],
   "private_write_mode": "offline_request_spec_only",
-  "private_read_runtime": "unsupported_until_account_permissions_and_v3_rest_auth_are_verified",
+  "private_read_runtime": "credential_gated_order_and_fill_readback",
+  "private_read_runtime_guard": "NDAX_PRIVATE_REST_ENABLED plus api_key/api_secret/user_id/account_id/oms_id",
   "private_ws_runtime": "unsupported_payload_only",
   "fiat_ledger_runtime": "unsupported",
   "unsupported": [

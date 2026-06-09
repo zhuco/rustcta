@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "btm_order_1",
+      "clientOrderId": "client-btm-1",
+      "symbol": "BTC_USDT",
+      "side": "buy",
+      "type": "limit",
+      "status": "open",
+      "amount": "0.01",
+      "price": "64000",
+      "filled": "0.004",
+      "average": "64010",
+      "timestamp": 1717200000000,
+      "updatedAt": 1717200060000
+    }
+  ]
+}

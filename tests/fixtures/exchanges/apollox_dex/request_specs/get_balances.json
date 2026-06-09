@@ -1,0 +1,34 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fapi/v2/balance",
+  "auth": "signed",
+  "query": {
+    "timestamp": { "match": "exact", "value": "1700000000000" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret", "real", "private"],
+  "response_sample": [
+    {
+      "accountAlias": "SgsR",
+      "asset": "USDT",
+      "balance": "1000.00000000",
+      "crossWalletBalance": "850.00000000",
+      "availableBalance": "850.00000000",
+      "maxWithdrawAmount": "850.00000000"
+    }
+  ],
+  "runtime_boundary": "ApolloX DEX get_balances is request-spec only until signed private REST guard, balance parser, account scope policy, and REST/user-stream reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

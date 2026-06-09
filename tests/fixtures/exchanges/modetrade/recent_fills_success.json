@@ -1,0 +1,23 @@
+{
+  "success": true,
+  "data": {
+    "rows": [
+      {
+        "id": "mt-trade-1",
+        "match_id": "mt-match-1",
+        "order_id": "mt-order-1",
+        "client_order_id": "mt-client-1",
+        "symbol": "PERP_BTC_USDC",
+        "side": "BUY",
+        "executed_price": "63950",
+        "executed_quantity": "0.004",
+        "fee_asset": "USDC",
+        "fee": "0.12",
+        "order_enum_fee_rate": "0.0005",
+        "realized_pnl": "0",
+        "is_maker": 0,
+        "executed_timestamp": 1700000020000
+      }
+    ]
+  }
+}

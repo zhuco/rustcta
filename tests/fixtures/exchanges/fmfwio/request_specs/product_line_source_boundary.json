@@ -1,0 +1,55 @@
+{
+  "exchange": "fmfwio",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "margin_product", "futures_product"],
+  "current_adapter_scope": ["spot", "guarded_spot_private_runtime", "futures_fee_source_boundary"],
+  "official_product_lines": ["margin", "futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://api.fmfw.io/",
+      "evidence": "FMFW.io HitBTC-family API documentation includes spot and futures fee/order-related surfaces and private trading WebSocket surfaces."
+    }
+  ],
+  "runtime_isolation": "Current FMFW.io profile stays spot-only at runtime; futures/margin/perpetual support needs explicit product scope guards and must not reuse spot private paths implicitly.",
+  "unsupported_runtime_reason": "FMFW.io futures/margin/perpetual surfaces are official, but this profile only promotes Spot lifecycle/readbacks; derivatives metadata, positions/risk and order reconciliation are not wired.",
+  "required_endpoints": {
+    "market_metadata": [
+      "margin/futures/perpetual instruments",
+      "contract specifications",
+      "settlement and precision rules"
+    ],
+    "public_market_data": [
+      "margin/futures/perpetual order book",
+      "margin/futures/perpetual ticker",
+      "margin/futures/perpetual trades"
+    ],
+    "private_account": [
+      "margin/futures/perpetual balances",
+      "positions",
+      "risk or leverage limits"
+    ],
+    "private_order_lifecycle": [
+      "margin/futures/perpetual place order",
+      "margin/futures/perpetual cancel order",
+      "margin/futures/perpetual query/open orders",
+      "margin/futures/perpetual fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "product-scope guard beyond FMFWIO_PRIVATE_REST_ENABLED",
+    "read-only and trade permission validation for margin/futures/perpetual",
+    "private WS or REST reconciliation policy for derivatives state"
+  ],
+  "unsafe_to_promote_without": [
+    "futures/margin metadata separated from spot symbols",
+    "position/margin/risk parser fixtures",
+    "derivatives private order request specs",
+    "post-write query/open/fills reconciliation"
+  ],
+  "remaining_work": [
+    "separate FMFW.io futures/margin metadata from spot symbols",
+    "add position, margin and risk parser fixtures",
+    "promote private auth/order runtime only after product-scope and dry-run validation"
+  ]
+}

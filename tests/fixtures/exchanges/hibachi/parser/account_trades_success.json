@@ -1,0 +1,21 @@
+{
+  "trades": [
+    {
+      "accountId": 42,
+      "tradeId": 88112233,
+      "orderId": 579183763093760000,
+      "clientOrderId": "hibachi-readback-1",
+      "symbol": "BTC/USDT-P",
+      "side": "BID",
+      "price": "65000",
+      "quantity": "0.1",
+      "quoteQuantity": "6500",
+      "feeAsset": "USDT",
+      "feeAmount": "3.25",
+      "feeRate": "0.0005",
+      "liquidity": "TAKER",
+      "realizedPnl": "0",
+      "tradeTime": 1717200000456
+    }
+  ]
+}

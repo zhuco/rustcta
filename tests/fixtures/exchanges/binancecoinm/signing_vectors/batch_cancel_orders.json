@@ -1,0 +1,12 @@
+{
+  "exchange": "binancecoinm",
+  "name": "batch_cancel_orders",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "DELETE",
+  "request_path": "/dapi/v1/batchOrders",
+  "payload": "orderIdList=%5B30%2C31%5D&recvWindow=5000&symbol=BTCUSD_PERP&timestamp=1710000000000",
+  "expected_signature": "3366c0cab58a207924b7aaef9e04d26e0bfad217a312e3b7318be1ee997c8204",
+  "payload_format": "raw_payload"
+}

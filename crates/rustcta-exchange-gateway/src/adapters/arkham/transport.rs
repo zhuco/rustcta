@@ -8,10 +8,14 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::arkham_signature;
+
 #[derive(Clone)]
 pub struct ArkhamPublicRest {
     exchange_id: ExchangeId,
     rest_base_url: String,
+    api_key: Option<String>,
+    api_secret: Option<String>,
     http: reqwest::Client,
 }
 
@@ -19,6 +23,8 @@ impl ArkhamPublicRest {
     pub fn new(
         exchange_id: ExchangeId,
         rest_base_url: String,
+        api_key: Option<String>,
+        api_secret: Option<String>,
         request_timeout_ms: u64,
     ) -> ExchangeApiResult<Self> {
         let http = reqwest::Client::builder()
@@ -33,6 +39,8 @@ impl ArkhamPublicRest {
         Ok(Self {
             exchange_id,
             rest_base_url,
+            api_key,
+            api_secret,
             http,
         })
     }
@@ -45,6 +53,46 @@ impl ArkhamPublicRest {
         let response = self
             .http
             .get(build_url(&self.rest_base_url, endpoint, params))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let api_key = self
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        let api_secret = self
+            .api_secret
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        let expires_us = Utc::now().timestamp_micros() + 30_000_000;
+        let path_with_query = build_path_with_query(endpoint, params);
+        let signature =
+            arkham_signature(api_key, api_secret, expires_us, "GET", &path_with_query, "")?;
+        let response = self
+            .http
+            .get(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                path_with_query
+            ))
+            .header("Arkham-Api-Key", api_key)
+            .header("Arkham-Expires", expires_us.to_string())
+            .header("Arkham-Signature", signature)
+            .header("Arkham-Broker-Id", "1001")
+            .header("Accept", "application/json")
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {
@@ -81,8 +129,32 @@ pub fn signed_json_request_spec(method: &str, path: &str, body: Value) -> Value 
     })
 }
 
+pub fn signed_get_request_spec(path: &str, query: Value) -> Value {
+    json!({
+        "method": "GET",
+        "path": path,
+        "query": query,
+        "auth": "arkham_hmac_sha256_base64",
+        "headers": {
+            "Accept": "application/json",
+            "Arkham-Api-Key": "<redacted:api_key>",
+            "Arkham-Expires": "<unix-microseconds-expiry>",
+            "Arkham-Signature": "<redacted:signature>",
+            "Arkham-Broker-Id": "1001"
+        }
+    })
+}
+
 fn build_url(base: &str, endpoint: &str, params: &HashMap<String, String>) -> String {
-    let mut url = format!("{}{}", base.trim_end_matches('/'), endpoint);
+    format!(
+        "{}{}",
+        base.trim_end_matches('/'),
+        build_path_with_query(endpoint, params)
+    )
+}
+
+fn build_path_with_query(endpoint: &str, params: &HashMap<String, String>) -> String {
+    let mut url = endpoint.to_string();
     if !params.is_empty() {
         let query = params
             .iter()

@@ -52,6 +52,25 @@ impl BlockchainComRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_api_token_get(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_token: &str,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .get(build_url(&self.rest_base_url, endpoint, params))
+            .header("Accept", "application/json")
+            .header("X-API-Token", api_token)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 pub fn public_get_request_spec(path: &str, query: Value) -> Value {

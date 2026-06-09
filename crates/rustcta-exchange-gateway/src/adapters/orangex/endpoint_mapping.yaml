@@ -65,11 +65,46 @@ websocket:
   public:
     support: spec_only
     reason: OrangeX published WebSocket API deprecation notice.
+    runtime_support: unsupported_for_production
+    url: wss://api.orangex.com/ws/api/v1
+    subscribe:
+      method: /public/subscribe
+      payload:
+        jsonrpc: "2.0"
+        method: /public/subscribe
+        params:
+          channels: ["{channel}"]
+    channels:
+      orderbook_raw:
+        channel: book.{instrument}.raw
+        products: [spot, linear_perp]
+        interval_ms: event_driven
+        depth: "depth: unspecified; no fixed depth / no verified depth parameter"
+        sequence:
+          fields: [change_id, prev_change_id]
+          continuity: next prev_change_id must match local change_id
+          gap_policy: reconnect_resubscribe_and_fetch_rest_order_book_snapshot
+        checksum: none
+        update_semantics: order book delta stream; side/price/amount changes are applied to a REST-initialized local book
+      orderbook_100ms:
+        channel: book.{instrument}.100ms
+        products: [spot, linear_perp]
+        interval_ms: 100
+        depth: "depth: unspecified; no fixed depth / legacy 100ms evidence retained but no verified depth parameter"
+        sequence:
+          fields: [change_id, prev_change_id]
+          continuity: next prev_change_id must match local change_id
+          gap_policy: reconnect_resubscribe_and_fetch_rest_order_book_snapshot
+        checksum: none
+      trades:
+        channel: trades.{instrument}.raw
+      ticker:
+        channel: ticker.{instrument}.raw
     heartbeat:
       direction: ping_pong
       interval_ms: 20000
       timeout_ms: 60000
-    resync: rest_order_book_snapshot
+    resync: rest_order_book_snapshot_on_connect_reconnect_or_change_id_gap
   private:
     support: spec_only
     runtime_support: unsupported
@@ -127,6 +162,7 @@ endpoints:
   - operation: get_balances
     product: spot
     transport: rest
+    support: native
     method: POST
     path: /private/get_assets_info
     auth: bearer
@@ -134,9 +170,19 @@ endpoints:
     rate_limit_bucket: private_rpc
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/orangex/request_specs/get_balances_spot.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/orangex/private_tests.rs
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::orangex::private_parser::parse_balances
+      fixture: tests/fixtures/exchanges/orangex/balances_success.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/orangex/private_tests.rs
   - operation: get_positions
     product: linear_perp
     transport: rest
+    support: native
     method: POST
     path: /private/get_positions
     auth: bearer
@@ -144,6 +190,15 @@ endpoints:
     rate_limit_bucket: private_rpc
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/orangex/request_specs/get_positions_perp.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/orangex/private_tests.rs
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::orangex::private_parser::parse_positions
+      fixture: tests/fixtures/exchanges/orangex/positions_success.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/orangex/private_tests.rs
   - operation: get_fees
     product: spot
     market_types: [spot, linear_perp]
@@ -154,7 +209,18 @@ endpoints:
     rate_limit_bucket: public_rpc
     weight: 1
     request_spec_required: false
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/orangex/request_specs/get_fees_public_instruments.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/orangex/public_tests.rs
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::orangex::private_parser::parse_fee_snapshots
+      fixture: tests/fixtures/exchanges/orangex/spot_symbols.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/orangex/public_tests.rs
   - operation: place_order
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -177,6 +243,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_order
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -188,6 +255,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_all_orders
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -200,6 +268,7 @@ endpoints:
     request_spec_required: true
     reason: Instrument-scoped cancel-all uses /private/cancel_all_by_instrument.
   - operation: query_order
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -211,6 +280,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -223,6 +293,7 @@ endpoints:
     request_spec_required: true
     reason: Instrument-scoped read uses /private/get_open_orders_by_instrument.
   - operation: get_recent_fills
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest

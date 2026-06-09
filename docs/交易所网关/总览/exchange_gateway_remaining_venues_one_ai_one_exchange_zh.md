@@ -259,7 +259,7 @@ G1，除非官方私有交易 API 文档、签名和错误码足够稳定。
 | B-04 | AI-P04 | `ourbit` | Spot + perpetual CEX | 永续优先，检查是否可复用 MEXC/API 族；避免盲目复制 | `mexc`, `blofin` |
 | B-05 | AI-P05 | `btse` | Futures/perpetual CEX | futures/perp symbol rules、positions、orders、WS；机构账户模型审计 | `krakenfutures`, `deribit` |
 | B-06 | AI-P06 | `zoomex` | USDT perpetual CEX | Bybit API 族/profile 可能性优先审计；独立差异再实现 | `bybit`, `phemex` |
-| B-07 | AI-P07 | `kcex` | Spot + futures CEX | 永续 public/private REST + WS，先校验官方 OpenAPI 稳定性 | `mexc`, `blofin` |
+| B-07 | AI-P07 | `kcex` | Spot + futures CEX | 已完成 2026-06-08：新增保守 adapter shell、endpoint mapping、unsupported fixture 和适配器文档；官网/支持页确认 Spot/永续产品线，但未找到稳定官方 OpenAPI，REST/WS/private/trading runtime 全部保持 `*_unverified_openapi` unsupported。 | `mexc`, `blofin` |
 | B-08 | AI-P08 | `hotcoin` | USDT perpetual CEX | G0/G1 起步，重点确认签名、订单 API 和地区限制 | `coinw`, `bitunix` |
 | B-09 | AI-P09 | `edgex` | Perp/DEX | 官方 API 明确 HTTP/WS；优先 public book、positions、orders、链上签名边界 | `hyperliquid`, `lighter` |
 | B-10 | AI-P10 | `extended` | Perp/DEX | G0/G1 审计，确认账户模型、撮合 API、WS resync 和资金路径 | `paradex`, `lighter` |

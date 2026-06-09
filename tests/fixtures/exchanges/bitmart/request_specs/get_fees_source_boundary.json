@@ -1,0 +1,37 @@
+{
+  "exchange": "bitmart",
+  "operation": "bitmart.get_fees",
+  "boundary_type": "config_fee_table_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "official_spot_futures_vip_fee_schedule",
+    "source_url": "https://www.bitmart.com/en-US/fee",
+    "last_reviewed": "2026-06-09",
+    "products": ["spot", "perpetual"],
+    "effective_fee_kind": "maker_taker_by_vip_level",
+    "tier_basis": [
+      "30d_spot_trade_volume_usd",
+      "30d_contract_trade_volume_usd",
+      "asset_holding",
+      "bmx_holding"
+    ],
+    "account_effective_fee_requires": [
+      "vip_level_read_or_config",
+      "spot_vs_contract_product_scope",
+      "bmx_discount_flag"
+    ]
+  },
+  "default_or_override_strategy": {
+    "default_allowed_for_backtest_only": true,
+    "production_requires_account_effective_tier_or_config_override": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "bitmart.fees_vip_source_only",
+  "remaining_work": [
+    "fee_schedule_source_refresh",
+    "vip_level_mapping",
+    "spot_contract_scope_guard",
+    "shared_get_fees_response_mapping"
+  ]
+}

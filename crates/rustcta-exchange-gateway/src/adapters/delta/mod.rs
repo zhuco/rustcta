@@ -1,15 +1,16 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateOrderStreamEventKind,
-    PrivateStreamCapabilities, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, RecentFillsRequest, RecentFillsResponse,
-    SymbolRulesRequest, SymbolRulesResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateOrderStreamEventKind, PrivateStreamCapabilities,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -193,6 +194,7 @@ impl ExchangeClient for DeltaGatewayAdapter {
         capabilities.supports_cancel_all_orders = private_rest;
         capabilities.supports_batch_place_order = private_rest;
         capabilities.supports_batch_cancel_order = private_rest;
+        capabilities.supports_amend_order = private_rest;
         capabilities.supports_client_order_id = true;
         capabilities.supports_reduce_only = true;
         capabilities.supports_post_only = true;
@@ -277,6 +279,13 @@ impl ExchangeClient for DeltaGatewayAdapter {
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
         self.cancel_order_impl(request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        self.amend_order_impl(request).await
     }
 
     async fn batch_place_orders(

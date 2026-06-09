@@ -1,0 +1,20 @@
+[Unit]
+Description=RustCTA Cross Exchange Arbitrage Live Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cta/rustcta
+Environment=RUST_LOG=warn
+EnvironmentFile=-/home/cta/rustcta/.env
+ExecStart=/home/cta/rustcta/target/release/cross-exchange-arbitrage-live-runner --config /home/cta/rustcta/config/cross_exchange_arbitrage_usdt.yml --strategy-id cross_arb_live --run-id server-live --tenant-id server --account-id cross_arb_3venues --lock-file /home/cta/rustcta/logs/cross_exchange_arbitrage/cross_arb_live.lock --dashboard-snapshot-path /home/cta/rustcta/logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json --market-data-source direct_websocket --profit-history-path /home/cta/rustcta/logs/cross_exchange_arbitrage/profit_history.jsonl --trade-ledger-path /home/cta/rustcta/logs/cross_exchange_arbitrage/trade_events.jsonl --dashboard-refresh-ms 5000
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=append:/home/cta/rustcta/logs/cross_exchange_arbitrage/cross-arb-live.service.log
+StandardError=append:/home/cta/rustcta/logs/cross_exchange_arbitrage/cross-arb-live.service.log
+
+[Install]
+WantedBy=default.target

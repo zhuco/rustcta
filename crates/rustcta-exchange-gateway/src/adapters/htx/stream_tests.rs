@@ -9,10 +9,28 @@ use super::streams::{
     private_ws_auth_payload, private_ws_auth_payload_for_url, public_subscribe_payload,
     HtxPrivateStreamMessage, HtxPublicStreamMessage,
 };
-use super::test_support::{context, exchange_id, load_fixture, perp_symbol};
+use super::test_support::{context, exchange_id, load_fixture, perp_symbol, spot_symbol};
 
 #[test]
 fn htx_public_stream_payloads_should_map_depth_channels() {
+    let spot_snapshot = public_subscribe_payload(&PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("public-ws-spot-snapshot"),
+        symbol: spot_symbol(),
+        kind: PublicStreamKind::OrderBookSnapshot,
+    })
+    .expect("spot snapshot payload");
+    assert_eq!(spot_snapshot["sub"], "market.btcusdt.mbp.refresh.20");
+
+    let spot_delta = public_subscribe_payload(&PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("public-ws-spot-delta"),
+        symbol: spot_symbol(),
+        kind: PublicStreamKind::OrderBookDelta,
+    })
+    .expect("spot delta payload");
+    assert_eq!(spot_delta["sub"], "market.btcusdt.mbp.20");
+
     let payload = public_subscribe_payload(&PublicStreamSubscription {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: context("public-ws"),
@@ -87,7 +105,25 @@ fn htx_stream_parser_should_parse_book_order_and_control_messages() {
         &load_fixture("ws/public_book.json"),
     )
     .expect("book");
-    assert!(matches!(book, HtxPublicStreamMessage::OrderBook(_)));
+    match book {
+        HtxPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.order_book.sequence, Some(100));
+        }
+        other => panic!("expected book, got {other:?}"),
+    }
+
+    let spot_book = parse_public_stream_message(
+        &exchange_id(),
+        spot_symbol(),
+        &load_fixture("ws/public_spot_mbp_refresh.json"),
+    )
+    .expect("spot book");
+    match spot_book {
+        HtxPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.order_book.sequence, Some(200));
+        }
+        other => panic!("expected spot book, got {other:?}"),
+    }
 
     let order = parse_private_stream_message(
         &exchange_id(),

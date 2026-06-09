@@ -24,13 +24,13 @@ impl BybiteuGatewayConfig {
             rest_base_url: self.rest_base_url,
             public_ws_url: self.public_ws_url,
             private_ws_url: self.private_ws_url,
-            api_key: None,
-            api_secret: None,
+            api_key: self.api_key,
+            api_secret: self.api_secret,
             recv_window_ms: self.recv_window_ms,
             request_timeout_ms: self.request_timeout_ms,
-            enabled_private_rest: false,
+            enabled_private_rest: self.enabled_private_rest,
             enabled: self.enabled,
-            status_message: "bybiteu Bybit EU V5 profile; private trading unsupported pending broker-scope audit".to_string(),
+            status_message: "bybiteu Bybit EU V5 profile; private REST reuses Bybit V5 runtime when EU credentials and explicit enable flag are configured".to_string(),
             unsupported_market_type_operation: "bybiteu.unsupported_market_type",
         }
     }

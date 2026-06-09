@@ -16,9 +16,7 @@ pub(super) fn apply_toolchain_capabilities(
             "Coins.ph private REST requires COINSPH_API_KEY and COINSPH_API_SECRET",
         )
     };
-    capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
-        "Coins.ph public WS runtime is not wired in this adapter; use REST snapshots",
-    );
+    capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
     capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
         "Coins.ph private stream runtime is not wired; use REST account, openOrders, order, and myTrades reconciliation",
     );
@@ -89,6 +87,21 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             Vec::new(),
             Some("public_ip"),
             Some(5),
+        ),
+        websocket_endpoint(
+            "public_book_ticker",
+            "{symbol}@bookTicker",
+            Some("public_ws"),
+        ),
+        websocket_endpoint(
+            "public_orderbook_partial_depth",
+            "{symbol}@depth5|10|20@100ms, {symbol}@depth200@1000ms",
+            Some("public_ws"),
+        ),
+        websocket_endpoint(
+            "public_orderbook_diff_depth",
+            "{symbol}@depth@100ms|1000ms",
+            Some("public_ws"),
         ),
     ];
 
@@ -161,17 +174,32 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
     }
 
     for operation in [
+        "amend_order",
+        "place_order_list",
+        "batch_place_orders",
+        "batch_cancel_orders",
+        "cancel_all_orders",
         "payment",
         "wallet",
         "fiat_transfer",
         "withdraw",
         "sub_account_transfer",
     ] {
+        let reason = if matches!(
+            operation,
+            "amend_order"
+                | "place_order_list"
+                | "batch_place_orders"
+                | "batch_cancel_orders"
+                | "cancel_all_orders"
+        ) {
+            "Coins.ph reviewed spot profile does not expose shared amend, OCO/OTO, native batch place/cancel, or safe cancel-all semantics"
+        } else {
+            "funding, wallet, payment, and fiat-transfer APIs are outside the Coins.ph trading credential boundary"
+        };
         endpoints.push(rest_endpoint(
             operation,
-            CapabilitySupport::unsupported(
-                "funding, wallet, payment, and fiat-transfer APIs are outside the Coins.ph trading credential boundary",
-            ),
+            CapabilitySupport::unsupported(reason),
             "N/A",
             "",
             EndpointAuth::Hmac,
@@ -205,6 +233,26 @@ fn rest_endpoint(
         credential_scopes,
         rate_limit_bucket: rate_limit_bucket.map(str::to_string),
         weight,
+        supports_testnet: false,
+    }
+}
+
+fn websocket_endpoint(
+    operation: &str,
+    path: &str,
+    rate_limit_bucket: Option<&str>,
+) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::native(),
+        market_types: vec![MarketType::Spot],
+        transport: EndpointTransport::WebSocket,
+        method: Some("SUBSCRIBE".to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::None,
+        credential_scopes: Vec::new(),
+        rate_limit_bucket: rate_limit_bucket.map(str::to_string),
+        weight: None,
         supports_testnet: false,
     }
 }

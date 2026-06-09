@@ -7,8 +7,8 @@
   "data": [
     {
       "instId": "BTC-USDT",
-      "ordId": "sanitized-order-id",
-      "clOrdId": "sanitized-client-id",
+      "ordId": "<redacted:order_id>",
+      "clOrdId": "<redacted:order_id>",
       "side": "buy",
       "ordType": "limit",
       "sz": "0.01",

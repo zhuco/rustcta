@@ -26,6 +26,33 @@ pub struct CoincheckWsSession {
     pub state: StreamRuntimeState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoincheckPublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub channel_template: &'static str,
+    pub subscribe_type: &'static str,
+    pub update_semantics: &'static str,
+    pub interval_ms: Option<u64>,
+    pub depth: Option<u32>,
+    pub sequence: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub resync: &'static str,
+}
+
+pub fn coincheck_public_order_book_ws_policy() -> CoincheckPublicOrderBookWsPolicy {
+    CoincheckPublicOrderBookWsPolicy {
+        url: "wss://ws-api.coincheck.com/",
+        channel_template: "{pair}-orderbook",
+        subscribe_type: "subscribe",
+        update_semantics: "order book differences are pushed when trades occur; official docs describe approximately 0.1s timing but publish no fixed depth",
+        interval_ms: Some(100),
+        depth: None,
+        sequence: None,
+        checksum: None,
+        resync: "initialize from REST /api/order_books and rebuild after reconnect, stale stream, parse error, or suspected missed message because no sequence or checksum is documented",
+    }
+}
+
 pub fn coincheck_private_stream_capabilities(_enabled: bool) -> PrivateStreamCapabilities {
     PrivateStreamCapabilities::unsupported(EXCHANGE_API_SCHEMA_VERSION)
 }

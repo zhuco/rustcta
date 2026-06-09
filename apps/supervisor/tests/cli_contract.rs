@@ -58,7 +58,7 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
             "cross_arb_live.spec.json",
             "cross_arb_live",
             "cross_exchange_arbitrage",
-            10,
+            22,
         ),
         (
             "funding_arb_live.spec.json",
@@ -123,7 +123,11 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
 
         let raw = std::fs::read_to_string(&spec_path).expect("checked-in spec should be readable");
         let spec: Value = serde_json::from_str(&raw).expect("checked-in spec should be json");
-        assert_root_free_supervisor_args(spec_name, spec["args"].as_array().expect("args array"));
+        assert_root_free_supervisor_command(
+            spec_name,
+            spec["command"].as_str().expect("command string"),
+            spec["args"].as_array().expect("args array"),
+        );
         let config_path = spec["config_path"]
             .as_str()
             .expect("checked-in spec should contain config_path");
@@ -134,15 +138,11 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
     }
 }
 
-fn assert_root_free_supervisor_args(spec_name: &str, args: &[Value]) {
+fn assert_root_free_supervisor_command(spec_name: &str, command: &str, args: &[Value]) {
     let arg_strings = args
         .iter()
         .map(|arg| arg.as_str().expect("supervisor arg should be a string"))
         .collect::<Vec<_>>();
-    assert!(
-        arg_strings.contains(&"-p"),
-        "{spec_name} should select an explicit workspace package"
-    );
     assert!(
         !arg_strings.windows(2).any(|window| matches!(
             window,
@@ -161,14 +161,22 @@ fn assert_root_free_supervisor_args(spec_name: &str, args: &[Value]) {
 
     match spec_name {
         "cross_arb_live.spec.json" => {
-            assert!(arg_strings.contains(&"rustcta-strategy-cross-exchange-arbitrage"));
-            assert!(arg_strings.contains(&"cross-exchange-arbitrage-runtime"));
+            assert_eq!(
+                command, "target/release/cross-exchange-arbitrage-live-runner",
+                "{spec_name} should launch the release live runner"
+            );
+            assert!(arg_strings.contains(&"direct_websocket"));
+            assert!(arg_strings.contains(&"--trade-ledger-path"));
+            assert!(arg_strings.contains(&"logs/cross_exchange_arbitrage/trade_events.jsonl"));
+            assert!(!arg_strings.contains(&"--enable-live-trading"));
         }
         "funding_arb_live.spec.json" => {
+            assert!(arg_strings.contains(&"-p"));
             assert!(arg_strings.contains(&"rustcta-strategy-funding-arbitrage"));
             assert!(arg_strings.contains(&"funding-arbitrage-runtime"));
         }
         "spot_spot_live_dry_run.spec.json" => {
+            assert!(arg_strings.contains(&"-p"));
             assert!(arg_strings.contains(&"rustcta-strategy-spot-spot-arbitrage"));
             assert!(arg_strings.contains(&"spot-spot-arbitrage-runtime"));
         }
@@ -177,6 +185,7 @@ fn assert_root_free_supervisor_args(spec_name: &str, args: &[Value]) {
         | "exchange_order_canary.spec.json"
         | "bitget_perp_order_canary.spec.json"
         | "bitget_spot_order_canary.spec.json" => {
+            assert!(arg_strings.contains(&"-p"));
             assert!(arg_strings.contains(&"rustcta-tools-ops"));
         }
         _ => panic!("unexpected supervisor spec {spec_name}"),

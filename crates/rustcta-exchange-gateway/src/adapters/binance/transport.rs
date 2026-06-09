@@ -208,11 +208,13 @@ async fn parse_response(
     Ok(value)
 }
 
-fn classify_binance_error(code: Option<&str>, message: &str) -> ExchangeErrorClass {
+pub(super) fn classify_binance_error(code: Option<&str>, message: &str) -> ExchangeErrorClass {
     let code = code.unwrap_or_default();
     let msg = message.to_ascii_lowercase();
     if matches!(code, "-2010" | "-2018") || msg.contains("insufficient") {
         ExchangeErrorClass::InsufficientBalance
+    } else if matches!(code, "-2022") || msg.contains("risk") || msg.contains("reduceonly") {
+        ExchangeErrorClass::RiskRejected
     } else if matches!(code, "-1121") || msg.contains("invalid symbol") {
         ExchangeErrorClass::InvalidSymbol
     } else if matches!(code, "-1111" | "-1013")

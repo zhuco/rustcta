@@ -442,7 +442,7 @@ async fn krakenfutures_readbacks_should_use_futures_private_rest() {
 }
 
 #[tokio::test]
-async fn krakenfutures_quote_market_and_fees_use_documented_fallbacks() {
+async fn krakenfutures_quote_market_and_fees_remain_offline_boundaries() {
     let adapter =
         KrakenFuturesGatewayAdapter::new(private_config("http://127.0.0.1:9".to_string()))
             .expect("adapter");
@@ -460,13 +460,18 @@ async fn krakenfutures_quote_market_and_fees_use_documented_fallbacks() {
         .unwrap_err();
     assert!(matches!(quote_err, ExchangeApiError::Unsupported { .. }));
 
-    let fees = adapter
+    let fee_err = adapter
         .get_fees(FeesRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             context: context("fees"),
             symbols: vec![perp_symbol_scope()],
         })
         .await
-        .expect("fees");
-    assert_eq!(fees.fees[0].maker_rate, "0.0016");
+        .expect_err("fees source boundary only");
+    assert!(matches!(
+        fee_err,
+        ExchangeApiError::Unsupported {
+            operation: "krakenfutures.fees_source_boundary_only"
+        }
+    ));
 }

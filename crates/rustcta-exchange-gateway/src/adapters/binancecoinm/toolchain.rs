@@ -1,6 +1,7 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
-    EndpointTransport, ExchangeClientCapabilities, HistoryCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HistoryCapability,
 };
 use rustcta_types::MarketType;
 
@@ -22,10 +23,37 @@ pub(super) fn apply_toolchain_capabilities(
     capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
         "Binance COIN-M private user data stream is not wired; use REST reconciliation through account, open orders, query order, and myTrades",
     );
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported("Binance COIN-M batch place order is not implemented");
-    capabilities.capabilities_v2.batch_cancel_orders =
-        BatchCapability::unsupported("Binance COIN-M batch cancel order is not implemented");
+    capabilities.capabilities_v2.batch_place_orders = if private_rest_enabled {
+        BatchCapability {
+            support: CapabilitySupport::native(),
+            mode: BatchExecutionMode::Native,
+            atomicity: BatchAtomicity::Partial,
+            max_items: Some(5),
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+            ..BatchCapability::default()
+        }
+    } else {
+        BatchCapability::unsupported("Binance COIN-M batch place requires private REST credentials")
+    };
+    capabilities.capabilities_v2.batch_cancel_orders = if private_rest_enabled {
+        BatchCapability {
+            support: CapabilitySupport::native(),
+            mode: BatchExecutionMode::Native,
+            atomicity: BatchAtomicity::Partial,
+            max_items: Some(10),
+            same_symbol_required: true,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+            ..BatchCapability::default()
+        }
+    } else {
+        BatchCapability::unsupported(
+            "Binance COIN-M batch cancel requires private REST credentials",
+        )
+    };
     capabilities.capabilities_v2.cancel_all_orders = if private_rest_enabled {
         CapabilitySupport::native()
     } else {
@@ -136,6 +164,20 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             "cancel_order",
             "DELETE",
             "/dapi/v1/order",
+            CredentialScope::Trade,
+            1,
+        ),
+        (
+            "batch_place_orders",
+            "POST",
+            "/dapi/v1/batchOrders",
+            CredentialScope::Trade,
+            5,
+        ),
+        (
+            "batch_cancel_orders",
+            "DELETE",
+            "/dapi/v1/batchOrders",
             CredentialScope::Trade,
             1,
         ),

@@ -1,10 +1,12 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    AccountId, CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol,
+    Fill, FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion, TenantId, TimeInForce,
 };
 use serde_json::Value;
 
@@ -101,6 +103,173 @@ pub fn apex_trade_symbol(symbol: &str) -> String {
     } else {
         upper
     }
+}
+
+pub fn parse_order(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    parse_order_state(exchange_id, symbol, first_order_like(exchange_id, value)?)
+}
+
+pub fn parse_open_orders(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    order_items(value)
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "ApeX open orders missing orders",
+                value,
+            )
+        })?
+        .iter()
+        .map(|order| parse_order_state(exchange_id, symbol, order))
+        .collect()
+}
+
+pub fn parse_recent_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    fill_items(value)
+        .ok_or_else(|| parse_error(exchange_id.clone(), "ApeX fills missing trades", value))?
+        .iter()
+        .map(|fill| {
+            let price = number_from_value(first_field(
+                fill,
+                &["price", "fillPrice", "avgPrice", "averagePrice"],
+            ))
+            .ok_or_else(|| parse_error(exchange_id.clone(), "ApeX fill missing price", fill))?;
+            let quantity = number_from_value(first_field(
+                fill,
+                &["size", "qty", "quantity", "fillSize", "filledSize"],
+            ))
+            .ok_or_else(|| parse_error(exchange_id.clone(), "ApeX fill missing quantity", fill))?;
+            let quote_quantity = number_from_value(first_field(
+                fill,
+                &["quoteQuantity", "quoteQty", "turnover", "notional"],
+            ))
+            .or(Some(price * quantity));
+            let canonical_symbol = symbol.canonical_symbol.clone().ok_or_else(|| {
+                ExchangeApiError::InvalidRequest {
+                    message: "ApeX fill parser requires canonical_symbol".to_string(),
+                }
+            })?;
+            Ok(Fill {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: symbol.market_type,
+                canonical_symbol,
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: string_or_number(first_field(fill, &["orderId", "order_id", "id"])),
+                client_order_id: string_or_number(first_field(
+                    fill,
+                    &["clientOrderId", "client_order_id", "clientId"],
+                )),
+                fill_id: string_or_number(first_field(
+                    fill,
+                    &["tradeId", "fillId", "id", "transactionId"],
+                )),
+                side: parse_side(
+                    first_field(fill, &["side", "orderSide"])
+                        .and_then(Value::as_str)
+                        .unwrap_or("BUY"),
+                ),
+                position_side: parse_position_side(
+                    first_field(fill, &["positionSide"]).and_then(Value::as_str),
+                ),
+                status: FillStatus::Confirmed,
+                liquidity_role: parse_liquidity_role(
+                    first_field(fill, &["liquidity", "liquidityRole", "maker"])
+                        .and_then(Value::as_str),
+                    first_field(fill, &["isMaker", "maker"]).and_then(Value::as_bool),
+                ),
+                price,
+                quantity,
+                quote_quantity,
+                fee_asset: string_or_number(first_field(fill, &["feeToken", "feeAsset", "token"])),
+                fee_amount: number_from_value(first_field(
+                    fill,
+                    &["fee", "feeAmount", "commission"],
+                )),
+                fee_rate: number_from_value(first_field(fill, &["feeRate"])),
+                realized_pnl: number_from_value(first_field(fill, &["realizedPnl", "realizedPnl"])),
+                filled_at: timestamp_any(fill, &["createdAt", "createdTime", "time", "timestamp"])
+                    .unwrap_or_else(Utc::now),
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
+fn parse_order_state(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let now = Utc::now();
+    let canonical_symbol = symbol.canonical_symbol.clone();
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: symbol.market_type,
+        canonical_symbol,
+        exchange_symbol: symbol.exchange_symbol.clone(),
+        client_order_id: string_or_number(first_field(
+            value,
+            &["clientOrderId", "client_order_id", "clientId"],
+        )),
+        exchange_order_id: string_or_number(first_field(value, &["id", "orderId", "order_id"])),
+        side: parse_side(
+            first_field(value, &["side", "orderSide"])
+                .and_then(Value::as_str)
+                .unwrap_or("BUY"),
+        ),
+        position_side: Some(parse_position_side(
+            first_field(value, &["positionSide"]).and_then(Value::as_str),
+        )),
+        order_type: parse_order_type(
+            first_field(value, &["type", "orderType"])
+                .and_then(Value::as_str)
+                .unwrap_or("LIMIT"),
+        ),
+        time_in_force: parse_time_in_force(
+            first_field(value, &["timeInForce"]).and_then(Value::as_str),
+        ),
+        status: parse_order_status(
+            first_field(value, &["status", "state"]).and_then(Value::as_str),
+        ),
+        quantity: string_or_number(first_field(value, &["size", "qty", "quantity", "amount"]))
+            .unwrap_or_else(|| "0".to_string()),
+        price: string_or_number(first_field(value, &["price", "limitPrice"])),
+        filled_quantity: string_or_number(first_field(
+            value,
+            &["filledSize", "filledQuantity", "cumExecQty", "filled"],
+        ))
+        .unwrap_or_else(|| "0".to_string()),
+        average_fill_price: string_or_number(first_field(
+            value,
+            &["avgPrice", "averagePrice", "averageFillPrice"],
+        )),
+        reduce_only: first_field(value, &["reduceOnly", "reduce_only"])
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        post_only: first_field(value, &["postOnly", "post_only"])
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        created_at: timestamp_any(value, &["createdAt", "createdTime", "time", "timestamp"]),
+        updated_at: timestamp_any(value, &["updatedAt", "updatedTime", "createdAt", "time"])
+            .unwrap_or(now),
+    })
 }
 
 fn parse_symbol_rule(
@@ -231,6 +400,159 @@ fn number_u64(value: &Value) -> Option<u64> {
         Value::String(text) => text.parse().ok(),
         Value::Number(number) => number.as_u64(),
         _ => None,
+    }
+}
+
+fn number_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::String(text) => text.parse().ok(),
+        Value::Number(number) => number.as_i64(),
+        _ => None,
+    }
+}
+
+fn first_field<'a>(value: &'a Value, fields: &[&str]) -> Option<&'a Value> {
+    fields.iter().find_map(|field| value.get(*field))
+}
+
+fn data_payload(value: &Value) -> &Value {
+    value.get("data").unwrap_or(value)
+}
+
+fn first_order_like<'a>(
+    exchange_id: &ExchangeId,
+    value: &'a Value,
+) -> ExchangeApiResult<&'a Value> {
+    let data = data_payload(value);
+    if data.is_object() {
+        if let Some(order) = data.get("order").filter(|order| order.is_object()) {
+            return Ok(order);
+        }
+        return Ok(data);
+    }
+    if let Some(first) = data.as_array().and_then(|items| items.first()) {
+        return Ok(first);
+    }
+    Err(parse_error(
+        exchange_id.clone(),
+        "ApeX order response missing order object",
+        value,
+    ))
+}
+
+fn order_items(value: &Value) -> Option<&Vec<Value>> {
+    let data = data_payload(value);
+    data.as_array()
+        .or_else(|| data.get("orders").and_then(Value::as_array))
+        .or_else(|| data.get("list").and_then(Value::as_array))
+        .or_else(|| data.get("items").and_then(Value::as_array))
+}
+
+fn fill_items(value: &Value) -> Option<&Vec<Value>> {
+    let data = data_payload(value);
+    data.as_array()
+        .or_else(|| data.get("fills").and_then(Value::as_array))
+        .or_else(|| data.get("trades").and_then(Value::as_array))
+        .or_else(|| data.get("list").and_then(Value::as_array))
+        .or_else(|| data.get("items").and_then(Value::as_array))
+}
+
+fn parse_side(value: &str) -> OrderSide {
+    match value.to_ascii_lowercase().as_str() {
+        "sell" | "ask" => OrderSide::Sell,
+        _ => OrderSide::Buy,
+    }
+}
+
+fn parse_position_side(value: Option<&str>) -> PositionSide {
+    match value.map(str::to_ascii_lowercase).as_deref() {
+        Some("long") => PositionSide::Long,
+        Some("short") => PositionSide::Short,
+        Some("net") | Some("both") => PositionSide::Net,
+        _ => PositionSide::None,
+    }
+}
+
+fn parse_order_type(value: &str) -> OrderType {
+    match value.to_ascii_lowercase().replace(['_', '-'], "").as_str() {
+        "market" => OrderType::Market,
+        "postonly" => OrderType::PostOnly,
+        "ioc" | "immediateorcancel" => OrderType::IOC,
+        "fok" | "fillorkill" => OrderType::FOK,
+        _ => OrderType::Limit,
+    }
+}
+
+fn parse_time_in_force(value: Option<&str>) -> Option<TimeInForce> {
+    match value?.to_ascii_lowercase().replace(['_', '-'], "").as_str() {
+        "gtc" | "goodtilcancel" | "goodtillcancel" => Some(TimeInForce::GTC),
+        "ioc" | "immediateorcancel" => Some(TimeInForce::IOC),
+        "fok" | "fillorkill" => Some(TimeInForce::FOK),
+        "gtx" | "postonly" => Some(TimeInForce::GTX),
+        _ => None,
+    }
+}
+
+fn parse_order_status(value: Option<&str>) -> OrderStatus {
+    match value
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .replace(['_', '-'], "")
+        .as_str()
+    {
+        "new" | "pending" => OrderStatus::New,
+        "open" | "active" => OrderStatus::Open,
+        "partiallyfilled" | "partialfilled" | "partfilled" => OrderStatus::PartiallyFilled,
+        "filled" | "closed" => OrderStatus::Filled,
+        "pendingcancel" | "canceling" | "cancelling" => OrderStatus::PendingCancel,
+        "canceled" | "cancelled" => OrderStatus::Cancelled,
+        "rejected" | "failed" => OrderStatus::Rejected,
+        "expired" => OrderStatus::Expired,
+        _ => OrderStatus::Unknown,
+    }
+}
+
+fn parse_liquidity_role(value: Option<&str>, is_maker: Option<bool>) -> LiquidityRole {
+    if let Some(is_maker) = is_maker {
+        return if is_maker {
+            LiquidityRole::Maker
+        } else {
+            LiquidityRole::Taker
+        };
+    }
+    match value.map(str::to_ascii_lowercase).as_deref() {
+        Some("maker") | Some("m") => LiquidityRole::Maker,
+        Some("taker") | Some("t") => LiquidityRole::Taker,
+        _ => LiquidityRole::Unknown,
+    }
+}
+
+fn timestamp_any(value: &Value, fields: &[&str]) -> Option<DateTime<Utc>> {
+    fields
+        .iter()
+        .filter_map(|field| value.get(*field))
+        .find_map(timestamp_value)
+}
+
+fn timestamp_value(value: &Value) -> Option<DateTime<Utc>> {
+    if let Some(text) = value.as_str() {
+        if let Ok(parsed) = DateTime::parse_from_rfc3339(text) {
+            return Some(parsed.with_timezone(&Utc));
+        }
+        if let Ok(number) = text.parse::<i64>() {
+            return timestamp_from_number(number);
+        }
+    }
+    number_i64(value).and_then(timestamp_from_number)
+}
+
+fn timestamp_from_number(value: i64) -> Option<DateTime<Utc>> {
+    if value > 10_000_000_000_000 {
+        DateTime::<Utc>::from_timestamp_micros(value)
+    } else if value > 10_000_000_000 {
+        DateTime::<Utc>::from_timestamp_millis(value)
+    } else {
+        DateTime::<Utc>::from_timestamp(value, 0)
     }
 }
 

@@ -7,7 +7,8 @@ use rustcta_types::MarketType;
 use serde_json::json;
 
 use super::streams::{
-    orangex_private_subscribe_payload, orangex_private_unsubscribe_payload,
+    orangex_book_change_is_contiguous, orangex_private_subscribe_payload,
+    orangex_private_unsubscribe_payload, orangex_public_order_book_ws_policy,
     orangex_public_ping_payload, orangex_public_subscribe_payload,
     orangex_public_unsubscribe_payload, parse_orangex_private_stream_event,
     parse_orangex_ws_control_message, OrangeXWsControlMessage, ORANGEX_WS_TEXT_PING,
@@ -39,6 +40,28 @@ fn orangex_public_stream_payload_should_map_orderbook_and_trades_channels() {
         payload["params"]["channels"][0],
         "trades.BTC-USDT-PERPETUAL.raw"
     );
+}
+
+#[test]
+fn orangex_public_orderbook_policy_should_keep_deprecated_ws_spec_only() {
+    let policy = orangex_public_order_book_ws_policy();
+
+    assert_eq!(policy.support, "spec_only");
+    assert_eq!(policy.book_raw_channel, "book.{instrument}.raw");
+    assert_eq!(policy.book_100ms_channel, "book.{instrument}.100ms");
+    assert_eq!(policy.fastest_interval_ms, Some(100));
+    assert_eq!(policy.sequence_fields, &["change_id", "prev_change_id"]);
+    assert_eq!(policy.checksum, None);
+    assert!(policy.reason.contains("deprecation notice"));
+    assert!(policy.resync.contains("prev_change_id"));
+}
+
+#[test]
+fn orangex_book_change_continuity_should_detect_gaps() {
+    assert!(orangex_book_change_is_contiguous(None, 1566763));
+    assert!(orangex_book_change_is_contiguous(Some(1566763), 1566763));
+    assert!(!orangex_book_change_is_contiguous(Some(1566763), 1566762));
+    assert!(!orangex_book_change_is_contiguous(Some(1566763), 1566764));
 }
 
 #[test]

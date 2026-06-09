@@ -14,6 +14,27 @@
     "read_enabled": false,
     "reason": "Bybit V5 docs state EEA users use api.bybit.eu and EU site API only supports Connect to Third-Party Applications for API broker users."
   },
+  "advanced_orders": {
+    "runtime_enabled": false,
+    "native_batch": false,
+    "order_list": false,
+    "cancel_all": false,
+    "unsupported_operations": [
+      "amend_order",
+      "place_order_list",
+      "batch_place_orders",
+      "batch_cancel_orders",
+      "cancel_all_orders"
+    ],
+    "runtime_unsupported_operations": {
+      "amend_order": "bybiteu.amend_order",
+      "place_order_list": "bybiteu.place_order_list",
+      "batch_place_orders": "bybiteu.batch_place_orders",
+      "batch_cancel_orders": "bybiteu.batch_cancel_orders",
+      "cancel_all_orders": "bybiteu.cancel_all_orders"
+    },
+    "reason": "Bybit EU advanced trading remains disabled by default until EU broker third-party application scope, credential eligibility, dry-run safety, and post-write reconciliation are audited."
+  },
   "websocket": {
     "public_status": "spec_only",
     "private_status": "unsupported_without_broker_scope_audit",

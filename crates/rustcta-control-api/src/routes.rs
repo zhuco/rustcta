@@ -562,6 +562,42 @@ pub async fn cross_arb_dashboard(
     legacy_strategy_detail_view(state, "cross_exchange_arbitrage").await
 }
 
+pub async fn cross_arb_instruments(State(state): State<ControlApiState>) -> Json<Value> {
+    let snapshot = state.snapshot().await;
+    let detail = legacy_strategy_detail(&snapshot, "cross_exchange_arbitrage");
+    let instruments = detail
+        .and_then(|detail| detail.get("instruments"))
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let feasibility = detail
+        .and_then(|detail| detail.get("instrument_feasibility"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let coverage_ok = instruments.as_array().is_some_and(|rows| !rows.is_empty());
+    Json(read_models::secret_free_legacy_value(&json!({
+        "schema_version": CONTROL_API_SCHEMA_VERSION,
+        "generated_at": snapshot.generated_at,
+        "instruments": instruments,
+        "feasibility": feasibility,
+        "coverage_ok": coverage_ok,
+    })))
+}
+
+pub async fn cross_arb_market_snapshots(State(state): State<ControlApiState>) -> Json<Value> {
+    let snapshot = state.snapshot().await;
+    let snapshots =
+        legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "market_snapshots")
+            .or_else(|| legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "snapshots"))
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+    let coverage_ok = snapshots.as_array().is_some_and(|rows| !rows.is_empty());
+    Json(read_models::secret_free_legacy_value(&json!({
+        "schema_version": CONTROL_API_SCHEMA_VERSION,
+        "generated_at": snapshot.generated_at,
+        "snapshots": snapshots,
+        "coverage_ok": coverage_ok,
+    })))
+}
+
 pub async fn scanner_exchanges(
     State(state): State<ControlApiState>,
 ) -> Json<LegacyDashboardReadView> {

@@ -4,10 +4,23 @@
   "trade_enabled": false,
   "private_write_enabled": false,
   "native_public_rest": ["products", "orderbook"],
-  "request_spec_only": ["place_order", "cancel_order", "open_orders", "private_ws_auth"],
+  "request_spec_only": [
+    "place_order",
+    "cancel_order",
+    "open_orders",
+    "amend_order",
+    "batch_cancel_orders",
+    "private_ws_auth"
+  ],
+  "runtime_guards": [
+    "bsx.amend_order_spec_only_no_eip712_session_headers_reconciliation_guard",
+    "bsx.batch_cancel_orders_spec_only_no_safe_cancel_shape_session_reconciliation_guard"
+  ],
   "unsupported": [
     "bsx.place_order_requires_eip712_wallet_signature_audit",
     "bsx.cancel_order_requires_cancel_v2_semantics_audit",
-    "bsx.private_streams_require_auth_lifecycle_audit"
+    "bsx.private_streams_require_auth_lifecycle_audit",
+    "bsx.order_list_not_mapped_to_lossless_shared_semantics",
+    "bsx.batch_place_orders_requires_eip712_wallet_signature_audit"
   ]
 }

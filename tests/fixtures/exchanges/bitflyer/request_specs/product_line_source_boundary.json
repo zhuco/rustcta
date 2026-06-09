@@ -1,0 +1,55 @@
+{
+  "exchange": "bitflyer",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "cfd_fx_product"],
+  "current_adapter_scope": ["spot", "adapter_specific_margin"],
+  "official_product_lines": ["crypto_cfd", "fx"],
+  "official_sources": [
+    {
+      "url": "https://lightning.bitflyer.com/docs",
+      "evidence": "Realtime and REST examples use product_code values such as BTC_JPY and FX_BTC_JPY."
+    }
+  ],
+  "runtime_isolation": "Do not expose bitFlyer Crypto CFD/FX as generic futures/perpetual without a separate contract model and product-scope guard.",
+  "unsupported_runtime_reason": "Current spot adapter can see Lightning product codes but lacks a gateway contract model, position/margin/risk parser and product-scoped order reconciliation for Crypto CFD/FX.",
+  "required_endpoints": {
+    "market_metadata": [
+      "Crypto CFD/FX product_code catalog",
+      "contract sizing and settlement model",
+      "margin mode and leverage constraints"
+    ],
+    "public_market_data": [
+      "Crypto CFD/FX order book",
+      "Crypto CFD/FX ticker",
+      "Crypto CFD/FX executions"
+    ],
+    "private_account": [
+      "collateral or margin state",
+      "positions",
+      "risk or leverage limits"
+    ],
+    "private_order_lifecycle": [
+      "Crypto CFD/FX place order",
+      "Crypto CFD/FX cancel order",
+      "Crypto CFD/FX query/open orders",
+      "Crypto CFD/FX fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "decide gateway MarketType for Crypto CFD/FX before advertising capability",
+    "product-code guard separate from Spot BTC_JPY",
+    "position/margin read-only validation before writes"
+  ],
+  "unsafe_to_promote_without": [
+    "adapter-specific CFD contract model",
+    "position/margin/risk parser coverage",
+    "product-scoped order lifecycle reconciliation",
+    "clear mapping that FX_BTC_JPY is not generic futures/perpetual"
+  ],
+  "remaining_work": [
+    "decide gateway MarketType/contract model for Crypto CFD",
+    "separate symbol metadata and risk semantics from Spot",
+    "add position/margin parser and read-only reconciliation before runtime promotion"
+  ]
+}

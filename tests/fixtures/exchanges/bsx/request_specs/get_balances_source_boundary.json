@@ -1,0 +1,43 @@
+{
+  "exchange": "bsx",
+  "operation": "get_balances",
+  "status": "source_boundary_only",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/source/bsx/account-balance",
+  "auth": "signed_account_headers",
+  "headers": {
+    "BSX-KEY": { "match": "non_empty" },
+    "BSX-SIGNATURE": { "match": "non_empty" },
+    "BSX-TIMESTAMP": { "match": "non_empty" }
+  },
+  "account_scope": {
+    "required": ["account_id_or_wallet", "api_key"],
+    "credential_scopes": ["read_only"],
+    "wallet_binding": "required_for_account_selection"
+  },
+  "source_boundary": {
+    "kind": "account_balance_or_equity_readback",
+    "stable_rest_path": "not_pinned",
+    "private_ws_reconciliation_source": "account/order updates after permission audit",
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
+  "response_sample": {
+    "accountId": "redacted-account-id",
+    "balances": [
+      {
+        "asset": "USDC",
+        "available": "1000.00",
+        "total": "1200.00",
+        "reserved": "200.00"
+      }
+    ],
+    "equity": "1200.00"
+  },
+  "runtime_boundary": "BSX get_balances is source-boundary only until a stable account balance path, account headers, permission scope, parser, and private REST/WS reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

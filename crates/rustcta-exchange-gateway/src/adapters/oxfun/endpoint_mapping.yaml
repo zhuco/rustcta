@@ -19,6 +19,7 @@ auth:
   private_rest: AccessKey/Timestamp/Nonce/Signature HMAC-SHA256 base64
   private_ws: login payload signs timestamp + GET/auth/self/verify
 rate_limits:
+  oxfun_account_source: { scope: account, interval_ms: 1000, limit: 1 }
   websocket_orders: { scope: account, interval_ms: 1000, limit: 50 }
   unverified_rest: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
@@ -35,9 +36,50 @@ websocket:
     channels: [market, depthUpdate, trade, ticker, candles]
     heartbeat: { mode: text_ping, interval_ms: 20000, timeout_ms: 45000, stale_message_ms: 60000 }
     resync: snapshot_then_seqnum_diffs
+    order_book:
+      channel: depthUpdate:<marketCode>
+      depth_channel: "depthUpdate:<marketCode> 100ms"
+      snapshot_event: depthUpdate
+      delta_event: depthUpdate-diff
+      push_interval_ms: 100
+      depth: unspecified
+      update_model: snapshot_then_diff_absolute_quantity
+      sequence_field: seqNum
+      checksum: supported
+      gap_policy: resubscribe
   private:
     support: spec_only
     auth_renewal: { mode: login_payload }
+unsupported:
+  - operation: spot_product
+    reason: OX.FUN official profile is perpetual swaps/options-style trading; shared spot order lifecycle is not supported by this adapter.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：private account/orders/funding 仍未验证，未核到稳定 fee endpoint。"
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/oxfun/request_specs/get_balances_account_source.json
+    reason: "OX.FUN private account/funding materials indicate account state readback, but stable balances/account equity runtime, parser and reconciliation are not implemented yet."
+  - operation: get_positions
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/oxfun/request_specs/get_positions_account_source.json
+    reason: "OX.FUN private account/positions/funding materials indicate position readback, but stable get_positions runtime, parser and reconciliation are not implemented yet."
+  - operation: amend_order
+    status: unsupported
+    reason: "No OX.FUN amend/replace command has been verified as a lossless shared amend_order model; current code returns oxfun.amend_order_unverified."
+  - operation: place_order_list
+    status: unsupported
+    reason: "No OCO/OTO/order-list semantics are verified for the shared gateway model; current code returns oxfun.order_list_unverified."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_batch_place_orders.json
+    signing_vector: tests/fixtures/exchanges/oxfun/signing_vectors/ws_login.json
+    parser_fixtures:
+      - tests/fixtures/exchanges/oxfun/ws/private_order_ack.json
+      - tests/fixtures/exchanges/oxfun/ws/private_batch_place_ack_partial.json
+    reason: "Private WebSocket placeorders is fixture-backed but runtime remains disabled pending authenticated WS session lifecycle, request tag/order-id reconciliation, dry-run guard and REST/private-stream readback."
+  - operation: batch_cancel_orders
+    status: unsupported
+    reason: "OX.FUN cancelorders is not fixture-verified for shared batch_cancel_orders; current code keeps oxfun.batch_cancel_orders_ws_request_spec_only unsupported until safe request/parser/reconciliation evidence exists."
 streams:
   - operation: ws_market_snapshot
     transport: websocket
@@ -46,10 +88,16 @@ streams:
     resync: symbol_rules
   - operation: ws_depth_update
     transport: websocket
-    channel: depthUpdate:<marketCode>
+    channel: "depthUpdate:<marketCode> 100ms"
     support: parser_only
-    resync: order_book
-    notes: Accepts official object-shaped snapshot/diff payloads and legacy array fixture shape.
+    update_model: snapshot_then_diff_absolute_quantity
+    push_interval_ms: 100
+    sequence_field: seqNum
+    checksum: supported
+    gap_policy: resubscribe
+    resync:
+      endpoint_operation: order_book
+    notes: Accepts official object-shaped snapshot/diff payloads and legacy array fixture shape; gap handling must resubscribe.
   - operation: ws_heartbeat
     transport: websocket
     channel: text:ping
@@ -140,7 +188,59 @@ endpoints:
     support: spec_only
     request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_batch_place_orders.json
     official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/order-commands/place-batch-market-order
-    reason: oxfun.batch_place_orders_ws_request_spec_only
+    reason: oxfun.batch_place_orders_ws_private_write_runtime_blocked
+    response_parser:
+      status: fixture_only
+      fixtures:
+        - tests/fixtures/exchanges/oxfun/ws/private_batch_place_ack_single.json
+        - tests/fixtures/exchanges/oxfun/ws/private_batch_place_ack_partial.json
+      reconciliation_report: tests/fixtures/exchanges/oxfun/ws/private_batch_place_reconciliation_report.json
+    notes: "Keep offline: shared runtime lacks authenticated private WS session lifecycle, request tag/order-id reconciliation, dry-run guard, and REST/private-stream readback after WS write."
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/oxfun/amend-order
+    auth: unsupported
+    rate_limit_bucket: oxfun_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: oxfun.amend_order_unverified
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/oxfun/order-list
+    auth: unsupported
+    rate_limit_bucket: oxfun_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: oxfun.order_list_unverified
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/oxfun/batch-cancel
+    auth: unsupported
+    rate_limit_bucket: oxfun_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: oxfun.batch_cancel_orders_ws_request_spec_only
   - operation: cancel_order
     product: perpetual
     market_types: [perpetual, options]
@@ -158,21 +258,40 @@ endpoints:
     request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_cancel_order.json
     official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/order-commands/cancel-order
     reason: oxfun.cancel_order_ws_request_spec_only
-  - operation: positions
+  - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/oxfun/positions
-    auth: unsupported
-    rate_limit_bucket: oxfun_unverified
+    method: SOURCE_READ
+    path: source://oxfun/private-account-positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: oxfun_account_source
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/get_positions_account_source.json
+    reason: "OX.FUN private account/positions source is fixture-backed as an offline boundary; runtime remains disabled pending stable endpoint verification, read-only auth smoke, parser, and private WS/REST reconciliation."
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: SOURCE_READ
+    path: source://oxfun/private-account-equity
+    auth: none
+    rate_limit_bucket: oxfun_account_source
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
     testnet: false
-    support: unsupported_unverified
-    reason: oxfun.positions_unverified
+    support: spec_only
+    reason: "Private account/equity source boundary only; shared get_balances runtime remains project-unimplemented pending auth smoke, balance/equity parser, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/oxfun/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/oxfun/request_specs/get_balances_account_source.json }
   - operation: funding
     product: perpetual
     market_types: [perpetual]

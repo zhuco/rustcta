@@ -1,0 +1,55 @@
+{
+  "exchange": "bitstamp",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "derivatives_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["derivatives", "contracts"],
+  "official_sources": [
+    {
+      "url": "https://www.bitstamp.net/api/",
+      "evidence": "Official API material and changelog include derivatives public/private surfaces, funding-rate endpoints and derivatives trade-history references."
+    }
+  ],
+  "runtime_isolation": "Keep Bitstamp spot REST/WS runtime isolated from derivatives symbols, account state, positions and risk until a derivatives profile is implemented.",
+  "unsupported_runtime_reason": "Official derivatives/contracts surfaces exist, but the current adapter only wires Spot symbols, Spot market data and Spot private lifecycle semantics.",
+  "required_endpoints": {
+    "market_metadata": [
+      "derivatives instruments",
+      "contract specifications",
+      "funding or settlement schedule"
+    ],
+    "public_market_data": [
+      "derivatives order book",
+      "derivatives ticker",
+      "derivatives trade history"
+    ],
+    "private_account": [
+      "derivatives balances or margin account",
+      "positions",
+      "risk or leverage limits"
+    ],
+    "private_order_lifecycle": [
+      "derivatives place order",
+      "derivatives cancel order",
+      "derivatives query/open orders",
+      "derivatives fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "derivatives credential scope guard",
+    "product-specific account or subaccount routing",
+    "signed write dry-run guard"
+  ],
+  "unsafe_to_promote_without": [
+    "derivatives market metadata specs",
+    "position/margin/funding parser coverage",
+    "signed derivatives order lifecycle request specs",
+    "post-write query/open/fills reconciliation"
+  ],
+  "remaining_work": [
+    "pin derivatives market metadata endpoint specs",
+    "add positions/margin/funding parsers",
+    "add signed derivatives order lifecycle request specs and dry-run guard"
+  ]
+}

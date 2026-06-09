@@ -190,6 +190,15 @@ pub(super) fn fixture(name: &str) -> Value {
     serde_json::from_str(&text).expect("fixture json")
 }
 
+pub(super) fn ws_fixture(name: &str) -> Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/backpack/ws/{name}.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("ws fixture");
+    serde_json::from_str(&text).expect("ws fixture json")
+}
+
 pub(super) fn request_spec(name: &str) -> Value {
     let path = format!(
         "{}/../../tests/fixtures/exchanges/backpack/request_specs/{name}.json",

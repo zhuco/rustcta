@@ -57,7 +57,32 @@ websocket:
   public:
     supports_subscribe: true
     supports_unsubscribe: false
-    channels: ["{symbol}@orderbook@50", "{symbol}@trades", "{symbol}@prices", "{symbol}_{interval}", "{instrument}@orderbook@50-futures", "{instrument}@trades-futures"]
+    channels: ["B-BTC_USDT@orderbook@20", "{symbol}@orderbook@50", "{symbol}@trades", "{symbol}@prices", "{symbol}_{interval}", "{instrument}@orderbook@50-futures", "{instrument}@trades-futures"]
+    order_book:
+      channel: depth-update
+      channels: ["B-BTC_USDT@orderbook@20", "{symbol}@orderbook@50", "{instrument}@orderbook@50-futures"]
+      supported_depths: [20, 50]
+      interval: "no fixed ms documented for Socket.IO depth-update"
+      transport: socket_io
+      subscribe:
+        event: join
+        channel_field: channelName
+        official_spot_example: B-BTC_USDT@orderbook@20
+        project_spot_boundary: "{symbol}@orderbook@50"
+        project_futures_boundary: "{instrument}@orderbook@50-futures"
+      update:
+        event: depth-update
+        fixed_interval_ms: null
+        depth:
+          official_spot_example: 20
+          project_default: 50
+          project_max: 50
+        sequence_fields: []
+        checksum: unsupported
+        parser_fixture: tests/fixtures/exchanges/coindcx/ws/public_depth_update_socketio.json
+      resync:
+        snapshot_operation: get_order_book
+        strategy: rest_snapshot_after_reconnect_or_stale_stream_or_parse_failure
     heartbeat: { direction: application_message, ping_interval_ms: 25000, pong_timeout_ms: 35000, stale_message_ms: 45000 }
     resync: rest_snapshot_after_reconnect
   private:
@@ -67,11 +92,21 @@ websocket:
     auth: hmac_signed_join
     auth_renewal: { kind: relogin, renewal_interval_ms: 1800000, reconnect_on_failure: true, resubscribe_after_renewal: true }
     fallback: rest_reconciliation
+
+unsupported:
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：fee endpoint 未确认，当前只返回零费率占位。"
+
 streams:
   public:
     transport: socket_io
     parser_test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs
     fixture: tests/fixtures/exchanges/coindcx/ws_public_orderbook.json
+    join_fixtures:
+      spot_official_20: tests/fixtures/exchanges/coindcx/ws/public_orderbook_spot_join_20.json
+      spot_project_50: tests/fixtures/exchanges/coindcx/ws/public_orderbook_spot_join_50.json
+      futures_project_50: tests/fixtures/exchanges/coindcx/ws/public_orderbook_futures_join_50.json
+    depth_update_fixture: tests/fixtures/exchanges/coindcx/ws/public_depth_update_socketio.json
     resync_endpoint_operation: get_order_book
   private:
     transport: socket_io
@@ -129,6 +164,7 @@ endpoints:
     product: spot
     market_types: [spot]
     transport: rest
+    support: native
     method: POST
     path: /exchange/v1/users/balances
     auth: hmac
@@ -142,6 +178,7 @@ endpoints:
     product: linear_perp
     market_types: [linear_perp]
     transport: rest
+    support: native
     method: POST
     path: /exchange/v1/derivatives/futures/positions
     auth: hmac
@@ -152,6 +189,7 @@ endpoints:
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/get_positions.json }
     response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coindcx/parser/positions_success.json }
   - operation: place_order
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -165,6 +203,7 @@ endpoints:
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/place_order_spot_limit.json }
     response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coindcx/parser/order_ack_success.json }
   - operation: cancel_order
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -204,7 +243,53 @@ endpoints:
     native_batch: true
     atomicity: partial
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/batch_cancel_spot.json }
+  - operation: cancel_all_orders
+    support: native
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/cancel_all | /exchange/v1/derivatives/futures/positions/cancel_all_open_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    notes: Symbol-scoped cancel-all is credential-gated and maps to Spot or futures endpoint by market type.
+  - operation: amend_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/edit | /exchange/v1/derivatives/futures/orders/edit
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: native
+    notes: Standard quantity amend; new client id remains unsupported.
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /unsupported/coindcx/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coindcx.order_list_unsupported
   - operation: query_order
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -216,6 +301,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest
@@ -227,6 +313,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_recent_fills
+    support: native
     product: spot
     market_types: [spot, linear_perp]
     transport: rest

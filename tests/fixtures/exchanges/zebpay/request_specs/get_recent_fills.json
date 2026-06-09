@@ -1,6 +1,7 @@
 {
   "operation": "zebpay.get_recent_fills",
-  "request_spec_only": true,
+  "request_spec_only": false,
+  "runtime": "guarded_private_rest",
   "trade_enabled": false,
   "method": "GET",
   "path": "/orders/{order_id}/fills",
@@ -15,5 +16,5 @@
     "order_id": "zebpay_test_order_id_001"
   },
   "credential_scope": "read_only",
-  "expected_error_until_promoted": "zebpay.recent_fills_request_spec_only"
+  "runtime_guard": "ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token"
 }

@@ -12,15 +12,19 @@ clap.workspace = true
 dotenv = "0.15"
 flate2 = "1.0"
 futures-util.workspace = true
+hmac.workspace = true
+hex.workspace = true
 log = "0.4.27"
 reqwest.workspace = true
 rmp-serde = "1.1"
 rustcta-types.workspace = true
 rustcta-reporting.workspace = true
 rustcta-smart-money.workspace = true
+rustcta-strategy-cross-exchange-arbitrage = { path = "../../strategies/cross-exchange-arbitrage" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
+sha2.workspace = true
 tokio.workspace = true
 tokio-tungstenite = { version = "0.20", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 url = "2.4"

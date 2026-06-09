@@ -1,0 +1,25 @@
+{
+  "exchange": "binancecoinm",
+  "operation": "batch_cancel_orders",
+  "product": "futures",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/dapi/v1/batchOrders",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSD_PERP" },
+    "orderIdList": { "match": "exact", "value": "%5B30%2C31%5D" },
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "binancecoinm/batch_cancel_orders"
+}

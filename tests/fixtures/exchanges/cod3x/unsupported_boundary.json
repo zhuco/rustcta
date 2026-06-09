@@ -10,6 +10,12 @@
   "private_rest_enabled": false,
   "public_stream_enabled": false,
   "private_stream_enabled": false,
+  "balance_read_boundary": {
+    "support": "spec_only",
+    "status": "project_unimplemented",
+    "account_model": "downstream_venue_account_or_wallet",
+    "reason": "Balances are readback-capable through the selected downstream venue account or wallet source, but Cod3x-native routed account selection, parser, scope guard, and reconciliation are not implemented."
+  },
   "official_sources": [
     "https://docs.cod3x.org/",
     "https://www.cod3x.org/",
@@ -19,9 +25,26 @@
   "expected_runtime_errors": {
     "markets": "cod3x.markets_unverified",
     "risk": "cod3x.risk_and_fees_unverified",
+    "balances": "cod3x.balances_unverified",
     "positions": "cod3x.positions_unverified",
     "orders": "cod3x.routed_order_signing_unverified",
+    "amend_order": "cod3x.amend_order_routing_unverified",
+    "place_order_list": "cod3x.order_list_unsupported",
+    "batch_place_orders": "cod3x.batch_place_order_routing_unverified",
+    "batch_cancel_orders": "cod3x.batch_cancel_order_routing_unverified",
+    "cancel_all_orders": "cod3x.cancel_all_orders_routing_unverified",
     "public_stream": "cod3x.public_stream_unverified",
     "private_stream": "cod3x.private_stream_unverified"
+  },
+  "advanced_order_boundary": {
+    "support": "unsupported",
+    "operations": [
+      "amend_order",
+      "place_order_list",
+      "batch_place_orders",
+      "batch_cancel_orders",
+      "cancel_all_orders"
+    ],
+    "reason": "No stable Cod3x-native routed advanced-order API, signing ownership, downstream venue selection, idempotency, partial failure, or reconciliation contract is verified; downstream venue advanced-order semantics stay in their own adapters."
   }
 }

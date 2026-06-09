@@ -1,0 +1,13 @@
+{
+  "exchange": "binanceus",
+  "name": "oco_not_order_list",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/api/v3/order/oco",
+  "payload": "listClientOrderId=cli-oco-list-1&price=25000.00000000&quantity=0.01000000&recvWindow=5000&side=SELL&stopLimitPrice=24000.00000000&stopLimitTimeInForce=GTC&stopPrice=24500.00000000&symbol=BTCUSDT&timestamp=1710000000000",
+  "expected_signature": "a0f2b3e145eef9990266e6175416fb3d8c63948ebc6003d98ae285ae8a1972b5",
+  "payload_format": "raw_payload",
+  "shared_semantics": "unsupported_oco_boundary"
+}

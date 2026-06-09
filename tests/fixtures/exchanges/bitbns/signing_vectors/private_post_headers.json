@@ -10,7 +10,7 @@
     "rate": "65000",
     "side": "BUY"
   },
-  "payload": "eyJib2R5Ijp7InF1YW50aXR5IjoiMC4wMSIsInJhdGUiOiI2NTAwMCIsInNpZGUiOiJCVVkifSwic3ltYm9sIjoiL3BsYWNlT3JkZXIvQlRDIiwidGltZVN0YW1wX25vbmNlIjoiMTcwMDAwMDAwMDAwMCJ9",
-  "expected_signature": "f3b5a51bb697da4d2e01ad782da03a1abeda27bcc1753a4ac2c4ef67841ce9fce632531036a8d346d88b1ab014b5e5333c42a65ba1330f57bda2a59380ce455f",
+  "payload": "eyJib2R5Ijoie1wicXVhbnRpdHlcIjpcIjAuMDFcIixcInJhdGVcIjpcIjY1MDAwXCIsXCJzaWRlXCI6XCJCVVlcIn0iLCJzeW1ib2wiOiIvcGxhY2VPcmRlci9CVEMiLCJ0aW1lU3RhbXBfbm9uY2UiOiIxNzAwMDAwMDAwMDAwIn0=",
+  "expected_signature": "241b3e9b955cfc3e87131da264b9b4d2df45fee189e2feeb82adc48a39c5b5db85736aa7df2bd2c0aba93b578e4821a12f3a230796236c0e7e4209e92d9ac378",
   "secret_leak_check": false
 }

@@ -19,13 +19,22 @@ Official references:
 - OKX US Terms of Service: https://www.okx.com/en-us/help/terms-of-service-us
 - OKX API Agreement: https://www.okx.com/en-us/help/okx-api-agreement
 
-The official API docs use the same OKX v5 `/api/v5` REST surface and list U.S. domains for U.S. users. The U.S. terms and disclosures frame the U.S. venue as spot digital asset trading plus related buy/sell/convert services, so this adapter keeps non-spot and private trading surfaces closed until a separate credential and product-scope audit is completed.
+The official API docs use the same OKX v5 `/api/v5` REST surface and list U.S. domains for U.S. users. The current adapter still exposes only spot public REST at runtime, so non-spot product lines stay disabled until a dedicated OKX US product-scope audit verifies API-enabled access for each product line.
 
-P6 official product-line verification also found OKX U.S. help material for
-perpetual futures, event contracts, and spot/margin trading. Those surfaces are
-`项目未实现 Perpetual Futures/Event Contracts/Margin boundary` for this adapter
-until regional API eligibility, credential scope, and product availability are
-audited; do not document them as `交易所不支持合约`.
+2026 US help materials also expose Event Contracts and futures concepts, and OKX v5 API docs expose the shared margin/derivatives account and instrument semantics. Because the current adapter wires only spot public REST, non-spot products are recorded as `项目未实现` regional product boundaries pending US domain, credential scope, state eligibility, account-mode, and API product-scope audit.
+Mapping now records `contract_product`, `market_type_non_spot`,
+`margin_product`, `futures_product`, `perpetual_product`, and
+`event_contract_product` as `status: project_unimplemented` with
+`boundary: project_unimplemented_product_line`, all bound to
+`tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json`
+with required audit gaps for US domain, credential scope, state eligibility,
+account mode, product metadata, order lifecycle, and reconciliation. This
+is a regional `project_unimplemented` boundary, not an unsupported judgment.
+Status recommendation: keep Margin, Perpetual, Futures, non-spot market scope,
+and Event Contracts disabled until US eligibility, credential permissions,
+API product scope, metadata, lifecycle, positions, settlement, and
+reconciliation are audited.
+preserves the regional product gap without enabling private or non-spot runtime.
 
 ## Implemented Gateway Surface
 
@@ -38,7 +47,8 @@ audited; do not document them as `交易所不支持合约`.
 
 ## Unsupported Boundary
 
-- Private REST reads, private REST writes, private WebSocket auth/subscriptions, real order placement, real cancels, batch operations, leverage, margin mode, position mode, derivatives, funding, mark/index/open-interest, deposits, withdrawals, transfers, fiat banking, convert/OTC, Earn, bots/copy/algo/order-list flows, and dead-man/cancel-all-after are `Unsupported`.
+- Private REST reads, private REST writes, private WebSocket auth/subscriptions, real order placement, real cancels, batch operations, leverage, position mode, funding, mark/index/open-interest, deposits, withdrawals, transfers, fiat banking, convert/OTC, Earn, bots/copy/algo/order-list flows, and dead-man/cancel-all-after are `Unsupported` or disabled until credential/scope audit.
+- Margin, perpetual, expiry futures, options, and event-contract product lines are `项目未实现` regional product boundaries, not fully implemented runtime surfaces; the source boundary fixture is `tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json`.
 - The adapter does not read `RUSTCTA_OKXUS_API_KEY`, `RUSTCTA_OKXUS_API_SECRET`, `RUSTCTA_OKXUS_API_PASSPHRASE`, or global OKX credentials. This prevents accidental live trading on a regional profile whose credential scope has not been verified.
 - No web page endpoints, unofficial APIs, live orders, live cancels, withdrawals, or transfers are used.
 
@@ -48,24 +58,28 @@ audited; do not document them as `交易所不支持合约`.
 
 当前 adapter 禁用 private REST/WS 和真实下单撤单；这是 `项目未实现/未启用区域 private trading`，不是 `交易所不支持下单/撤单`。后续必须先补区域 private REST specs、signing vectors、credential scope guard 和 parser。
 
+账户/余额已补离线边界：OKX V5 `GET /api/v5/account/balance` 已固定 OKX US host request-spec `request_specs/get_balances_account_balance.json`，矩阵按 `get_balances=离线` 记录。`okxus` shared `get_balances` runtime 尚未完成 US domain、credential scope、state/product eligibility、account-mode policy、parser 和 read-only reconciliation。
+
 ## Endpoint Mapping
 
 `crates/rustcta-exchange-gateway/src/adapters/okxus/endpoint_mapping.yaml` records:
 
 - OKX US REST and WebSocket base URLs.
 - OKX v5 Spot public market-data endpoints as supported/spec-covered.
-- Private account/order/fills endpoints as explicit `Unsupported`.
+- Private account/order/fills endpoints as explicit `Unsupported` with `project_unimplemented` boundaries for the US credential, scope, signing, parser, eligibility, and dry-run audit.
+- Non-spot product lines as regional `project_unimplemented` boundaries pending US domain, credential scope, state eligibility, account-mode, and API product-scope audit.
 - REST reconciliation fallback only for public stream resync; private reconciliation remains unsupported.
 
 ## Official WebSocket Order Book Detail
 
 P9 official verification treats this as an OKX V5 regional profile. Public
-market data supports `bbo-tbt` at 10ms, `books5` at 100ms, and `books` at
-100ms; TBT depth channels are 10ms but require login/VIP eligibility. The U.S.
-public host is `wss://wsus.okx.com:8443/ws/v5/public`. Mapping must record the
-regional host, `books5`/`bbo-tbt`, 10ms/100ms intervals, OKX
-sequence/checksum semantics, REST `/api/v5/market/books` resync, and regional
-product eligibility caveats.
+market data supports `bbo-tbt` depth1 at 10ms, `books5` depth5 at 100ms, and
+`books` depth400 at 100ms; `books-l2-tbt` depth400 and `books50-l2-tbt` depth50
+are 10ms depth channels but require login/VIP eligibility. The U.S. public host
+is `wss://wsus.okx.com:8443/ws/v5/public`. The mapping records the regional
+host, `books`/`books5`/`bbo-tbt`, 10ms/100ms intervals, OKX
+`seqId`/`prevSeqId` and `checksum` semantics, REST `/api/v5/market/books`
+resync, and regional product eligibility caveats.
 
 ## Validation
 
@@ -78,3 +92,10 @@ cargo test -p rustcta-gateway okxus --message-format short
 ```
 
 `cargo build` is intentionally not part of this task.
+
+## Fee Boundary
+
+费率来源在 OKX US/OKX V5 account fee 资料中存在；当前已补 OKX US host `GET /api/v5/account/trade-fee` 的 `request_specs/get_fees_trade_fee.json` 离线 request-spec 边界。`okxus` shared `get_fees` runtime 仍属项目未实现/未启用；补齐前需完成 US domain、credential scope、state/product eligibility、instType/instId policy 和 parser 审计。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core trading now reuses the OKX V5 signed private REST runtime on the OKX US host when explicit OKXUS credentials/passphrase and private REST enable flag are configured. place/cancel/cancel-all/query/open/fills are matrix `原生`; non-spot products remain separate US product-scope gaps.

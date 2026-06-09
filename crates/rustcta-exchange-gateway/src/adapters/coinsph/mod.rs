@@ -4,13 +4,14 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest,
-    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
-    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -27,6 +28,7 @@ mod public;
 #[cfg(test)]
 mod public_tests;
 mod signing;
+mod streams;
 #[cfg(test)]
 mod test_support;
 mod toolchain;
@@ -193,7 +195,7 @@ impl ExchangeClient for CoinsPhGatewayAdapter {
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
-        capabilities.supports_public_streams = false;
+        capabilities.supports_public_streams = true;
         capabilities.supports_private_streams = false;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
@@ -221,7 +223,7 @@ impl ExchangeClient for CoinsPhGatewayAdapter {
         ];
         capabilities.max_order_book_depth = Some(100);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(200));
         capabilities.max_recent_fill_limit = Some(1000);
         toolchain::apply_toolchain_capabilities(&mut capabilities, private);
         capabilities
@@ -298,6 +300,20 @@ impl ExchangeClient for CoinsPhGatewayAdapter {
         self.unsupported_private("coinsph.cancel_all_orders")
     }
 
+    async fn batch_place_orders(
+        &self,
+        _request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.unsupported_private("coinsph.batch_place_orders")
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        _request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.unsupported_private("coinsph.batch_cancel_orders")
+    }
+
     async fn query_order(
         &self,
         request: QueryOrderRequest,
@@ -321,11 +337,9 @@ impl ExchangeClient for CoinsPhGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "coinsph.subscribe_public_stream",
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(

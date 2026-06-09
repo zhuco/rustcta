@@ -9,12 +9,79 @@ market_types: [spot]
 products: [spot]
 rest:
   base_url: https://api.pro.coins.ph
+websocket:
+  public_url: wss://wsapi.pro.coins.ph/openapi/quote/ws/v1
+  status: public_order_book_spec_only
+  public:
+    support: spec_only
+    runtime: project_unimplemented
+    url: wss://wsapi.pro.coins.ph/openapi/quote/stream
+    order_book:
+      bbo_channel: "{symbol}@bookTicker"
+      channels:
+        - "{symbol}@depth5@100ms"
+        - "{symbol}@depth10@100ms"
+        - "{symbol}@depth20@100ms"
+        - "{symbol}@depth200@1000ms"
+        - "{symbol}@depth@100ms"
+        - "{symbol}@depth@1000ms"
+      interval_ms: [100, 1000]
+      realtime_channels: ["{symbol}@bookTicker"]
+      depth: [1, 5, 10, 20, 200]
+      sequence_fields: [U, u, lastUpdateId]
+      checksum: none
+      resync:
+        mode: rest_snapshot_then_delta_replay
+        endpoint_operation: get_order_book
+        continuity: drop u <= lastUpdateId, apply first U <= lastUpdateId + 1 <= u, then require next U == previous u + 1
+  private:
+    support: unsupported
+  heartbeat: exchange_ping_or_idle_reconnect
+  public_order_book:
+    product: spot
+    book_ticker:
+      stream: "{symbol}@bookTicker"
+      interval_ms: realtime
+      depth: 1
+      sequence: [u]
+    partial_depth:
+      streams:
+        - "{symbol}@depth5@100ms"
+        - "{symbol}@depth10@100ms"
+        - "{symbol}@depth20@100ms"
+        - "{symbol}@depth200@1000ms"
+      levels: [5, 10, 20, 200]
+      interval_ms: [100, 1000]
+      sequence: [lastUpdateId]
+    diff_depth:
+      streams:
+        - "{symbol}@depth@100ms"
+        - "{symbol}@depth@1000ms"
+      interval_ms: [100, 1000]
+      sequence: [U, u]
+      update_semantics: absolute_quantity_level_delta_zero_removes
+    checksum: none
+    rest_snapshot:
+      endpoint_operation: get_order_book
+      path: /openapi/quote/v1/depth
+      limits: [5, 10, 20, 50, 100]
+      sequence_field: lastUpdateId
+    replay:
+      buffer_before_snapshot: true
+      drop_rule: discard events where u <= lastUpdateId
+      first_apply_rule: require U <= lastUpdateId + 1 <= u
+      continuity_rule: next U must equal previous u + 1
+      gap_policy: reconnect_resubscribe_and_fetch_rest_snapshot
 rate_limits:
   buckets:
     public_ip:
       scope: rest
       interval: 1m
       limit: 1200
+    public_ws:
+      scope: websocket
+      interval: 1m
+      limit: 300
     signed_uid:
       scope: account
       interval: 1m
@@ -25,17 +92,68 @@ reconciliation:
   after_unknown_place: query_order
   after_unknown_cancel: query_order
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
   - cancel_all_orders
   - quote_market_order
   - amend_order
   - order_list
   - batch_place_orders
   - batch_cancel_orders
-  - public_streams
   - private_streams
   - payment_wallet_fiat_transfer
   - withdraw
   - sub_account_transfer
+streams:
+  - operation: public_book_ticker
+    transport: websocket
+    product: spot
+    market_types: [spot]
+    channel: "{symbol}@bookTicker"
+    auth: none
+    support: native
+    interval_ms: realtime
+    depth: 1
+    sequence: [u]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinsph/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinsph/ws/book_ticker.json }
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot
+  - operation: public_orderbook_partial_depth
+    transport: websocket
+    product: spot
+    market_types: [spot]
+    channel: "{symbol}@depth5|10|20@100ms, {symbol}@depth200@1000ms"
+    auth: none
+    support: native
+    interval_ms: [100, 1000]
+    depth: [5, 10, 20, 200]
+    sequence: [lastUpdateId]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinsph/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinsph/ws/partial_depth.json }
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot
+  - operation: public_orderbook_diff_depth
+    transport: websocket
+    product: spot
+    market_types: [spot]
+    channel: "{symbol}@depth@100ms|1000ms"
+    auth: none
+    support: native
+    interval_ms: [100, 1000]
+    depth: delta
+    sequence: [U, u]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinsph/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinsph/ws/diff_depth.json }
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_delta_replay
+      replay: drop u <= lastUpdateId, apply first U <= lastUpdateId + 1 <= u, then require next U == previous u + 1
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -139,3 +257,73 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/coinsph/request_specs/get_recent_fills.json
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinsph/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinsph.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinsph/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinsph.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinsph/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinsph.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinsph/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinsph.batch_cancel_orders_unsupported
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinsph/cancel-all
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinsph.cancel_all_orders_unsupported_until_local_partial_cancel_audit

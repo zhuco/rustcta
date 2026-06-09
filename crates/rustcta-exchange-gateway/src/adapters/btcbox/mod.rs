@@ -74,6 +74,25 @@ impl BtcboxGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn private_credentials(&self, operation: &'static str) -> ExchangeApiResult<(&str, &str)> {
+        if !self.config.enabled_private_rest {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        let api_key = self
+            .config
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        let api_secret = self
+            .config
+            .api_secret
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        Ok((api_key, api_secret))
+    }
 }
 
 #[async_trait]
@@ -86,7 +105,7 @@ impl GatewayAdapter for BtcboxGatewayAdapter {
             private_stream_connected: false,
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
-            message: Some("btcbox spot scan-only public REST adapter".to_string()),
+            message: Some("btcbox spot public REST plus guarded readback adapter".to_string()),
         }
     }
 }
@@ -101,7 +120,7 @@ impl ExchangeClient for BtcboxGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = self.config.private_rest_enabled();
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities =
@@ -114,8 +133,8 @@ impl ExchangeClient for BtcboxGatewayAdapter {
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
+        capabilities.supports_query_order = self.config.private_rest_enabled();
+        capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = false;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
@@ -240,20 +259,14 @@ impl ExchangeClient for BtcboxGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("btcbox.query_order.scan_only_private_rest_disabled")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        if let Some(market_type) = request.market_type {
-            self.ensure_spot(market_type)?;
-        }
-        self.unsupported("btcbox.get_open_orders.scan_only_private_rest_disabled")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(

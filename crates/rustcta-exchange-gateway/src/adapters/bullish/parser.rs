@@ -82,13 +82,12 @@ pub fn parse_orderbook_snapshot(
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
     snapshot.sequence = value
         .get("sequenceNumber")
-        .and_then(Value::as_str)
-        .and_then(|text| text.parse::<u64>().ok());
+        .and_then(value_as_u64)
+        .or_else(|| sequence_number_range_upper(value));
     snapshot.exchange_timestamp = value
         .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
-        .map(|time| time.with_timezone(&Utc));
+        .or_else(|| value.get("datetime"))
+        .and_then(value_as_datetime);
     Ok(snapshot)
 }
 
@@ -178,20 +177,41 @@ fn parse_levels(
         )
     })?;
     let mut levels = Vec::with_capacity(rows.len());
-    for row in rows {
-        let values = row.as_array().ok_or_else(|| {
-            parse_error(
-                exchange_id.clone(),
-                "Bullish order book level is not an array",
-                row,
-            )
-        })?;
-        let price = number_from_value(values.first())
-            .ok_or_else(|| parse_error(exchange_id.clone(), "Bullish level missing price", row))?;
-        let quantity = number_from_value(values.get(1)).ok_or_else(|| {
-            parse_error(exchange_id.clone(), "Bullish level missing quantity", row)
-        })?;
-        levels.push(OrderBookLevel::new(price, quantity).map_err(validation_error)?);
+    if rows.first().is_some_and(Value::is_array) {
+        for row in rows {
+            let values = row.as_array().ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "Bullish order book level is not an array",
+                    row,
+                )
+            })?;
+            let price = number_from_value(values.first()).ok_or_else(|| {
+                parse_error(exchange_id.clone(), "Bullish level missing price", row)
+            })?;
+            let quantity = number_from_value(values.get(1)).ok_or_else(|| {
+                parse_error(exchange_id.clone(), "Bullish level missing quantity", row)
+            })?;
+            levels.push(OrderBookLevel::new(price, quantity).map_err(validation_error)?);
+        }
+    } else {
+        for row in rows.chunks(2) {
+            let price = number_from_value(row.first()).ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "Bullish flattened level missing price",
+                    &Value::Array(row.to_vec()),
+                )
+            })?;
+            let quantity = number_from_value(row.get(1)).ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "Bullish flattened level missing quantity",
+                    &Value::Array(row.to_vec()),
+                )
+            })?;
+            levels.push(OrderBookLevel::new(price, quantity).map_err(validation_error)?);
+        }
     }
     if side == "bids" {
         levels.sort_by(|left, right| right.price.total_cmp(&left.price));
@@ -260,6 +280,32 @@ fn number_from_value(value: Option<&Value>) -> Option<f64> {
         Value::Number(number) => number.as_f64(),
         _ => None,
     }
+}
+
+fn value_as_u64(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_str()?.parse().ok())
+}
+
+fn sequence_number_range_upper(value: &Value) -> Option<u64> {
+    value
+        .get("sequenceNumberRange")
+        .and_then(Value::as_array)?
+        .last()
+        .and_then(value_as_u64)
+}
+
+fn value_as_datetime(value: &Value) -> Option<DateTime<Utc>> {
+    if let Some(text) = value.as_str() {
+        if let Ok(time) = DateTime::parse_from_rfc3339(text) {
+            return Some(time.with_timezone(&Utc));
+        }
+        if let Ok(timestamp_ms) = text.parse::<i64>() {
+            return DateTime::<Utc>::from_timestamp_millis(timestamp_ms);
+        }
+    }
+    value
+        .as_i64()
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
 fn precision(value: &str) -> Option<u32> {

@@ -17,6 +17,31 @@ pub struct BitbankWsSubscriptionSpec {
     pub unsubscribe_payload: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitbankPublicOrderBookWsPolicy {
+    pub snapshot_room_template: &'static str,
+    pub delta_room_template: &'static str,
+    pub normal_depth_per_side: u32,
+    pub fixed_update_interval_ms: Option<u64>,
+    pub snapshot_sequence_field: &'static str,
+    pub delta_sequence_field: &'static str,
+    pub sequence_is_contiguous: bool,
+    pub rebuild_strategy: &'static str,
+}
+
+pub fn public_order_book_ws_policy() -> BitbankPublicOrderBookWsPolicy {
+    BitbankPublicOrderBookWsPolicy {
+        snapshot_room_template: "depth_whole_{pair}",
+        delta_room_template: "depth_diff_{pair}",
+        normal_depth_per_side: 200,
+        fixed_update_interval_ms: None,
+        snapshot_sequence_field: "sequenceId",
+        delta_sequence_field: "s",
+        sequence_is_contiguous: false,
+        rebuild_strategy: "buffer depth_diff, apply updates with s > depth_whole.sequenceId, resubscribe or REST snapshot on reconnect",
+    }
+}
+
 pub fn bitbank_private_stream_capabilities(enabled: bool) -> PrivateStreamCapabilities {
     if enabled {
         PrivateStreamCapabilities {

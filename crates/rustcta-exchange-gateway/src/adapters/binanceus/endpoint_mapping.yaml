@@ -44,10 +44,12 @@ reconciliation:
 batch:
   place_orders:
     support: unsupported
-    reason: batch place order is not implemented
+    status: unsupported
+    reason: Binance.US Spot profile has no verified native batch-place endpoint that maps losslessly to shared batch_place_orders.
   cancel_orders:
     support: unsupported
-    reason: batch cancel order is not implemented
+    status: unsupported
+    reason: Binance.US Spot profile has no verified native batch-cancel endpoint that maps losslessly to shared batch_cancel_orders.
   cancel_all_orders:
     support: native
     atomicity: partial
@@ -55,7 +57,57 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: spec_only
+    runtime: project_unimplemented
+    urls:
+      raw: wss://stream.binance.us:9443/ws
+      combined: wss://stream.binance.us:9443/stream
+    subscribe:
+      method: SUBSCRIBE
+      params: [stream_name]
+      id: client_request_id
+    channels:
+      book_ticker:
+        stream: <symbol>@bookTicker
+        product: spot
+        interval_ms: realtime
+        depth: 1
+        sequence: u
+        checksum: none
+      partial_depth:
+        stream: <symbol>@depth5|10|20[@100ms]
+        product: spot
+        interval_ms: [100, 1000]
+        depth: [5, 10, 20]
+        sequence: lastUpdateId
+        checksum: none
+      diff_depth:
+        stream: <symbol>@depth[@100ms]
+        product: spot
+        interval_ms: [100, 1000]
+        depth: delta
+        sequence: [U, u]
+        checksum: none
+    order_book:
+      bbo_channel: <symbol>@bookTicker
+      channels:
+        - <symbol>@bookTicker
+        - <symbol>@depth5@100ms
+        - <symbol>@depth10@100ms
+        - <symbol>@depth20@100ms
+        - <symbol>@depth@100ms
+        - <symbol>@depth@1000ms
+      interval_ms: [100, 1000]
+      realtime_channels: [<symbol>@bookTicker]
+      depth: [1, 5, 10, 20]
+      sequence_fields: [lastUpdateId, U, u]
+      checksum: none
+      resync:
+        mode: rest_snapshot_then_delta_replay
+        endpoint_operation: get_order_book
+        snapshot_path: /api/v3/depth
+        snapshot_field: lastUpdateId
+        continuity: drop u <= lastUpdateId, apply first U <= lastUpdateId + 1 <= u, then require next U == previous u + 1
     heartbeat:
       required: true
       direction: server_ping
@@ -67,11 +119,43 @@ websocket:
     auth: listen_key
     renewal_ms: 1800000
     fallback: rest_reconciliation
+streams:
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: spot
+    channel: public_orderbook_spot
+    support: spec_only
+    runtime: project_unimplemented
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels:
+      - <symbol>@bookTicker
+      - <symbol>@depth5@100ms
+      - <symbol>@depth10@100ms
+      - <symbol>@depth20@100ms
+      - <symbol>@depth@100ms
+      - <symbol>@depth@1000ms
+    interval_ms: [100, 1000]
+    depth: [1, 5, 10, 20, delta]
+    sequence: [lastUpdateId, U, u]
+    checksum: none
+    resync:
+      endpoint_operation: get_order_book
+      mode: REST depth snapshot + buffered delta replay
 unsupported:
+  - operation: contract_product
+    reason: Binance.US API profile currently exposes spot trading only; standard futures/perpetual/options are not available in the reviewed official API surface.
   - operation: amend_order
-    reason: Binance.US documents cancel-replace semantics, not Binance.com keep-priority quantity amend.
+    reason: Binance.US documents POST /api/v3/order/cancelReplace, which cancels and submits a replacement order; this is not a lossless keep-priority amend_order mapping.
   - operation: place_order_list
-    reason: Binance.US documents legacy OCO at /api/v3/order/oco, which is not a lossless match for the shared order-list request shape used by this adapter.
+    reason: Binance.US documents legacy OCO at /api/v3/order/oco and cancel at /api/v3/orderList, but that two-leg contingency shape is not a lossless match for the shared order-list request model used by this adapter.
+  - operation: batch_place_orders
+    status: unsupported
+    reason: Binance.US regional Spot profile has no verified native batch-place route in the reviewed official docs that can map losslessly to shared batch_place_orders.
+  - operation: batch_cancel_orders
+    status: unsupported
+    reason: Binance.US regional Spot profile has no verified native batch-cancel route in the reviewed official docs that can map losslessly to shared batch_cancel_orders.
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -184,24 +268,52 @@ endpoints:
   - operation: amend_order
     transport: rest
     product: spot
-    method: UNSUPPORTED
-    path: /unsupported/binanceus/amend_order
-    auth: unsupported
+    method: POST
+    path: /api/v3/order/cancelReplace
+    auth: hmac
     credential_scopes: [trade]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
     support: unsupported
-    reason: Binance.US documents cancel-replace, not keep-priority amend.
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/binanceus/request_specs/cancel_replace_not_amend_boundary.json }
+    reason: Binance.US cancel-replace is fixture-backed as an unsupported boundary because it cancels and submits a replacement order, not a lossless keep-priority amend_order.
   - operation: place_order_list
     transport: rest
     product: spot
+    method: POST
+    path: /api/v3/order/oco
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    support: unsupported
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/binanceus/request_specs/oco_not_order_list_boundary.json }
+    reason: Binance.US legacy OCO is fixture-backed as an unsupported boundary because it does not cover the generic shared order-list request model.
+  - operation: batch_place_orders
+    transport: rest
+    product: spot
     method: UNSUPPORTED
-    path: /unsupported/binanceus/place_order_list
+    path: /unsupported/binanceus/batch_place_orders
     auth: unsupported
     credential_scopes: [trade]
     rate_limit_bucket: unsupported
     weight: 0
     request_spec_required: false
     support: unsupported
-    reason: Binance.US legacy OCO shape is not a lossless match for this adapter's shared order-list request model.
+    request_spec: { status: unsupported, fixture: tests/fixtures/exchanges/binanceus/request_specs/batch_place_orders_unsupported.json }
+    reason: Binance.US regional Spot profile has no verified native batch-place route in the reviewed official docs; keep unsupported instead of aliasing Binance.com batch-order routes.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: spot
+    method: UNSUPPORTED
+    path: /unsupported/binanceus/batch_cancel_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    request_spec: { status: unsupported, fixture: tests/fixtures/exchanges/binanceus/request_specs/batch_cancel_orders_unsupported.json }
+    reason: Binance.US regional Spot profile has no verified native batch-cancel route in the reviewed official docs; keep unsupported instead of aliasing Binance.com batch-order routes.

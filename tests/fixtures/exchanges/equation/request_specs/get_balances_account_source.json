@@ -1,0 +1,48 @@
+{
+  "exchange": "equation",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "boundary": "evm_wallet_indexer_collateral_source_only",
+  "runtime_enabled": false,
+  "chain_profile": {
+    "name": "arbitrum_one",
+    "chain_id": 42161
+  },
+  "source": {
+    "surfaces": [
+      "Equation protocol collateral contract read",
+      "Equation Arbitrum indexer account state",
+      "wallet-scoped EVM account scan"
+    ],
+    "requires": [
+      "wallet_address",
+      "collateral_or_vault_contract",
+      "block_number_or_indexer_cursor"
+    ],
+    "address_shape": "0x-prefixed Arbitrum wallet address fixture",
+    "does_not_use": [
+      "gateway_api_key",
+      "hmac_secret",
+      "centralized_exchange_private_rest"
+    ]
+  },
+  "decoded_sample": {
+    "wallet_address": "0x000000000000000000000000000000000000e9a1",
+    "collateral_asset": "USDC",
+    "collateral_balance": "875.500000",
+    "account_equity": "901.250000",
+    "block_number": 42161000
+  },
+  "runtime_gap": [
+    "contract/indexer source guard",
+    "collateral/equity parser",
+    "block freshness and reorg handling",
+    "audit-only profile reconciliation"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_wallet_address": false,
+    "live_call_allowed": false
+  }
+}

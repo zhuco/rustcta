@@ -8,9 +8,11 @@ use crate::streams::StreamSupervisorAction;
 
 use super::streams::{
     bitmex_ping_payload, bitmex_private_auth_payload, bitmex_private_subscribe_payload,
-    bitmex_public_subscribe_payload, bitmex_stream_reconnect_policy, is_bitmex_heartbeat,
-    parse_bitmex_private_stream_message, parse_bitmex_public_stream_message,
-    BitmexPrivateStreamMessage, BitmexPublicStreamMessage, BitmexWsSessionEvent,
+    bitmex_public_orderbook_ws_policies, bitmex_public_subscribe_payload,
+    bitmex_public_subscribe_payload_for_channel, bitmex_stream_reconnect_policy,
+    is_bitmex_heartbeat, parse_bitmex_private_stream_message, parse_bitmex_public_stream_message,
+    BitmexOrderBookAction, BitmexOrderBookChannel, BitmexPrivateStreamMessage,
+    BitmexPublicStreamMessage, BitmexWsSessionEvent,
 };
 use super::test_support::{context, exchange_id, perp_symbol_scope, private_config};
 use super::BitmexGatewayAdapter;
@@ -27,6 +29,27 @@ fn bitmex_public_stream_payload_should_map_order_book_and_candles() {
     assert_eq!(book["op"], "subscribe");
     assert_eq!(book["args"][0], "orderBookL2:XBTUSD");
 
+    let top25 = bitmex_public_subscribe_payload(&PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("book-top25-stream"),
+        symbol: perp_symbol_scope(),
+        kind: PublicStreamKind::OrderBookSnapshot,
+    })
+    .expect("top25 book payload");
+    assert_eq!(top25["args"][0], "orderBookL2_25:XBTUSD");
+
+    let top10 = bitmex_public_subscribe_payload_for_channel(
+        &PublicStreamSubscription {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("book-top10-stream"),
+            symbol: perp_symbol_scope(),
+            kind: PublicStreamKind::OrderBookSnapshot,
+        },
+        Some(BitmexOrderBookChannel::Top10),
+    )
+    .expect("top10 book payload");
+    assert_eq!(top10["args"][0], "orderBook10:XBTUSD");
+
     let candle = bitmex_public_subscribe_payload(&PublicStreamSubscription {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: context("candle-stream"),
@@ -37,6 +60,29 @@ fn bitmex_public_stream_payload_should_map_order_book_and_candles() {
     })
     .expect("candle payload");
     assert_eq!(candle["args"][0], "tradeBin1m:XBTUSD");
+}
+
+#[test]
+fn bitmex_public_orderbook_policy_should_document_channels_and_resync() {
+    let policies = bitmex_public_orderbook_ws_policies();
+    let top25 = policies
+        .iter()
+        .find(|policy| policy.channel == "orderBookL2_25")
+        .expect("top25 policy");
+    assert_eq!(top25.depth, "25");
+    assert_eq!(top25.push_interval_ms, Some(100));
+    assert_eq!(top25.actions, ["partial", "insert", "update", "delete"]);
+    assert_eq!(top25.key_fields, ["symbol", "id", "side"]);
+    assert_eq!(top25.checksum, "none");
+    assert!(top25.sequence.contains("none"));
+    assert!(top25.resync.contains("/api/v1/orderBook/L2"));
+
+    assert!(policies
+        .iter()
+        .any(|policy| policy.channel == "orderBook10" && policy.depth == "10"));
+    assert!(policies.iter().any(|policy| policy.channel == "orderBookL2"
+        && policy.depth == "full_l2"
+        && policy.actions.contains(&"delete")));
 }
 
 #[test]
@@ -90,6 +136,58 @@ fn bitmex_stream_parser_should_parse_public_book_and_private_order() {
             assert_eq!(order.status, rustcta_types::OrderStatus::Filled);
         }
         other => panic!("unexpected private message {other:?}"),
+    }
+}
+
+#[test]
+fn bitmex_stream_parser_fixtures_should_cover_public_orderbook_tables() {
+    let top25_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitmex/ws/public_orderbook_l2_25_partial.json"
+    ))
+    .expect("top25 fixture");
+    let top25 =
+        parse_bitmex_public_stream_message(&exchange_id(), perp_symbol_scope(), &top25_fixture)
+            .expect("top25 stream");
+    match top25 {
+        BitmexPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.bids[0].price, 100.5);
+            assert_eq!(book.asks[0].quantity, 800.0);
+            assert!(book.exchange_timestamp.is_some());
+        }
+        other => panic!("unexpected top25 message {other:?}"),
+    }
+
+    let top10_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitmex/ws/public_orderbook10.json"
+    ))
+    .expect("top10 fixture");
+    let top10 =
+        parse_bitmex_public_stream_message(&exchange_id(), perp_symbol_scope(), &top10_fixture)
+            .expect("top10 stream");
+    match top10 {
+        BitmexPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.bids.len(), 2);
+            assert_eq!(book.bids[0].price, 100.5);
+            assert_eq!(book.asks[0].price, 101.5);
+        }
+        other => panic!("unexpected top10 message {other:?}"),
+    }
+
+    let delete_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitmex/ws/public_orderbook_l2_delete.json"
+    ))
+    .expect("delete fixture");
+    let delete =
+        parse_bitmex_public_stream_message(&exchange_id(), perp_symbol_scope(), &delete_fixture)
+            .expect("delete stream");
+    match delete {
+        BitmexPublicStreamMessage::OrderBookTableDiff(diff) => {
+            assert_eq!(diff.table, "orderBookL2");
+            assert_eq!(diff.action, BitmexOrderBookAction::Delete);
+            assert_eq!(diff.key_fields, ["symbol", "id", "side"]);
+            assert_eq!(diff.rows[0]["id"], 8799999950_i64);
+        }
+        other => panic!("unexpected delete message {other:?}"),
     }
 }
 
@@ -252,7 +350,7 @@ fn bitmex_ws_sessions_should_build_runtime_requests_and_events() {
         .expect("public session");
     assert_eq!(
         public_session.initial_requests()[0]["args"][0],
-        "orderBookL2:XBTUSD"
+        "orderBookL2_25:XBTUSD"
     );
 
     let now = chrono::Utc::now();

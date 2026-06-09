@@ -4,12 +4,13 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, OpenOrdersRequest, OpenOrdersResponse, OrderState, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, QueryOrderRequest, QueryOrderResponse,
-    RecentFillsRequest, RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, OpenOrdersRequest,
+    OpenOrdersResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
+    RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::{json, Value};
@@ -154,6 +155,37 @@ impl DeltaGatewayAdapter {
             ),
             order,
             cancelled: true,
+        })
+    }
+
+    pub(super) async fn amend_order_impl(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
+        self.ensure_private_rest("delta.amend_order")?;
+        let body = delta_amend_order_body(&request)?;
+        let value = self
+            .rest
+            .send_signed_put("delta.amend_order", "/v2/orders", &body)
+            .await?;
+        let order = parse_order_state(
+            &self.exchange_id,
+            Some(&request.symbol),
+            response_result(&value),
+        )
+        .unwrap_or_else(|_| {
+            order_state_from_amend_ack(&self.exchange_id, &request, response_result(&value))
+        });
+        Ok(AmendOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            order,
         })
     }
 
@@ -470,6 +502,30 @@ fn delta_cancel_order_body(request: &CancelOrderRequest) -> ExchangeApiResult<Va
     Ok(body)
 }
 
+fn delta_amend_order_body(request: &AmendOrderRequest) -> ExchangeApiResult<Value> {
+    if request.exchange_order_id.is_none() && request.client_order_id.is_none() {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "delta.amend_order requires exchange_order_id or client_order_id".to_string(),
+        });
+    }
+    if request.new_client_order_id.is_some() {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "delta.amend_order_new_client_order_id",
+        });
+    }
+    let mut body = json!({
+        "product_symbol": normalize_delta_symbol(&request.symbol)?,
+        "size": non_empty("new_quantity", &request.new_quantity)?,
+    });
+    if let Some(order_id) = request.exchange_order_id.as_deref() {
+        body["id"] = Value::String(non_empty("exchange_order_id", order_id)?);
+    }
+    if let Some(client_order_id) = request.client_order_id.as_deref() {
+        body["client_order_id"] = Value::String(non_empty("client_order_id", client_order_id)?);
+    }
+    Ok(body)
+}
+
 fn order_state_from_place_ack(
     exchange_id: &rustcta_types::ExchangeId,
     request: &PlaceOrderRequest,
@@ -499,6 +555,45 @@ fn order_state_from_place_ack(
         reduce_only: request.reduce_only,
         post_only: request.post_only,
         created_at: Some(Utc::now()),
+        updated_at: Utc::now(),
+    }
+}
+
+fn order_state_from_amend_ack(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &AmendOrderRequest,
+    value: &Value,
+) -> OrderState {
+    OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: request.symbol.market_type,
+        canonical_symbol: request.symbol.canonical_symbol.clone(),
+        exchange_symbol: request.symbol.exchange_symbol.clone(),
+        client_order_id: request
+            .new_client_order_id
+            .clone()
+            .or_else(|| request.client_order_id.clone()),
+        exchange_order_id: value
+            .get("id")
+            .and_then(|id| {
+                id.as_str()
+                    .map(str::to_string)
+                    .or_else(|| id.as_u64().map(|id| id.to_string()))
+            })
+            .or_else(|| request.exchange_order_id.clone()),
+        side: OrderSide::Buy,
+        position_side: Some(rustcta_types::PositionSide::Net),
+        order_type: OrderType::Limit,
+        time_in_force: None,
+        status: OrderStatus::New,
+        quantity: request.new_quantity.clone(),
+        price: None,
+        filled_quantity: "0".to_string(),
+        average_fill_price: None,
+        reduce_only: false,
+        post_only: false,
+        created_at: None,
         updated_at: Utc::now(),
     }
 }

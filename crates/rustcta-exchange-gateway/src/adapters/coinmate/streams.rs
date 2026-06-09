@@ -16,6 +16,29 @@ const COINMATE_WS_PING_INTERVAL_MS: i64 = 30_000;
 const COINMATE_WS_PONG_TIMEOUT_MS: i64 = 45_000;
 const COINMATE_WS_STALE_MESSAGE_MS: i64 = 60_000;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoinmatePublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub channel_template: &'static str,
+    pub interval_ms: Option<u64>,
+    pub depth: Option<u32>,
+    pub sequence: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub resync: &'static str,
+}
+
+pub fn coinmate_public_order_book_ws_policy() -> CoinmatePublicOrderBookWsPolicy {
+    CoinmatePublicOrderBookWsPolicy {
+        url: "wss://coinmate.io/api/websocket",
+        channel_template: "order_book-{PAIR}",
+        interval_ms: None,
+        depth: None,
+        sequence: None,
+        checksum: None,
+        resync: "reconnect/resubscribe and rebuild from REST /orderBook because no official sequence or checksum is documented",
+    }
+}
+
 impl CoinmateGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,

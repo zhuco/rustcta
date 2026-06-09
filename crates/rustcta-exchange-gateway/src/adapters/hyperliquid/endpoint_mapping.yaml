@@ -36,6 +36,16 @@ websocket:
   public:
     support: native
     channels: [l2Book, trades, bbo, candle, allMids, activeAssetCtx]
+    order_book:
+      channels: [l2Book, bbo]
+      snapshot: POST /info type=l2Book
+      snapshot_depth: 20 levels per side
+      update_mode: event-driven; official docs do not publish a fixed millisecond interval.
+      push_interval_ms: null
+      sequence_fields: []
+      sequence_policy: no traditional sequence; use stale-book detection and REST l2Book resync.
+      checksum: unsupported
+      resync_policy: Rebuild from REST l2Book after disconnect, stale book, or suspicious update ordering.
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 90000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
@@ -43,7 +53,39 @@ websocket:
     channels: [orderUpdates, userFills, userEvents, userFundings, userNonFundingLedgerUpdates]
     auth_renewal: { mode: address_subscription }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Hyperliquid spotMeta, spot asset contexts, and HIP-1 spot order books exist, but this adapter scope is USDC-settled perpetual metadata/book/account/order lifecycle only; remaining Spot runtime work is spotMeta asset-id mapping, HIP-1 spot l2Book public parsers, spot order/cancel action encoding, open-order/fill/balance private readback, and asset-scope reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/hyperliquid/request_specs/product_line_source_boundary.json
+    current_scope: "USDC-settled perpetual metadata, book, account, and order lifecycle."
+    runtime_gap: "spotMeta/spot asset id mapping, HIP-1 spot order book parser, spot order action encoding, and spot account/fill reconciliation are not wired."
+    required_endpoints: [info_spot_meta, info_spot_meta_and_asset_ctxs, info_l2_book_spot, exchange_spot_order, exchange_cancel_spot, info_open_orders_spot, info_user_fills_spot]
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: protocol_fee_schedule
+    source_fixture: tests/fixtures/exchanges/hyperliquid/request_specs/get_fees_source_boundary.json
+    reason: "Hyperliquid official fee schedule/user tier source is recorded as an offline protocol source; shared account-tier get_fees runtime remains project-unimplemented pending user fee tier readback, asset scope, and discount guard."
 endpoints:
+  - operation: get_fees
+    product: mixed
+    market_types: [perpetual, spot]
+    transport: rest
+    method: GET
+    path: /trading/fees
+    auth: none
+    rate_limit_bucket: hyperliquid_info
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: default fee schedule/protocol fee tier source is fixture-backed only; production needs user-tier readback or explicit override."
+    official_doc: https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees
+    request_spec:
+      fixture: tests/fixtures/exchanges/hyperliquid/request_specs/get_fees_source_boundary.json
   - operation: symbol_rules
     product: perpetual
     market_types: [perpetual]

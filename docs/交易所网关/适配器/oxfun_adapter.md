@@ -59,16 +59,20 @@ Sanitized vectors:
   live trading, private streams, or public stream runtime on either environment.
 
 P9 official verification adds the missing structure: `depthUpdate:<marketCode>`
-has a 100ms channel update frequency. Clients subscribe with
+is a 100ms depth channel. Clients subscribe with
 `{"op":"subscribe","args":["depthUpdate:BTC-USD-SWAP-LIN"]}`, wait for the
 `depthUpdate` snapshot, then apply `depthUpdate-diff` absolute-quantity updates
 by increasing `seqNum`; payloads include `checksum`.
+`endpoint_mapping.yaml` records the channel, 100ms cadence, snapshot+diff model,
+`seqNum`, checksum support, and the resubscribe-on-gap boundary.
 
 ## Official Position Detail
 
-仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。当前 adapter 仅保留离线 spec/parser；private account/orders/positions/funding 仍未验证，`get_positions` 保持 unsupported。
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。OX.FUN private account/positions/funding 材料提供 position readback 线索，但 stable positions endpoint、签名权限、分页/字段、parser 和 live auth 都未完成 runtime 审计。
 
-写法：`交易所不支持当前仓位接口 runtime`。只有在官方 private positions endpoint、签名权限、分页/字段和 live auth 全部验证后，才重新核验是否补 runtime。
+写法：`get_positions` 是 `项目未实现/离线边界`，绑定 `tests/fixtures/exchanges/oxfun/request_specs/get_positions_account_source.json`，矩阵为 `get_positions=离线`。只有在官方 private positions endpoint、read-only auth、parser 和 REST/private-WS reconciliation 全部验证后，才提升 runtime。
+
+账户/余额接口写 `项目未实现/离线边界`：private account/funding 材料提供账户状态线索，`endpoint_mapping.yaml` 已将 `get_balances` 写成 `source://oxfun/private-account-equity` spec-only source boundary，并绑定 `tests/fixtures/exchanges/oxfun/request_specs/get_balances_account_source.json`。矩阵应为 `get_balances=离线`；balances/account equity readback 尚未接入 shared runtime、parser、auth smoke 或 reconciliation。
 
 ## Capability Boundary
 
@@ -76,7 +80,8 @@ Unsupported or spec-only:
 
 - Private REST account/orders/positions/funding: unverified.
 - Private WebSocket runtime: unverified; request-spec and parser fixtures only.
-- Native batch place/cancel: documented over WebSocket, but runtime disabled.
+- Native batch place: documented over WebSocket and pinned by `ws_batch_place_orders.json`; `capabilities_v2` exposes the native/partial batch boundary and parser fixtures cover single and partial `placeorders` acks with reconciliation plans. The offline reconciliation report is `tests/fixtures/exchanges/oxfun/ws/private_batch_place_reconciliation_report.json`. Runtime stays disabled because the adapter lacks authenticated private WS session lifecycle, request tag/order-id reconciliation, dry-run guard, and REST/private-stream readback after WS writes.
+- Native batch cancel: not promoted; current fixtures only cover single cancel order.
 - Dead-man switch, advanced order lists, leverage/margin/position-mode mutation:
   not mapped.
 - Options contract metadata is documented only as product scope; no shared option
@@ -100,3 +105,7 @@ cargo test -p rustcta-exchange-gateway oxfun --lib --message-format short
 ```
 
 Do not run `cargo build` or live trading commands for this adapter.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：private account/orders/funding 仍未验证，未核到稳定 fee endpoint。

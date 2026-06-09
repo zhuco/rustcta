@@ -2,11 +2,15 @@
 
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
+    BatchItemResult, BatchOperationReport, BatchPlaceOrdersRequest, BatchPlaceOrdersResponse,
+    ExchangeApiError, ExchangeApiResult, OrderState, ReconcilePlan, ReconcileTrigger,
+    ResponseMetadata, RetryReconcilePolicy, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    AccountId, CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol,
+    Fill, FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, TenantId,
 };
 use serde_json::Value;
 
@@ -205,11 +209,521 @@ pub fn parse_grvt_book_frame_meta(payload: &Value) -> GrvtBookFrameMeta {
     }
 }
 
+pub fn parse_grvt_amend_order_ack(
+    exchange_id: &ExchangeId,
+    request: &AmendOrderRequest,
+    value: &Value,
+) -> ExchangeApiResult<AmendOrderResponse> {
+    ensure_success(exchange_id, value)?;
+    let order = parse_grvt_order_state(
+        exchange_id,
+        &request.symbol,
+        first_order_like(value)?,
+        Some(GrvtOrderFallback::Amend(request)),
+    )?;
+    Ok(AmendOrderResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata: ResponseMetadata::new(exchange_id.clone(), Utc::now()),
+        order,
+    })
+}
+
+pub fn parse_grvt_batch_place_orders_ack(
+    exchange_id: &ExchangeId,
+    request: &BatchPlaceOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+    ensure_success(exchange_id, value)?;
+    let items = batch_items(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "GRVT bulk create ack missing item results",
+            value,
+        )
+    })?;
+
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.orders.len());
+    for (index, order_request) in request.orders.iter().enumerate() {
+        let Some(item) = items.get(index) else {
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                missing_item_error(exchange_id, "GRVT bulk create response omitted item"),
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "GRVT bulk create omitted an item; query/open-orders reconciliation is required before replay",
+                )),
+            ));
+            continue;
+        };
+
+        if !item_success(item) {
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                string_or_number(item.get("order_id")).or_else(|| string_or_number(item.get("id"))),
+                item_error(exchange_id, item, "GRVT bulk create item failed"),
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchPlacePartialFailure,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "GRVT bulk create item failed or was ambiguous; readback reconciliation is required",
+                )),
+            ));
+            continue;
+        }
+
+        let order = parse_grvt_order_state(
+            exchange_id,
+            &order_request.symbol,
+            item,
+            Some(GrvtOrderFallback::Place(order_request)),
+        )?;
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+
+    Ok(BatchPlaceOrdersResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata: ResponseMetadata::new(exchange_id.clone(), Utc::now()),
+        orders,
+        report: Some(BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.orders.len(),
+            results,
+        }),
+    })
+}
+
+pub fn parse_grvt_batch_cancel_orders_ack(
+    exchange_id: &ExchangeId,
+    request: &BatchCancelOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+    ensure_success(exchange_id, value)?;
+    let items = batch_items(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "GRVT bulk cancel ack missing item results",
+            value,
+        )
+    })?;
+
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.cancels.len());
+    for (index, cancel_request) in request.cancels.iter().enumerate() {
+        let Some(item) = items.get(index) else {
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                missing_item_error(exchange_id, "GRVT bulk cancel response omitted item"),
+                Some(ReconcilePlan::for_cancel_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    cancel_request,
+                    RetryReconcilePolicy::default(),
+                    "GRVT bulk cancel omitted an item; query/open-orders reconciliation is required",
+                )),
+            ));
+            continue;
+        };
+
+        if !item_success(item) {
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                string_or_number(item.get("order_id"))
+                    .or_else(|| string_or_number(item.get("id")))
+                    .or_else(|| cancel_request.exchange_order_id.clone()),
+                item_error(exchange_id, item, "GRVT bulk cancel item failed"),
+                Some(ReconcilePlan::for_cancel_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchCancelPartialFailure,
+                    cancel_request,
+                    RetryReconcilePolicy::default(),
+                    "GRVT bulk cancel item failed or was ambiguous; readback reconciliation is required",
+                )),
+            ));
+            continue;
+        }
+
+        let order = parse_grvt_order_state(
+            exchange_id,
+            &cancel_request.symbol,
+            item,
+            Some(GrvtOrderFallback::Cancel(cancel_request)),
+        )?;
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+
+    Ok(BatchCancelOrdersResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata: ResponseMetadata::new(exchange_id.clone(), Utc::now()),
+        cancelled_count: orders.len() as u32,
+        orders,
+        report: Some(BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.cancels.len(),
+            results,
+        }),
+    })
+}
+
+pub fn parse_grvt_single_order(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    ensure_success(exchange_id, value)?;
+    parse_grvt_order_state(exchange_id, symbol, first_order_like(value)?, None)
+}
+
+pub fn parse_grvt_orders(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    ensure_success(exchange_id, value)?;
+    batch_items(value)
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "GRVT orders response missing array",
+                value,
+            )
+        })?
+        .iter()
+        .map(|order| parse_grvt_order_state(exchange_id, symbol, order, None))
+        .collect()
+}
+
+pub fn parse_grvt_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    ensure_success(exchange_id, value)?;
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "grvt get_recent_fills requires canonical_symbol".to_string(),
+            })?;
+    fill_items(value)
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "GRVT fills response missing fills array",
+                value,
+            )
+        })?
+        .iter()
+        .map(|fill| {
+            let side = fill
+                .get("side")
+                .and_then(Value::as_str)
+                .and_then(parse_side)
+                .ok_or_else(|| parse_error(exchange_id.clone(), "GRVT fill missing side", fill))?;
+            let price = string_or_number(
+                fill.get("price")
+                    .or_else(|| fill.get("fill_price"))
+                    .or_else(|| fill.get("execution_price")),
+            )
+            .and_then(|value| value.parse::<f64>().ok())
+            .ok_or_else(|| parse_error(exchange_id.clone(), "GRVT fill missing price", fill))?;
+            let quantity = string_or_number(
+                fill.get("size")
+                    .or_else(|| fill.get("quantity"))
+                    .or_else(|| fill.get("fill_size"))
+                    .or_else(|| fill.get("executed_size")),
+            )
+            .and_then(|value| value.parse::<f64>().ok())
+            .ok_or_else(|| parse_error(exchange_id.clone(), "GRVT fill missing quantity", fill))?;
+            let filled_at = fill
+                .get("created_at")
+                .or_else(|| fill.get("updated_at"))
+                .or_else(|| fill.get("timestamp"))
+                .or_else(|| fill.get("time"))
+                .and_then(timestamp_any_value)
+                .unwrap_or_else(Utc::now);
+            Ok(Fill {
+                schema_version: rustcta_types::SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: symbol.market_type,
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: string_or_number(fill.get("order_id").or_else(|| fill.get("id"))),
+                client_order_id: string_or_number(
+                    fill.get("client_order_id")
+                        .or_else(|| fill.get("clientOrderId")),
+                ),
+                fill_id: string_or_number(
+                    fill.get("trade_id")
+                        .or_else(|| fill.get("fill_id"))
+                        .or_else(|| fill.get("execution_id")),
+                ),
+                side,
+                position_side: PositionSide::None,
+                status: FillStatus::Confirmed,
+                liquidity_role: fill
+                    .get("liquidity")
+                    .or_else(|| fill.get("liquidity_role"))
+                    .and_then(Value::as_str)
+                    .and_then(parse_liquidity_role)
+                    .unwrap_or(LiquidityRole::Unknown),
+                price,
+                quantity,
+                quote_quantity: string_or_number(
+                    fill.get("notional")
+                        .or_else(|| fill.get("quote_quantity"))
+                        .or_else(|| fill.get("quote_qty")),
+                )
+                .and_then(|value| value.parse::<f64>().ok()),
+                fee_asset: string_or_number(
+                    fill.get("fee_asset").or_else(|| fill.get("fee_currency")),
+                ),
+                fee_amount: string_or_number(fill.get("fee").or_else(|| fill.get("fee_amount")))
+                    .and_then(|value| value.parse::<f64>().ok()),
+                fee_rate: string_or_number(fill.get("fee_rate"))
+                    .and_then(|value| value.parse::<f64>().ok()),
+                realized_pnl: string_or_number(fill.get("realized_pnl"))
+                    .and_then(|value| value.parse::<f64>().ok()),
+                filled_at,
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
+enum GrvtOrderFallback<'a> {
+    Place(&'a rustcta_exchange_api::PlaceOrderRequest),
+    Amend(&'a AmendOrderRequest),
+    Cancel(&'a rustcta_exchange_api::CancelOrderRequest),
+}
+
+fn parse_grvt_order_state(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+    fallback: Option<GrvtOrderFallback<'_>>,
+) -> ExchangeApiResult<OrderState> {
+    let side = value
+        .get("side")
+        .and_then(Value::as_str)
+        .and_then(parse_side)
+        .or_else(|| match fallback {
+            Some(GrvtOrderFallback::Place(request)) => Some(request.side),
+            _ => None,
+        })
+        .ok_or_else(|| parse_error(exchange_id.clone(), "GRVT order ack missing side", value))?;
+    let order_type = value
+        .get("order_type")
+        .or_else(|| value.get("type"))
+        .and_then(Value::as_str)
+        .and_then(parse_order_type)
+        .or_else(|| match fallback {
+            Some(GrvtOrderFallback::Place(request)) => Some(request.order_type),
+            _ => None,
+        })
+        .unwrap_or(OrderType::Limit);
+    let quantity = string_or_number(value.get("size"))
+        .or_else(|| string_or_number(value.get("quantity")))
+        .or_else(|| string_or_number(value.get("order_size")))
+        .or_else(|| string_or_number(value.get("new_size")))
+        .or_else(|| match fallback {
+            Some(GrvtOrderFallback::Place(request)) => Some(request.quantity.clone()),
+            Some(GrvtOrderFallback::Amend(request)) => Some(request.new_quantity.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| parse_error(exchange_id.clone(), "GRVT order ack missing size", value))?;
+    let status = value
+        .get("status")
+        .or_else(|| value.get("order_status"))
+        .and_then(Value::as_str)
+        .and_then(parse_order_status)
+        .unwrap_or_else(|| {
+            if matches!(fallback, Some(GrvtOrderFallback::Cancel(_))) {
+                OrderStatus::Cancelled
+            } else {
+                OrderStatus::Open
+            }
+        });
+    let client_order_id = string_or_number(value.get("client_order_id"))
+        .or_else(|| string_or_number(value.get("clientOrderId")))
+        .or_else(|| match fallback {
+            Some(GrvtOrderFallback::Place(request)) => request.client_order_id.clone(),
+            Some(GrvtOrderFallback::Amend(request)) => request
+                .new_client_order_id
+                .clone()
+                .or_else(|| request.client_order_id.clone()),
+            Some(GrvtOrderFallback::Cancel(request)) => request.client_order_id.clone(),
+            None => None,
+        });
+    let exchange_order_id = string_or_number(value.get("order_id"))
+        .or_else(|| string_or_number(value.get("id")))
+        .or_else(|| match fallback {
+            Some(GrvtOrderFallback::Amend(request)) => request.exchange_order_id.clone(),
+            Some(GrvtOrderFallback::Cancel(request)) => request.exchange_order_id.clone(),
+            _ => None,
+        });
+
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: symbol.market_type,
+        canonical_symbol: symbol.canonical_symbol.clone(),
+        exchange_symbol: symbol.exchange_symbol.clone(),
+        client_order_id,
+        exchange_order_id,
+        side,
+        position_side: Some(PositionSide::None),
+        order_type,
+        time_in_force: None,
+        status,
+        quantity,
+        price: string_or_number(value.get("limit_price"))
+            .or_else(|| string_or_number(value.get("price")))
+            .or_else(|| string_or_number(value.get("new_limit_price")))
+            .or_else(|| match fallback {
+                Some(GrvtOrderFallback::Place(request)) => request.price.clone(),
+                _ => None,
+            }),
+        filled_quantity: string_or_number(value.get("filled_size"))
+            .or_else(|| string_or_number(value.get("filled_quantity")))
+            .or_else(|| string_or_number(value.get("executed_size")))
+            .unwrap_or_else(|| "0".to_string()),
+        average_fill_price: string_or_number(value.get("average_fill_price"))
+            .or_else(|| string_or_number(value.get("avg_fill_price"))),
+        reduce_only: value
+            .get("reduce_only")
+            .and_then(Value::as_bool)
+            .or_else(|| match fallback {
+                Some(GrvtOrderFallback::Place(request)) => Some(request.reduce_only),
+                _ => None,
+            })
+            .unwrap_or(false),
+        post_only: value
+            .get("post_only")
+            .and_then(Value::as_bool)
+            .or_else(|| match fallback {
+                Some(GrvtOrderFallback::Place(request)) => Some(request.post_only),
+                _ => None,
+            })
+            .unwrap_or(false),
+        created_at: value.get("created_at").and_then(timestamp_any_value),
+        updated_at: value
+            .get("updated_at")
+            .and_then(timestamp_any_value)
+            .unwrap_or_else(Utc::now),
+    })
+}
+
 fn data_payload(value: &Value) -> &Value {
     value
         .get("result")
         .or_else(|| value.get("data"))
         .unwrap_or(value)
+}
+
+fn first_order_like(value: &Value) -> ExchangeApiResult<&Value> {
+    let data = data_payload(value);
+    Ok(data
+        .get("order")
+        .or_else(|| data.get("result"))
+        .or_else(|| data.as_array().and_then(|items| items.first()))
+        .unwrap_or(data))
+}
+
+fn batch_items(value: &Value) -> Option<&[Value]> {
+    let data = data_payload(value);
+    data.as_array()
+        .or_else(|| data.get("results").and_then(Value::as_array))
+        .or_else(|| data.get("orders").and_then(Value::as_array))
+        .or_else(|| data.get("items").and_then(Value::as_array))
+        .map(Vec::as_slice)
+}
+
+fn fill_items(value: &Value) -> Option<&[Value]> {
+    let data = data_payload(value);
+    data.as_array()
+        .or_else(|| data.get("fills").and_then(Value::as_array))
+        .or_else(|| data.get("trades").and_then(Value::as_array))
+        .or_else(|| data.get("items").and_then(Value::as_array))
+        .or_else(|| data.get("results").and_then(Value::as_array))
+        .map(Vec::as_slice)
+}
+
+fn ensure_success(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<()> {
+    if value.get("success").and_then(Value::as_bool) == Some(false)
+        || value
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status.to_ascii_uppercase().as_str(), "ERROR" | "FAIL"))
+    {
+        return Err(parse_error(
+            exchange_id.clone(),
+            "GRVT response reported failure",
+            value,
+        ));
+    }
+    Ok(())
+}
+
+fn item_success(value: &Value) -> bool {
+    value
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            value
+                .get("status")
+                .and_then(Value::as_str)
+                .map(|status| {
+                    !matches!(
+                        status.to_ascii_uppercase().as_str(),
+                        "ERROR" | "FAILED" | "REJECTED"
+                    )
+                })
+                .unwrap_or(true)
+        })
+}
+
+fn item_error(exchange_id: &ExchangeId, value: &Value, message: &str) -> ExchangeError {
+    let mut error = ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::Unknown,
+        value
+            .get("message")
+            .or_else(|| value.get("error"))
+            .and_then(Value::as_str)
+            .unwrap_or(message),
+        Utc::now(),
+    );
+    error.raw = Some(value.clone());
+    error
+}
+
+fn missing_item_error(exchange_id: &ExchangeId, message: &str) -> ExchangeError {
+    ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::Unknown,
+        message,
+        Utc::now(),
+    )
 }
 
 fn data_items(value: &Value) -> Option<&[Value]> {
@@ -296,6 +810,57 @@ fn decimal_precision(value: String) -> Option<u32> {
         .split_once('.')
         .map(|(_, fraction)| fraction.len() as u32)
         .or(Some(0))
+}
+
+fn parse_side(value: &str) -> Option<OrderSide> {
+    match value.to_ascii_uppercase().as_str() {
+        "BUY" | "BID" => Some(OrderSide::Buy),
+        "SELL" | "ASK" => Some(OrderSide::Sell),
+        _ => None,
+    }
+}
+
+fn parse_order_type(value: &str) -> Option<OrderType> {
+    match value.to_ascii_uppercase().as_str() {
+        "MARKET" => Some(OrderType::Market),
+        "LIMIT" | "POST_ONLY" | "POSTONLY" => Some(OrderType::Limit),
+        _ => None,
+    }
+}
+
+fn parse_order_status(value: &str) -> Option<OrderStatus> {
+    match value.to_ascii_uppercase().as_str() {
+        "NEW" | "PENDING" => Some(OrderStatus::New),
+        "OPEN" | "ACTIVE" | "WORKING" => Some(OrderStatus::Open),
+        "PARTIALLY_FILLED" | "PARTIAL_FILL" | "PARTIAL" => Some(OrderStatus::PartiallyFilled),
+        "FILLED" | "DONE" => Some(OrderStatus::Filled),
+        "PENDING_CANCEL" => Some(OrderStatus::PendingCancel),
+        "CANCELLED" | "CANCELED" => Some(OrderStatus::Cancelled),
+        "REJECTED" | "FAILED" => Some(OrderStatus::Rejected),
+        "EXPIRED" => Some(OrderStatus::Expired),
+        _ => None,
+    }
+}
+
+fn parse_liquidity_role(value: &str) -> Option<LiquidityRole> {
+    match value.to_ascii_uppercase().as_str() {
+        "MAKER" | "M" => Some(LiquidityRole::Maker),
+        "TAKER" | "T" => Some(LiquidityRole::Taker),
+        _ => None,
+    }
+}
+
+fn timestamp_any_value(value: &Value) -> Option<DateTime<Utc>> {
+    value
+        .as_str()
+        .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+        .map(|timestamp| timestamp.with_timezone(&Utc))
+        .or_else(|| {
+            value.as_i64().and_then(|timestamp| match timestamp {
+                millis if millis > 10_000_000_000 => DateTime::from_timestamp_millis(millis),
+                seconds => DateTime::from_timestamp(seconds, 0),
+            })
+        })
 }
 
 fn parse_error(

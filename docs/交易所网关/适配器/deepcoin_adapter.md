@@ -54,7 +54,8 @@ The adapter signs GET requests with the sorted query string included in
 | fees | `GET /deepcoin/account/trade-fee` | Spot maker/taker and USDT swap makerU/takerU |
 | place order | `POST /deepcoin/trade/order` | market/limit/post-only/IOC, client order id, quote-sized Spot market order, reduce-only for perp |
 | cancel order | `POST /deepcoin/trade/cancel-order` | Requires exchange order id |
-| amend order | `POST /deepcoin/trade/replace-order` | Exchange-order-id quantity amend |
+| amend order | `POST /deepcoin/trade/replace-order` | Native single-order replace by exchange order id; non-batch, atomic per request |
+| order list | Unsupported | OCO/OTO order lists are not exposed through the current standard gateway trait |
 | batch place | `POST /deepcoin/trade/batch-orders` | Native batch place, maximum 5 orders |
 | batch cancel | `POST /deepcoin/trade/batch-cancel-order` | Native batch cancel by exchange order ids |
 | cancel all | `POST /deepcoin/trade/swap/cancel-all` | Perpetual-only; Spot cancel-all returns `Unsupported` |
@@ -69,7 +70,7 @@ The adapter signs GET requests with the sorted query string included in
 
 官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。DeepCoin public WS V2 的订单簿 topic 是 `book25`，官方描述为 25Level Incremental Market Data；Spot 和 swap public WS URL 分开。
 
-订阅 payload 使用 V2 `Action/Symbol/LocalNo/ResumeNo/Topic` 结构。官方未给固定推流毫秒，也未见 checksum；`LocalNo`/`ResumeNo` 应作为会话连续性字段记录。断线或 gap 时用 REST `GET /deepcoin/market/books`，`sz` 1..400，重建 snapshot。
+订阅 payload 使用 V2 `Action/Symbol/LocalNo/ResumeNo/Topic` 结构。`book25` 是 25 档增量订单簿；官方未给固定推流毫秒，也未见 checksum，mapping 记录为 no fixed ms；`LocalNo`/`ResumeNo` 应作为会话连续性字段记录。断线或 gap 时用 REST `GET /deepcoin/market/books`，`sz` 1..400，重建 snapshot。
 
 ## Validation
 

@@ -14,6 +14,37 @@ use super::private_parser::{parse_balances, parse_fill, parse_order_state, parse
 use super::OrangeXGatewayAdapter;
 use crate::adapters::ensure_exchange_api_schema;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrangeXPublicOrderBookWsPolicy {
+    pub support: &'static str,
+    pub book_raw_channel: &'static str,
+    pub book_100ms_channel: &'static str,
+    pub fastest_interval_ms: Option<u64>,
+    pub depth: &'static str,
+    pub sequence_fields: &'static [&'static str],
+    pub checksum: Option<&'static str>,
+    pub reason: &'static str,
+    pub resync: &'static str,
+}
+
+pub fn orangex_public_order_book_ws_policy() -> OrangeXPublicOrderBookWsPolicy {
+    OrangeXPublicOrderBookWsPolicy {
+        support: "spec_only",
+        book_raw_channel: "book.{instrument}.raw",
+        book_100ms_channel: "book.{instrument}.100ms",
+        fastest_interval_ms: Some(100),
+        depth: "full book delta stream; no verified depth parameter",
+        sequence_fields: &["change_id", "prev_change_id"],
+        checksum: None,
+        reason: "OrangeX published a WebSocket API deprecation notice; helpers stay spec/parser coverage and REST snapshot remains the production fallback",
+        resync: "fetch REST /public/get_order_book on connect/reconnect, discard stale deltas by change_id, require prev_change_id to match the local change_id, and rebuild on gap/regression",
+    }
+}
+
+pub fn orangex_book_change_is_contiguous(previous: Option<u64>, prev_change_id: u64) -> bool {
+    previous.is_none_or(|previous| previous == prev_change_id)
+}
+
 impl OrangeXGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,

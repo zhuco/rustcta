@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::streams::{
     kucoin_bullet_token_lease, kucoin_pong_response, kucoin_private_subscription_spec,
-    kucoin_public_subscription_spec,
+    kucoin_public_subscription_spec, parse_kucoin_obu_delta, parse_kucoin_obu_snapshot,
 };
 use super::test_support::{context, exchange_id, symbol_scope};
 use super::{KuCoinGatewayAdapter, KuCoinGatewayConfig};
@@ -25,13 +25,40 @@ fn kucoin_public_stream_spec_should_normalize_symbol_and_ping_pong() {
     let spec = kucoin_public_subscription_spec(&subscription, "req-1", None).expect("spec");
 
     assert_eq!(spec.url, "wss://ws-api-spot.kucoin.com/endpoint");
-    assert_eq!(spec.topic, "/market/level2:BTC-USDT");
+    assert_eq!(spec.topic, "obu:BTC-USDT:increment");
+    assert_eq!(spec.subscribe_payload["channel"], "obu");
+    assert_eq!(spec.subscribe_payload["symbol"], "BTC-USDT");
+    assert_eq!(spec.subscribe_payload["depth"], "increment");
     assert_eq!(spec.subscribe_payload["type"], "subscribe");
     assert_eq!(spec.subscribe_payload["privateChannel"], false);
     assert_eq!(
         kucoin_pong_response(&json!({"type": "ping", "id": "42"})).expect("pong")["id"],
         "42"
     );
+}
+
+#[test]
+fn kucoin_public_stream_parser_should_read_obu_sequence_and_depth() {
+    let delta_fixture = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/kucoin/ws/obu_increment.json"
+    ))
+    .expect("delta fixture");
+    let delta =
+        parse_kucoin_obu_delta(&exchange_id(), &symbol_scope(), &delta_fixture).expect("delta");
+    assert_eq!(delta.first_sequence, Some(101));
+    assert_eq!(delta.last_sequence, Some(102));
+    assert_eq!(delta.bids[0].price, 65000.0);
+    assert_eq!(delta.asks[0].quantity, 0.8);
+
+    let snapshot_fixture = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/kucoin/ws/obu_depth50_snapshot.json"
+    ))
+    .expect("snapshot fixture");
+    let snapshot = parse_kucoin_obu_snapshot(&exchange_id(), symbol_scope(), &snapshot_fixture)
+        .expect("snapshot");
+    assert_eq!(snapshot.sequence, Some(102));
+    assert_eq!(snapshot.bids.len(), 2);
+    assert_eq!(snapshot.best_ask().unwrap().price, 65010.0);
 }
 
 #[test]
@@ -92,7 +119,7 @@ async fn kucoin_adapter_should_ack_ws_specs_and_expose_v2_policy() {
         })
         .await
         .expect("public stream id");
-    assert!(public_id.contains("wss://ws-api-spot.kucoin.com/endpoint:/market/ticker:BTC-USDT"));
+    assert!(public_id.contains("wss://ws-api-spot.kucoin.com/endpoint:obu:BTC-USDT:1"));
 
     let private_id = adapter
         .subscribe_private_stream(PrivateStreamSubscription {
@@ -119,6 +146,7 @@ async fn kucoin_adapter_should_ack_ws_specs_and_expose_v2_policy() {
         Some(20_000)
     );
     assert!(capabilities.capabilities_v2.fills_history.supports_cursor);
+    assert!(capabilities.order_book.supports_sequence);
     assert!(
         capabilities
             .private_stream_capabilities

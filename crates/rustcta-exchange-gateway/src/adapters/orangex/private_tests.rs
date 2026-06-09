@@ -1,6 +1,7 @@
 use rustcta_exchange_api::{
     BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
-    ExchangeClient, PlaceOrderRequest, QuoteMarketOrderRequest, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeClient, PlaceOrderRequest, PositionsRequest, QuoteMarketOrderRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderType, PositionSide, TimeInForce};
 use serde_json::json;
@@ -157,6 +158,53 @@ async fn orangex_private_balance_and_cancel_specs_should_match_official_methods(
             .assert_matches(&actual_request(request))
             .expect("orangex balance/cancel request spec");
     }
+}
+
+#[tokio::test]
+async fn orangex_get_positions_should_use_private_perp_rpc_and_parse_position() {
+    let positions_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/orangex/positions_success.json"
+    ))
+    .expect("orangex positions fixture");
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": positions_fixture
+    })])
+    .await;
+    let adapter = OrangeXGatewayAdapter::new(OrangeXGatewayConfig {
+        rest_base_url: base_url,
+        access_token: Some("token".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..OrangeXGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let positions = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("positions"),
+            exchange: super::test_support::exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![perp_symbol_scope().exchange_symbol],
+        })
+        .await
+        .expect("positions");
+
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].quantity, 0.25);
+    assert_eq!(positions.positions[0].entry_price, Some(64000.0));
+    assert_eq!(positions.positions[0].mark_price, Some(64125.5));
+    assert_eq!(positions.positions[0].leverage, Some(10.0));
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(
+        request.body.as_ref().unwrap()["method"],
+        "/private/get_positions"
+    );
+    request_spec("get_positions_perp")
+        .assert_matches(&actual_request(request))
+        .expect("orangex positions request spec");
 }
 
 #[tokio::test]

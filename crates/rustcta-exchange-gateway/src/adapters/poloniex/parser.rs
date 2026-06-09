@@ -150,6 +150,12 @@ pub fn parse_orderbook_snapshot(
     )
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
+    snapshot.sequence = data
+        .get("id")
+        .or_else(|| data.get("lastId"))
+        .or_else(|| data.get("lid"))
+        .and_then(value_as_i64)
+        .and_then(|sequence| u64::try_from(sequence).ok());
     snapshot.exchange_timestamp = data
         .get("ts")
         .or_else(|| data.get("T"))

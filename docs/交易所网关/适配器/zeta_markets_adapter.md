@@ -29,7 +29,8 @@ Status date: 2026-06-08
 | --- | --- | --- |
 | `get_symbol_rules` | native public REST | Parses `/prices/symbols` style fixture into perpetual `SymbolRules`. |
 | `get_order_book` | native public REST | Parses `/v2/orderbook?ticker_id={symbol}` snapshot fixture. |
-| balances / positions / fees | unsupported | Require wallet-owned Solana margin account and SDK audit. |
+| balances / positions | spec-only source boundary | Historical wallet-owned Solana margin account state; no exchange API key required, runtime disabled until SDK/account decoder, public-key guard, slot/reorg policy and reconciliation are audited. |
+| fees | unsupported | Original venue has ceased operations; no live private fee runtime is added. |
 | place / cancel / amend / batch | unsupported | Venue is shut down; no private keys or Solana transactions are built. |
 | WebSocket | unsupported | 交易所不支持当前公共 WS runtime；fallback is REST polling only for legacy fixtures. |
 
@@ -43,7 +44,9 @@ Official core trading verification:
 
 Official position verification:
 
-[仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md) confirms balances/positions/private account runtime remain unsupported for this legacy scan adapter. Keep `get_positions` as `交易所不支持当前仓位接口 runtime`; do not add live private position runtime for the stopped venue.
+[仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md) confirms live private account runtime remains disabled for this legacy scan adapter. Historical positions are wallet-owned Solana margin account state, so `get_positions` is a `项目未实现/离线边界` backed by `tests/fixtures/exchanges/zeta_markets/request_specs/get_positions_margin_account_source.json`, not an exchange-unsupported CEX API-key read. Do not add live private position runtime for the stopped venue.
+
+账户/余额接口同样写 `项目未实现/离线边界`：原 Zeta venue 已停止运营，legacy adapter 只保留 public scan，不补 live private balance runtime；历史余额/权益 readback 属 wallet-owned Solana margin account state。
 
 ## Validation
 
@@ -58,3 +61,7 @@ cargo test -p rustcta-gateway zeta_markets --message-format short
 ```
 
 Do not run `cargo build` for this task.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：原 Zeta venue 已停止运营；legacy adapter 不补 live private fee runtime。

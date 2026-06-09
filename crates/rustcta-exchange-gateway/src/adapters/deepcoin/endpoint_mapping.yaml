@@ -61,6 +61,16 @@ batch:
 websocket:
   public:
     support: spec_only
+    order_book:
+      topic: book25
+      depth_levels: [25]
+      update_mode: incremental
+      continuity_fields: [LocalNo, ResumeNo]
+      interval: "no fixed ms"
+      checksum: none_documented
+      resync_endpoint: get_order_book
+      snapshot_params:
+        sz: "1..400"
     heartbeat:
       direction: client_ping
       interval_ms: 20000
@@ -79,6 +89,23 @@ websocket:
       timeout_ms: 60000
       payload: ping
     fallback: rest_reconciliation
+streams:
+  - operation: subscribe_public_order_book
+    channel: book25
+    topic: book25
+    transport: websocket
+    auth: none
+    support: spec_only
+    depth_levels: [25]
+    update_mode: incremental
+    continuity_fields: [LocalNo, ResumeNo]
+    interval: "no fixed ms"
+    checksum: none_documented
+    resync:
+      mode: rest_snapshot
+      endpoint_operation: get_order_book
+      params:
+        sz: "1..400"
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -176,6 +203,26 @@ endpoints:
     rate_limit_bucket: trade
     weight: 1
     request_spec_required: true
+    support: native
+    native_batch: false
+    atomicity: atomic
+    notes: Native in-place replace endpoint for a single perpetual order by exchange order id.
+  - operation: place_order_list
+    product: mixed
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/deepcoin/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: deepcoin.order_list_oco_oto_unsupported
+    notes: "OCO/OTO order-list endpoints are not exposed through the current standard gateway trait."
   - operation: cancel_order
     product: linear_perp
     transport: rest
@@ -240,6 +287,8 @@ endpoints:
     request_spec_required: true
     native_batch: true
     atomicity: partial
+    support: native
+    max_items: 5
   - operation: batch_cancel_orders
     product: linear_perp
     transport: rest
@@ -252,6 +301,8 @@ endpoints:
     request_spec_required: true
     native_batch: true
     atomicity: partial
+    support: native
+    max_items: 50
   - operation: acquire_listen_key
     product: spot
     market_types: [spot, linear_perp]

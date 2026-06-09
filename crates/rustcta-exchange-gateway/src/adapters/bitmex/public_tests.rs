@@ -219,6 +219,14 @@ fn bitmex_endpoint_mapping_should_cover_task14_required_sections() {
         "auth_renewal:",
         "mode: relogin",
         "mode: rest_reconciliation",
+        "orderBookL2_25",
+        "push_interval_ms: 100",
+        "orderBook10",
+        "table_diff",
+        "actions: [partial, insert, update, delete]",
+        "keys: [symbol, id, side]",
+        "sequence_risk:",
+        "REST /api/v1/orderBook/L2 snapshot",
     ] {
         assert!(
             mapping.contains(required),

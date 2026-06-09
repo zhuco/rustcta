@@ -18,9 +18,12 @@ use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::private::bitfinex_place_order_body;
 use super::signing::{bitfinex_rest_signature, bitfinex_ws_auth_signature};
 use super::streams::{
-    bitfinex_private_auth_payload, bitfinex_public_subscribe_payload,
-    parse_bitfinex_private_stream_message, parse_bitfinex_public_stream_message,
-    BitfinexPrivateStreamMessage,
+    bitfinex_private_auth_payload, bitfinex_public_conf_payload, bitfinex_public_orderbook_policy,
+    bitfinex_public_subscribe_payload, bitfinex_sequence_gap,
+    parse_bitfinex_private_stream_message, parse_bitfinex_public_book_message,
+    parse_bitfinex_public_stream_message, BitfinexBookSide, BitfinexBookUpdateAction,
+    BitfinexPrivateStreamMessage, BitfinexPublicBookMessage, BITFINEX_WS_OB_CHECKSUM_FLAG,
+    BITFINEX_WS_SEQ_ALL_FLAG,
 };
 use super::{BitfinexGatewayAdapter, BitfinexGatewayConfig};
 use crate::request_spec::{ActualHttpRequest, RequestSpec};
@@ -202,6 +205,9 @@ fn bitfinex_ws_payloads_and_parsers_should_cover_auth_book_and_private_order() {
     assert_eq!(public["event"], "subscribe");
     assert_eq!(public["channel"], "book");
     assert_eq!(public["symbol"], "tBTCUSD");
+    assert_eq!(public["prec"], "P0");
+    assert_eq!(public["freq"], "F0");
+    assert_eq!(public["len"], 100);
 
     let auth = bitfinex_private_auth_payload("key", "bitfinex-test-secret", "1700000000000000");
     assert_eq!(auth["event"], "auth");
@@ -253,6 +259,84 @@ fn bitfinex_ws_payloads_and_parsers_should_cover_auth_book_and_private_order() {
     let capabilities = adapter.capabilities();
     assert!(capabilities.supports_private_streams);
     assert_eq!(subscription.exchange, exchange_id());
+}
+
+#[test]
+fn bitfinex_public_book_ws_structured_details_should_cover_flags_and_updates() {
+    let policy = bitfinex_public_orderbook_policy();
+    assert_eq!(policy.channel, "book");
+    assert!(policy.supported_precisions.contains(&"P4"));
+    assert!(policy.supported_frequencies.contains(&"F1"));
+    assert!(policy.supported_lengths.contains(&250));
+    assert_eq!(policy.sequence_flag, BITFINEX_WS_SEQ_ALL_FLAG);
+    assert_eq!(policy.checksum_flag, BITFINEX_WS_OB_CHECKSUM_FLAG);
+
+    let conf = bitfinex_public_conf_payload(true, true, false);
+    assert_eq!(
+        conf,
+        json!({
+            "event": "conf",
+            "flags": BITFINEX_WS_OB_CHECKSUM_FLAG + BITFINEX_WS_SEQ_ALL_FLAG,
+        })
+    );
+
+    let subscribe: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitfinex/ws_public_book_subscribe.json"
+    ))
+    .expect("subscribe fixture");
+    assert_eq!(subscribe["channel"], "book");
+    assert_eq!(subscribe["prec"], "P0");
+    assert_eq!(subscribe["freq"], "F0");
+    assert_eq!(subscribe["len"], 100);
+
+    let snapshot: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitfinex/ws_public_book_seq_snapshot.json"
+    ))
+    .expect("snapshot fixture");
+    match parse_bitfinex_public_book_message(&exchange_id(), spot_symbol_scope(), &snapshot)
+        .expect("snapshot message")
+    {
+        BitfinexPublicBookMessage::Snapshot { book, sequence } => {
+            assert_eq!(sequence, Some(41));
+            assert_eq!(book.sequence, Some(41));
+            assert_eq!(book.bids[0].price, 65000.0);
+            assert_eq!(book.asks[0].price, 65001.0);
+        }
+        other => panic!("unexpected Bitfinex book snapshot message: {other:?}"),
+    }
+
+    let update: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitfinex/ws_public_book_update.json"
+    ))
+    .expect("update fixture");
+    match parse_bitfinex_public_book_message(&exchange_id(), spot_symbol_scope(), &update)
+        .expect("update message")
+    {
+        BitfinexPublicBookMessage::Update { update, sequence } => {
+            assert_eq!(sequence, Some(42));
+            assert_eq!(update.side, BitfinexBookSide::Bid);
+            assert_eq!(update.action, BitfinexBookUpdateAction::Delete);
+            assert_eq!(update.quantity, 0.0);
+            assert_eq!(update.price, 65000.0);
+        }
+        other => panic!("unexpected Bitfinex book update message: {other:?}"),
+    }
+    assert_eq!(bitfinex_sequence_gap(Some(41), Some(42)), None);
+    assert_eq!(bitfinex_sequence_gap(Some(40), Some(42)), Some((41, 42)));
+
+    let checksum: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitfinex/ws_public_book_checksum.json"
+    ))
+    .expect("checksum fixture");
+    match parse_bitfinex_public_book_message(&exchange_id(), spot_symbol_scope(), &checksum)
+        .expect("checksum message")
+    {
+        BitfinexPublicBookMessage::Checksum { checksum, sequence } => {
+            assert_eq!(checksum, -123456789);
+            assert_eq!(sequence, Some(43));
+        }
+        other => panic!("unexpected Bitfinex checksum message: {other:?}"),
+    }
 }
 
 #[test]

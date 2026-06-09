@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 use super::streams::{
     is_weex_heartbeat, parse_weex_private_stream_message, parse_weex_public_stream_message,
     weex_pong_payload, weex_private_auth_headers, weex_private_subscribe_payload,
-    weex_public_subscribe_payload, WeexPrivateStreamMessage, WeexPublicStreamMessage,
+    weex_public_depth_channel, weex_public_order_book_ws_policy, weex_public_subscribe_payload,
+    WeexPrivateStreamMessage, WeexPublicStreamMessage,
 };
 use super::test_support::{context, exchange_id, perp_symbol_scope, spot_symbol_scope};
 use super::{WeexGatewayAdapter, WeexGatewayConfig};
@@ -35,6 +36,24 @@ fn weex_public_stream_payload_should_map_market_channels() {
     })
     .expect("candle payload");
     assert_eq!(candle["params"][0], "BTCUSDT@kline_1m");
+}
+
+#[test]
+fn weex_public_orderbook_policy_should_cover_depth_levels_and_gap_recovery() {
+    let policy = weex_public_order_book_ws_policy();
+    assert_eq!(policy.supported_depth_levels, &[15, 200]);
+    assert_eq!(policy.default_depth_level, 15);
+    assert_eq!(policy.fixed_update_interval_ms, None);
+    assert_eq!(policy.first_update_id_field, "U");
+    assert_eq!(policy.last_update_id_field, "u");
+    assert_eq!(policy.snapshot_marker, "SNAPSHOT");
+    assert_eq!(policy.update_marker, "CHANGED");
+    assert_eq!(policy.checksum, None);
+    assert!(policy.gap_recovery.contains("resubscribe"));
+
+    let depth200 =
+        weex_public_depth_channel("btc_usdt", MarketType::Spot, 200).expect("depth200 channel");
+    assert_eq!(depth200, "BTCUSDT@depth200");
 }
 
 #[test]
@@ -95,6 +114,29 @@ fn weex_stream_parser_should_parse_heartbeat_public_book_and_private_order() {
         WeexPublicStreamMessage::OrderBook(book) => {
             assert_eq!(book.bids[0].price, 65000.0);
             assert_eq!(book.asks[0].quantity, 0.2);
+            assert_eq!(book.sequence, None);
+        }
+        other => panic!("unexpected public message {other:?}"),
+    }
+
+    let book = parse_weex_public_stream_message(
+        &exchange_id(),
+        spot_symbol_scope(),
+        &json!({
+            "channel": "BTCUSDT@depth200",
+            "data": {
+                "d": "CHANGED",
+                "U": 1001,
+                "u": 1002,
+                "b": [["65000", "0.1"]],
+                "a": [["65001", "0.2"]]
+            }
+        }),
+    )
+    .expect("book with update id");
+    match book {
+        WeexPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.sequence, Some(1002));
         }
         other => panic!("unexpected public message {other:?}"),
     }

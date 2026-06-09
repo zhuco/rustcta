@@ -1,10 +1,11 @@
 use chrono::Utc;
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    OrderBookLevel, OrderBookSnapshot, OrderSide, OrderStatus, OrderType, PositionSide,
 };
 use serde_json::Value;
 
@@ -85,6 +86,72 @@ pub fn parse_orderbook_snapshot(
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
     Ok(snapshot)
+}
+
+pub fn parse_bit2c_order_state(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    parse_bit2c_order_state_with_side(exchange_id, symbol_hint, value, None)
+}
+
+pub fn parse_bit2c_open_orders(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    if let Some(orders) = value.as_array() {
+        return orders
+            .iter()
+            .map(|order| parse_bit2c_order_state_with_side(exchange_id, Some(symbol), order, None))
+            .collect();
+    }
+    if let Some(orders) = value.get("orders").and_then(Value::as_array) {
+        return orders
+            .iter()
+            .map(|order| parse_bit2c_order_state_with_side(exchange_id, Some(symbol), order, None))
+            .collect();
+    }
+
+    let pair = pair_from_symbol(&symbol.exchange_symbol.symbol)?;
+    let pair_orders = value.get(pair.venue).or_else(|| {
+        value
+            .as_object()
+            .and_then(|object| object.iter().find(|(key, _)| pair_from_symbol(key).is_ok()))
+            .map(|(_, value)| value)
+    });
+    let pair_orders = pair_orders.ok_or_else(|| ExchangeApiError::InvalidRequest {
+        message: "Bit2C open orders response missing pair bucket".to_string(),
+    })?;
+
+    let mut orders = Vec::new();
+    for (field, side) in [("bid", OrderSide::Buy), ("bids", OrderSide::Buy)] {
+        if let Some(rows) = pair_orders.get(field).and_then(Value::as_array) {
+            for row in rows {
+                orders.push(parse_bit2c_order_state_with_side(
+                    exchange_id,
+                    Some(symbol),
+                    row,
+                    Some(side),
+                )?);
+            }
+        }
+    }
+    for (field, side) in [("ask", OrderSide::Sell), ("asks", OrderSide::Sell)] {
+        if let Some(rows) = pair_orders.get(field).and_then(Value::as_array) {
+            for row in rows {
+                orders.push(parse_bit2c_order_state_with_side(
+                    exchange_id,
+                    Some(symbol),
+                    row,
+                    Some(side),
+                )?);
+            }
+        }
+    }
+
+    Ok(orders)
 }
 
 pub fn pair_from_symbol(symbol: &str) -> ExchangeApiResult<Bit2cPair> {
@@ -219,6 +286,237 @@ fn parse_levels(
             OrderBookLevel::new(price, quantity).map_err(validation_error)
         })
         .collect()
+}
+
+fn parse_bit2c_order_state_with_side(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+    side_hint: Option<OrderSide>,
+) -> ExchangeApiResult<OrderState> {
+    let row = value
+        .get("data")
+        .or_else(|| value.get("order"))
+        .or_else(|| value.get("Order"))
+        .unwrap_or(value);
+    let pair = if let Some(pair) = string_field(row, &["pair", "Pair"]) {
+        pair_from_symbol(pair)?
+    } else if let Some(symbol) = symbol_hint {
+        pair_from_symbol(&symbol.exchange_symbol.symbol)?
+    } else {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "Bit2C order row missing pair".to_string(),
+        });
+    };
+    let exchange_symbol = if let Some(symbol) = symbol_hint {
+        symbol.exchange_symbol.clone()
+    } else {
+        ExchangeSymbol::new(exchange_id.clone(), MarketType::Spot, pair.venue)
+            .map_err(validation_error)?
+    };
+    let canonical_symbol = symbol_hint
+        .and_then(|symbol| symbol.canonical_symbol.clone())
+        .or_else(|| CanonicalSymbol::new(pair.base, pair.quote).ok());
+    let initial_amount = value_as_string(
+        row.get("initialAmount")
+            .or_else(|| row.get("InitialAmount"))
+            .or_else(|| row.get("initial_amount")),
+    );
+    let remaining_amount = value_as_string(
+        row.get("amount")
+            .or_else(|| row.get("Amount"))
+            .or_else(|| row.get("remainingAmount"))
+            .or_else(|| row.get("remaining_amount")),
+    );
+    let filled_quantity = match (&initial_amount, &remaining_amount) {
+        (Some(initial), Some(remaining)) => {
+            decimal_diff_string(initial, remaining).unwrap_or_else(|| "0".to_string())
+        }
+        _ => value_as_string(
+            row.get("filledAmount")
+                .or_else(|| row.get("FilledAmount"))
+                .or_else(|| row.get("filled_amount")),
+        )
+        .unwrap_or_else(|| "0".to_string()),
+    };
+    let now = Utc::now();
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Spot,
+        canonical_symbol,
+        exchange_symbol,
+        client_order_id: None,
+        exchange_order_id: row
+            .get("id")
+            .or_else(|| row.get("Id"))
+            .or_else(|| row.get("orderId"))
+            .or_else(|| row.get("order_id"))
+            .and_then(value_to_string),
+        side: parse_bit2c_side(row)
+            .or(side_hint)
+            .unwrap_or(OrderSide::Buy),
+        position_side: Some(PositionSide::None),
+        order_type: parse_bit2c_order_type(row),
+        time_in_force: Some(TimeInForce::GTC),
+        status: parse_bit2c_order_status(row).unwrap_or(OrderStatus::Open),
+        quantity: initial_amount
+            .or(remaining_amount)
+            .unwrap_or_else(|| "0".to_string()),
+        price: value_as_string(row.get("price").or_else(|| row.get("Price"))),
+        filled_quantity,
+        average_fill_price: None,
+        reduce_only: false,
+        post_only: false,
+        created_at: row
+            .get("created")
+            .or_else(|| row.get("Created"))
+            .and_then(timestamp_seconds),
+        updated_at: now,
+    })
+}
+
+fn parse_bit2c_side(row: &Value) -> Option<OrderSide> {
+    if let Some(is_bid) = row
+        .get("isBid")
+        .or_else(|| row.get("IsBid"))
+        .and_then(Value::as_bool)
+    {
+        return Some(if is_bid {
+            OrderSide::Buy
+        } else {
+            OrderSide::Sell
+        });
+    }
+    match row.get("type").or_else(|| row.get("Type")) {
+        Some(Value::Number(number)) => match number.as_i64()? {
+            0 => Some(OrderSide::Buy),
+            1 => Some(OrderSide::Sell),
+            _ => None,
+        },
+        Some(Value::String(value)) => match value.trim().to_ascii_lowercase().as_str() {
+            "0" | "buy" | "bid" => Some(OrderSide::Buy),
+            "1" | "sell" | "ask" => Some(OrderSide::Sell),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn parse_bit2c_order_type(row: &Value) -> OrderType {
+    match row
+        .get("order_type")
+        .or_else(|| row.get("orderType"))
+        .or_else(|| row.get("OrderType"))
+    {
+        Some(Value::Number(number)) => match number.as_i64().unwrap_or_default() {
+            1 => OrderType::Market,
+            2 => OrderType::StopLimit,
+            _ => OrderType::Limit,
+        },
+        Some(Value::String(value)) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "market" | "mkt" => OrderType::Market,
+            "2" | "stop" | "stl" | "stoplimit" | "stop_limit" => OrderType::StopLimit,
+            _ => OrderType::Limit,
+        },
+        _ => OrderType::Limit,
+    }
+}
+
+fn parse_bit2c_order_status(row: &Value) -> Option<OrderStatus> {
+    match row
+        .get("status_type")
+        .or_else(|| row.get("statusType"))
+        .or_else(|| row.get("StatusType"))
+        .or_else(|| row.get("status"))
+        .or_else(|| row.get("Status"))
+    {
+        Some(Value::Number(number)) => match number.as_i64()? {
+            0 => Some(OrderStatus::New),
+            1 => Some(OrderStatus::Open),
+            2 => Some(OrderStatus::Rejected),
+            3 => Some(OrderStatus::New),
+            4 => Some(OrderStatus::Cancelled),
+            5 => Some(OrderStatus::Filled),
+            _ => Some(OrderStatus::Unknown),
+        },
+        Some(Value::String(value)) => match value.trim().to_ascii_lowercase().as_str() {
+            "0" | "new" => Some(OrderStatus::New),
+            "1" | "open" | "active" => Some(OrderStatus::Open),
+            "2" | "nofunds" | "no_funds" | "rejected" => Some(OrderStatus::Rejected),
+            "3" | "waitforinsert" | "wait_for_insert" => Some(OrderStatus::New),
+            "4" | "deleted" | "cancelled" | "canceled" => Some(OrderStatus::Cancelled),
+            "5" | "completed" | "filled" => Some(OrderStatus::Filled),
+            _ => Some(OrderStatus::Unknown),
+        },
+        _ => None,
+    }
+}
+
+fn string_field<'a>(value: &'a Value, fields: &[&str]) -> Option<&'a str> {
+    fields
+        .iter()
+        .find_map(|field| value.get(*field).and_then(Value::as_str))
+}
+
+fn value_as_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(normalize_number_string(number.to_string())),
+        _ => None,
+    }
+}
+
+fn value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(normalize_number_string(number.to_string())),
+        _ => None,
+    }
+}
+
+fn normalize_number_string(value: String) -> String {
+    if value.contains('.') {
+        let trimmed = value
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string();
+        if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed
+        }
+    } else {
+        value
+    }
+}
+
+fn timestamp_seconds(value: &Value) -> Option<chrono::DateTime<Utc>> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0)),
+        Value::String(text) => text
+            .parse::<i64>()
+            .ok()
+            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0)),
+        _ => None,
+    }
+}
+
+fn decimal_diff_string(initial: &str, remaining: &str) -> Option<String> {
+    let initial = initial.replace(',', "").parse::<f64>().ok()?;
+    let remaining = remaining.replace(',', "").parse::<f64>().ok()?;
+    let diff = (initial - remaining).max(0.0);
+    let value = format!("{diff:.8}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string();
+    Some(if value.is_empty() {
+        "0".to_string()
+    } else {
+        value
+    })
 }
 
 fn number_from_value(value: &Value) -> Option<f64> {

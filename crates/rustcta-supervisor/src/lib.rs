@@ -444,12 +444,8 @@ impl LegacyProcessTemplate {
             Self::SpotSpotLiveDryRun => "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml",
             Self::TrendReport => "config/trend_report.yml",
             Self::AccountPositionReporter => "config/account_position_reporter.yml",
-            Self::ExchangeOrderCanary => {
-                "config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"
-            }
-            Self::BitgetPerpOrderCanary => {
-                "config/cross_exchange_arbitrage_bitget_50u.live-small.yml"
-            }
+            Self::ExchangeOrderCanary => "config/cross_exchange_arbitrage_usdt.yml",
+            Self::BitgetPerpOrderCanary => "config/cross_exchange_arbitrage_usdt.yml",
             Self::BitgetSpotOrderCanary => {
                 "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml"
             }
@@ -457,22 +453,37 @@ impl LegacyProcessTemplate {
     }
 
     pub fn default_command(self) -> &'static str {
-        "cargo"
+        match self {
+            Self::CrossArbLive => "target/release/cross-exchange-arbitrage-live-runner",
+            _ => "cargo",
+        }
     }
 
     pub fn default_args(self, config_path: &str) -> Vec<String> {
         match self {
             Self::CrossArbLive => vec![
-                "run".to_string(),
-                "-p".to_string(),
-                "rustcta-strategy-cross-exchange-arbitrage".to_string(),
-                "--bin".to_string(),
-                "cross-exchange-arbitrage-runtime".to_string(),
-                "--".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
                 "--strategy-id".to_string(),
                 self.as_str().to_string(),
+                "--run-id".to_string(),
+                "local".to_string(),
+                "--tenant-id".to_string(),
+                "local".to_string(),
+                "--account-id".to_string(),
+                "cross_arb_3venues".to_string(),
+                "--lock-file".to_string(),
+                "logs/cross_exchange_arbitrage/cross_arb_live.lock".to_string(),
+                "--dashboard-snapshot-path".to_string(),
+                "logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json".to_string(),
+                "--market-data-source".to_string(),
+                "direct_websocket".to_string(),
+                "--profit-history-path".to_string(),
+                "logs/cross_exchange_arbitrage/profit_history.jsonl".to_string(),
+                "--trade-ledger-path".to_string(),
+                "logs/cross_exchange_arbitrage/trade_events.jsonl".to_string(),
+                "--dashboard-refresh-ms".to_string(),
+                "5000".to_string(),
             ],
             Self::FundingArbLive => vec![
                 "run".to_string(),
@@ -1742,20 +1753,35 @@ mod tests {
         assert_eq!(spec.run_id, "local");
         assert_eq!(spec.tenant_id, "local");
         assert_eq!(spec.config_path, "config/cross_exchange_arbitrage_usdt.yml");
-        assert_eq!(spec.command, "cargo");
+        assert_eq!(
+            spec.command,
+            "target/release/cross-exchange-arbitrage-live-runner"
+        );
         assert_eq!(
             spec.args,
             vec![
-                "run",
-                "-p",
-                "rustcta-strategy-cross-exchange-arbitrage",
-                "--bin",
-                "cross-exchange-arbitrage-runtime",
-                "--",
                 "--config",
                 "config/cross_exchange_arbitrage_usdt.yml",
                 "--strategy-id",
                 "cross_arb_live",
+                "--run-id",
+                "local",
+                "--tenant-id",
+                "local",
+                "--account-id",
+                "cross_arb_3venues",
+                "--lock-file",
+                "logs/cross_exchange_arbitrage/cross_arb_live.lock",
+                "--dashboard-snapshot-path",
+                "logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json",
+                "--market-data-source",
+                "direct_websocket",
+                "--profit-history-path",
+                "logs/cross_exchange_arbitrage/profit_history.jsonl",
+                "--trade-ledger-path",
+                "logs/cross_exchange_arbitrage/trade_events.jsonl",
+                "--dashboard-refresh-ms",
+                "5000",
             ]
         );
         assert_eq!(spec.working_dir.as_deref(), Some("."));

@@ -1,0 +1,70 @@
+{
+  "exchange": "latoken",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "futures_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://api.latoken.com/doc/v2/",
+      "evidence": "Stable REST v2 docs cover spot-style market/account/order endpoints; official futures product clues require endpoint-spec verification before gateway use."
+    },
+    {
+      "url": "https://latoken.com/futures",
+      "evidence": "LATOKEN public product material references futures, but this adapter has not pinned a stable futures API spec."
+    }
+  ],
+  "runtime_isolation": "Keep LATOKEN futures clues outside the spot REST/STOMP adapter until endpoint specs, symbols and risk semantics are verified.",
+  "unsupported_runtime_reason": "LATOKEN has futures product clues, but stable futures endpoint specs, auth scope, contract metadata, positions/risk and order lifecycle reconciliation are not pinned.",
+  "required_endpoints": {
+    "market_metadata": [
+      "futures/perpetual instruments",
+      "contract specifications",
+      "base/quote or settlement asset mapping",
+      "funding or settlement schedule if exposed"
+    ],
+    "public_market_data": [
+      "futures/perpetual order book",
+      "futures/perpetual trades",
+      "futures/perpetual ticker"
+    ],
+    "private_account": [
+      "futures/perpetual margin balances",
+      "positions",
+      "risk limits",
+      "leverage settings"
+    ],
+    "private_order_lifecycle": [
+      "futures/perpetual place order",
+      "futures/perpetual cancel order",
+      "futures/perpetual query/open orders",
+      "futures/perpetual fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "confirm whether futures uses LATOKEN v2 HMAC headers or a separate auth flow",
+    "pin read-only and trade permission scopes for futures/perpetual endpoints",
+    "add product-scoped dry-run guard before enabling writes"
+  ],
+  "required_parsers": [
+    "contract metadata",
+    "position and margin snapshots",
+    "risk/leverage snapshots",
+    "futures/perpetual order acknowledgements",
+    "futures/perpetual fills"
+  ],
+  "unsafe_to_promote_without": [
+    "stable official futures/perpetual endpoint specs",
+    "auth and permission-scope verification",
+    "contract metadata and product symbol mapping",
+    "positions/risk/leverage parser coverage",
+    "post-write query/open/fills reconciliation"
+  ],
+  "remaining_work": [
+    "pin official futures API paths and auth scheme",
+    "add contract metadata and position readback specs",
+    "add risk/leverage readbacks",
+    "add product guard before any private write runtime"
+  ]
+}

@@ -3,12 +3,16 @@ use std::path::Path;
 pub mod account_position_render;
 pub mod gateio_bitget_spot_symbols;
 pub mod hyperliquid_self_test;
+pub mod private_ws_observe;
+pub mod private_ws_probe;
 pub mod safety;
+pub mod ws_config_probe;
 pub mod ws_proxy_probe;
 
 pub use account_position_render::{run_account_position_render, AccountPositionRenderArgs};
 pub use gateio_bitget_spot_symbols::{run_gateio_bitget_spot_symbols, GateioBitgetSpotSymbolsArgs};
 pub use hyperliquid_self_test::{hyperliquid_self_test_safety_plan, HyperliquidSelfTestPlanArgs};
+pub use private_ws_probe::{run_private_ws_probe, PrivateWsProbeArgs, PrivateWsProbeReport};
 pub use rustcta_reporting::{run_trend_report, TrendReportArgs};
 pub use rustcta_smart_money::{
     BinanceCollectorConfig as SmartMoneyBinanceCollectorConfig,
@@ -28,6 +32,7 @@ pub use safety::{
     ExchangeOrderCanarySafetyArgs, FundingArbObserveSafetyArgs, SafetyGateMode, SafetyPlan,
     SpotSide,
 };
+pub use ws_config_probe::{run_ws_config_probe, WsConfigProbeArgs, WsConfigProbeReport};
 pub use ws_proxy_probe::{run_ws_proxy_probe, WsProxyProbeArgs};
 
 pub fn smart_money_binance_collector_summary(

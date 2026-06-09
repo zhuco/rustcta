@@ -6,10 +6,10 @@ use rustcta_exchange_api::{
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
     ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, RequestContext,
-    SymbolRulesRequest, SymbolRulesResponse, TenantId, TimeInForce,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    RequestContext, SymbolRulesRequest, SymbolRulesResponse, TenantId, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 use serde_json::{Map, Value};
@@ -240,6 +240,15 @@ impl ExchangeClient for GeminiGatewayAdapter {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
         self.unsupported("gemini.amend_order_unsupported")
+    }
+
+    async fn place_order_list(
+        &self,
+        request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        self.ensure_exchange(&request.symbol().exchange)?;
+        self.ensure_spot(request.symbol().market_type)?;
+        self.unsupported("gemini.order_list_unsupported")
     }
 
     async fn batch_place_orders(

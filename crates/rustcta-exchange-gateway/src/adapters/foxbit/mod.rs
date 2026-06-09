@@ -106,7 +106,7 @@ impl ExchangeClient for FoxbitGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = self.config.private_rest_available();
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -119,9 +119,9 @@ impl ExchangeClient for FoxbitGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = self.config.private_rest_available();
+        capabilities.supports_open_orders = self.config.private_rest_available();
+        capabilities.supports_recent_fills = self.config.private_rest_available();
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -256,25 +256,21 @@ impl ExchangeClient for FoxbitGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("foxbit.query_order_private_read_not_promoted")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("foxbit.open_orders_private_read_not_promoted")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("foxbit.recent_fills_private_read_not_promoted")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

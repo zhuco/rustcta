@@ -1,0 +1,38 @@
+{
+  "exchange": "aark",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "path": "/v1/batch-order",
+  "auth": "signed",
+  "headers": {
+    "orderly-account-id": "<redacted-account-id>",
+    "orderly-key": "<redacted-orderly-key>",
+    "orderly-signature": "<redacted-ed25519-signature>",
+    "orderly-timestamp": "1700000000000"
+  },
+  "body": {
+    "orders": [
+      {
+        "symbol": "PERP_BTC_USDC",
+        "order_type": "LIMIT",
+        "side": "BUY",
+        "order_price": "64000",
+        "order_quantity": "0.01",
+        "client_order_id": "aark-batch-1"
+      }
+    ]
+  },
+  "canonical_payload": "1700000000000POST/v1/batch-order{\"orders\":[{\"symbol\":\"PERP_BTC_USDC\",\"order_type\":\"LIMIT\",\"side\":\"BUY\",\"order_price\":\"64000\",\"order_quantity\":\"0.01\",\"client_order_id\":\"aark-batch-1\"}]}",
+  "trade_enabled": false,
+  "expected_error": "aark.batch_place_orders_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+  "remaining_runtime_work": [
+    "Aark/Orderly account onboarding audit",
+    "audited Ed25519 signer wiring",
+    "trade permission scope guard",
+    "partial-failure and missing-item reconciliation",
+    "live dry-run guard"
+  ]
+}

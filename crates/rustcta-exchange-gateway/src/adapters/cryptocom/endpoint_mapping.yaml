@@ -34,12 +34,73 @@ websocket:
     channels: [book, trade, ticker, candlestick]
     heartbeat: { required: true, direction: server_ping, timeout_ms: 10000 }
     resync: rest_order_book_snapshot_after_reconnect
+    order_book:
+      channel_template: book.{instrument_name}.{depth}
+      mode: delta
+      subscription_type: SNAPSHOT_AND_UPDATE
+      depths:
+        default: 50
+        supported: [10, 50]
+      update_frequency_ms:
+        default: 10
+        supported: [10, 100]
+      message_semantics:
+        first_message: "SNAPSHOT payload seeds the local book."
+        updates: "UPDATE payloads are deltas; apply only when pu equals previous local u."
+        stale_or_gap: "If u regresses, pu is missing after initialization, or pu != previous local u, rebuild."
+      sequence:
+        fields: [u, pu]
+        continuity: strict_previous_update_id
+        rebuild_on: [pu_gap, sequence_regression, reconnect, stale_stream, parse_error]
+      checksum:
+        supported: false
+        field: null
+        risk: "No documented checksum; sequence continuity is the verified loss detector."
+      resync:
+        endpoint_operation: get_order_book
+        method: GET
+        path: /public/get-book
+        strategy: "Fetch REST snapshot, resubscribe to book.{instrument_name}.{depth} with SNAPSHOT_AND_UPDATE, then apply updates only after pu matches previous local u."
   private:
     support: native
     auth: hmac
     channels: [user.order, user.trade, user.balance]
     renewal: relogin_on_reconnect
     reconciliation: query_order_then_open_orders_then_recent_fills
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: websocket
+    protocol: json_rpc
+    url: wss://stream.crypto.com/exchange/v1/market
+    channel: book.{instrument_name}.{depth}
+    support: native
+    request:
+      method: subscribe
+      params:
+        channels: ["book.{instrument_name}.{depth}"]
+        book_subscription_type: SNAPSHOT_AND_UPDATE
+        book_update_frequency: 10
+      depth_supported: [10, 50]
+      update_frequency_ms_supported: [10, 100]
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/cryptocom/ws/public_book_delta_subscribe.json
+    message:
+      parser: parse_cryptocom_orderbook_delta_details
+      fixtures:
+        snapshot: tests/fixtures/exchanges/cryptocom/ws/public_book_delta_snapshot.json
+        update: tests/fixtures/exchanges/cryptocom/ws/public_book_delta_update.json
+      sequence_fields: [u, pu]
+      update_semantics: SNAPSHOT_AND_UPDATE
+    interval_ms: [10, 100]
+    depth: [10, 50]
+    checksum: none
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_rebuild
+      triggers: [reconnect, stale_stream, parse_error, pu_gap, sequence_regression]
 endpoints:
   - operation: get_symbol_rules
     product: spot

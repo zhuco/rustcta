@@ -1,0 +1,19 @@
+{
+  "exchange": "lighter",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Lighter market stats, market structures and API trading docs",
+      "evidence": "Spot market stats and spot market structures are visible in official/API material, but the adapter only maps perpetual market indexes and signed transaction boundaries."
+    }
+  ],
+  "runtime_isolation": "Keep Lighter spot separate from perpetual market indexes until spot-specific metadata, order book, account and transaction encoding are wired.",
+  "remaining_work": [
+    "map spot market indexes and spot market metadata",
+    "add spot order-book and trade parser fixtures",
+    "wire spot sendTx action encoding, nonce/sub-account parsing and readback reconciliation"
+  ]
+}

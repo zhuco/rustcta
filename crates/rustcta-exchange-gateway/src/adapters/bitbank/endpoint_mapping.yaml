@@ -10,9 +10,9 @@ products:
   - spot
 base_urls:
   public_rest: https://public.bitbank.cc
-  private_rest: https://api.bitbank.cc/v1
+  private_rest: https://api.bitbank.cc
 rest:
-  base_url: https://api.bitbank.cc/v1
+  base_url: https://api.bitbank.cc
 auth:
   rest:
     scheme: hmac_sha256
@@ -68,11 +68,30 @@ batch:
     mode: single_pair_order_ids
     atomicity: non_atomic
     partial_failure: true
+    reason: "Official same-pair batch cancel is implemented behind explicit private REST credentials."
 websocket:
   public:
     support: native
     url: wss://stream.bitbank.cc/socket.io/?EIO=4&transport=websocket
     protocol: socket.io
+    order_book:
+      subscribe: socket.io join-room
+      channels: ["depth_whole_{pair}", "depth_diff_{pair}"]
+      snapshot_channel: depth_whole_{pair}
+      delta_channel: depth_diff_{pair}
+      depths: [200]
+      normal_depth_per_side: 200
+      fixed_update_interval_ms: null
+      interval_note: official docs do not publish a fixed millisecond interval
+      sequence:
+        snapshot_field: sequenceId
+        delta_field: s
+        contiguous: false
+        note: monotonic but not guaranteed consecutive
+      rebuild:
+        strategy: buffer depth_diff, apply updates with s greater than depth_whole.sequenceId, resubscribe or REST snapshot after reconnect/gap
+        rest_snapshot_endpoint: /{pair}/depth
+      checksum: unsupported
     rooms:
       order_book_snapshot: depth_whole_{pair}
       order_book_delta: depth_diff_{pair}
@@ -114,12 +133,20 @@ endpoints:
     product: spot
     transport: rest
     method: GET
-    path: /user/assets
+    path: /v1/user/assets
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/get_balances_assets.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/assets_success.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bitbank/tests.rs::bitbank_balances_should_sign_assets_request_and_parse_assets
+    notes: Private assets endpoint is credential-gated and parsed into shared Balance snapshots; runtime signs GET /v1/user/assets and filters requested assets.
   - operation: get_fees
     product: spot
     transport: rest
@@ -130,11 +157,19 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/get_fees_source_boundary.json
+    response_parser:
+      status: planned
+      fixture: tests/fixtures/exchanges/bitbank/pairs_success.json
+    notes: Pair fee source is documented in spot pair metadata; shared FeeRateSnapshot parser and account-effective guard are still pending, so runtime returns bitbank.get_fees.rest_parser_pending.
   - operation: place_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
-    path: /user/spot/order
+    path: /v1/user/spot/order
     auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: orders
@@ -144,10 +179,11 @@ endpoints:
       fixture: tests/fixtures/exchanges/bitbank/request_specs/place_order_limit.json
     notes: "No client_order_id support; post_only is a boolean field for limit orders."
   - operation: cancel_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
-    path: /user/spot/cancel_order
+    path: /v1/user/spot/cancel_order
     auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: orders
@@ -159,45 +195,112 @@ endpoints:
     product: spot
     transport: rest
     method: POST
-    path: /user/spot/cancel_orders
+    path: /v1/user/spot/cancel_orders
     auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: orders
     weight: 1
     request_spec_required: true
+    support: native
+    native_batch: true
+    atomicity: non_atomic
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/batch_cancel_orders.json
+    notes: "Native same-pair batch cancel by numeric order_ids; runtime requires explicit private REST credentials, rejects mixed pairs/client ids, and is tested with tests/fixtures/exchanges/bitbank/batch_cancel_orders_success.json."
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitbank/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: No standard in-place amend endpoint is exposed.
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitbank/place_order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: No OCO/OTO/order-list endpoint is exposed.
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitbank/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: No native Spot batch place endpoint is exposed.
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
-    path: /user/spot/order
+    path: /v1/user/spot/order
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/order_ack_success.json
+    notes: "Credential-gated signed GET runtime; requires numeric exchange_order_id and rejects client_order_id because bitbank Spot order lookup is order_id based."
     params:
       - name: pair
       - name: order_id
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
-    path: /user/spot/active_orders
+    path: /v1/user/spot/active_orders
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/get_open_orders.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/open_orders_success.json
+    notes: "Credential-gated signed GET runtime; requires a Spot symbol/pair because bitbank active-orders readback is pair scoped."
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
-    path: /user/spot/trade_history
+    path: /v1/user/spot/trade_history
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/get_recent_fills.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitbank/fills_success.json
+    notes: "Credential-gated signed GET runtime; requires symbol and tenant/account context for Fill ownership, supports numeric exchange_order_id/count/since/end, and rejects client_order_id/from_trade_id."
     params:
       - name: pair
       - name: order_id
@@ -208,7 +311,7 @@ endpoints:
     product: spot
     transport: rest
     method: GET
-    path: /user/subscribe
+    path: /v1/user/subscribe
     auth: hmac
     credential_scopes: [read_only, trade]
     rate_limit_bucket: private_rest
@@ -221,5 +324,20 @@ unsupported:
     reason: "bitbank Spot REST order endpoints are order_id based."
   - operation: amend_order
     reason: "No standard in-place amend endpoint is exposed."
-  - operation: futures
-    reason: "Task 13 bitbank half is Japanese Spot/Jpy markets only."
+  - operation: batch_place_orders
+    reason: "No native Spot batch place endpoint is exposed."
+  - operation: order_list
+    reason: "No OCO/OTO/order-list endpoint is exposed."
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: margin_status_positions
+    boundary: project_unimplemented_product_line
+    scope: bitbank_margin
+    source_boundary_fixture: tests/fixtures/exchanges/bitbank/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [margin_account_eligibility, margin_status_positions, margin_risk_policy, margin_order_lifecycle, post_write_reconciliation]
+    reason: "Official API documents Margin status/positions, but this project has not implemented a bitbank Margin product line; do not route Margin through Spot runtime."
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_standard_futures_perpetual_options_api
+    scope: standard_contracts_only
+    reason: "Current official API profile exposes Spot/Margin paths but no standard futures/perpetual/options product line; this unsupported state applies only to standard contracts, while Margin remains a separate project-unimplemented boundary."

@@ -5,11 +5,27 @@ use rustcta_exchange_api::{
     PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
     EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::{ExchangeId, OrderBookSnapshot};
 use serde_json::{json, Value};
 
-use super::parser::normalize_market_symbol;
+use super::parser::{normalize_market_symbol, parse_orderbook_snapshot};
 use super::BitstampGatewayAdapter;
 use crate::adapters::ensure_exchange_api_schema;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitstampPublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub protocol: &'static str,
+    pub snapshot_channel_template: &'static str,
+    pub delta_channel_template: &'static str,
+    pub fixed_update_interval_ms: Option<u64>,
+    pub depth: Option<u32>,
+    pub sequence_field: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub rest_snapshot_endpoint: &'static str,
+    pub order_data_gap_recovery_endpoint: &'static str,
+    pub resync_strategy: &'static str,
+}
 
 impl BitstampGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
@@ -86,6 +102,44 @@ pub fn bitstamp_private_stream_capabilities() -> PrivateStreamCapabilities {
     }
 }
 
+pub fn bitstamp_public_order_book_ws_policy() -> BitstampPublicOrderBookWsPolicy {
+    BitstampPublicOrderBookWsPolicy {
+        url: "wss://ws.bitstamp.net",
+        protocol: "websocket_v2_json",
+        snapshot_channel_template: "order_book_{market_symbol}",
+        delta_channel_template: "diff_order_book_{market_symbol}",
+        fixed_update_interval_ms: None,
+        depth: None,
+        sequence_field: None,
+        checksum: None,
+        rest_snapshot_endpoint: "GET /api/v2/order_book/{market_symbol}/",
+        order_data_gap_recovery_endpoint: "POST /api/v2/order_data/",
+        resync_strategy: "rebuild from REST order_book snapshot and use public order_data with market/since_id/until_id for WebSocket gap recovery; reconnect or rebuild on stale stream because public WS order_book/diff_order_book has no documented sequence or checksum",
+    }
+}
+
+impl BitstampPublicOrderBookWsPolicy {
+    pub fn as_json(&self) -> Value {
+        json!({
+            "url": self.url,
+            "protocol": self.protocol,
+            "channels": {
+                "snapshot": self.snapshot_channel_template,
+                "delta": self.delta_channel_template,
+            },
+            "fixed_update_interval_ms": self.fixed_update_interval_ms,
+            "depth": self.depth,
+            "sequence_field": self.sequence_field,
+            "checksum": self.checksum,
+            "resync": {
+                "rest_snapshot_endpoint": self.rest_snapshot_endpoint,
+                "order_data_gap_recovery_endpoint": self.order_data_gap_recovery_endpoint,
+                "strategy": self.resync_strategy,
+            }
+        })
+    }
+}
+
 pub fn bitstamp_public_subscribe_payload(
     subscription: &PublicStreamSubscription,
 ) -> ExchangeApiResult<Value> {
@@ -100,6 +154,30 @@ pub fn bitstamp_private_subscribe_payload(channel: &str, token: &str) -> Value {
         "event": "bts:subscribe",
         "data": {"channel": channel, "auth": token}
     })
+}
+
+pub fn parse_bitstamp_public_order_book_message(
+    exchange_id: &ExchangeId,
+    symbol: rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderBookSnapshot> {
+    let channel = value
+        .get("channel")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: "bitstamp public WS message missing channel".to_string(),
+        })?;
+    if !channel.starts_with("order_book_") && !channel.starts_with("diff_order_book_") {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "bitstamp.public_ws_non_order_book_channel",
+        });
+    }
+    let data = value
+        .get("data")
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: "bitstamp public order book WS message missing data".to_string(),
+        })?;
+    parse_orderbook_snapshot(exchange_id, symbol, None, data)
 }
 
 pub fn bitstamp_public_channel(

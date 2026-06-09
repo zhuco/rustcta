@@ -74,7 +74,11 @@ Official futures public WS supports `depth_books`, `depth_book1`,
 `depth_book5`, and `depth_book15`: full/changed book, 1 level, 5 levels, and 15
 levels. The reviewed docs do not provide a fixed millisecond push interval,
 sequence field, or checksum. Spot WS is request-response under
-`wss://openapi.bitunix.com:443/ws-api/v1`. Mapping should add futures depth
-channels, 1/5/15 levels, 15s ping policy, no sequence/checksum, and REST depth
-fallback. Source batch:
+`wss://openapi.bitunix.com:443/ws-api/v1`. The mapping records futures depth
+channels/topics, 1/5/15 levels, 15s ping policy, no fixed ms, no
+sequence/checksum, and REST depth fallback. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：public/private fee endpoint 未验证，当前只返回零费率占位。

@@ -38,5 +38,5 @@ pub fn bitteam_private_stream_capabilities() -> PrivateStreamCapabilities {
 }
 
 pub fn bitteam_rest_reconciliation_fallback() -> &'static str {
-    "private REST request-spec-only fallback over /trade/api/ccxt/ordersOfUser and /trade/api/ccxt/tradesOfUser; disabled until read-only credentials are verified"
+    "private REST read-only fallback over /trade/api/ccxt/order, /trade/api/ccxt/ordersOfUser, and /trade/api/ccxt/tradesOfUser; guarded by BITTEAM_PRIVATE_REST_ENABLED plus Basic auth credentials"
 }

@@ -9,7 +9,8 @@ use rustcta_exchange_api::{
     OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
     PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
     PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    RecentFillsRequest, RecentFillsResponse, RequestContext, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -83,6 +84,53 @@ impl BlockchainComGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn private_api_token(&self, operation: &'static str) -> ExchangeApiResult<&str> {
+        if !self.config.private_rest_enabled() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        self.config
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })
+    }
+
+    fn context_account(
+        &self,
+        context: &RequestContext,
+    ) -> ExchangeApiResult<(
+        rustcta_exchange_api::TenantId,
+        rustcta_exchange_api::AccountId,
+    )> {
+        let tenant_id =
+            context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "blockchaincom private REST request requires tenant_id".to_string(),
+                })?;
+        let account_id =
+            context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "blockchaincom private REST request requires account_id".to_string(),
+                })?;
+        Ok((tenant_id, account_id))
+    }
+
+    async fn send_api_token_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &std::collections::HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let api_token = self.private_api_token(operation)?;
+        self.rest
+            .send_api_token_get(endpoint, params, api_token)
+            .await
+    }
 }
 
 #[async_trait]
@@ -114,7 +162,8 @@ impl ExchangeClient for BlockchainComGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        let private_rest = self.config.private_rest_enabled();
+        capabilities.supports_private_rest = private_rest;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = private_streams_enabled;
         capabilities.private_stream_capabilities = Some(
@@ -122,14 +171,14 @@ impl ExchangeClient for BlockchainComGatewayAdapter {
         );
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
         capabilities.supports_order_book_snapshot = self.config.enabled_public_rest;
-        capabilities.supports_balances = false;
+        capabilities.supports_balances = private_rest;
         capabilities.supports_positions = false;
-        capabilities.supports_fees = false;
+        capabilities.supports_fees = private_rest;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_rest;
+        capabilities.supports_open_orders = private_rest;
+        capabilities.supports_recent_fills = private_rest;
         capabilities.supports_cancel_all_orders = false;
         capabilities.supports_quote_market_order = false;
         capabilities.supports_amend_order = false;
@@ -145,11 +194,7 @@ impl ExchangeClient for BlockchainComGatewayAdapter {
     }
 
     async fn get_balances(&self, request: BalancesRequest) -> ExchangeApiResult<BalancesResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        if let Some(market_type) = request.market_type {
-            self.ensure_spot(market_type)?;
-        }
-        self.unsupported("blockchaincom.balances_offline_request_spec_only")
+        self.get_balances_impl(request).await
     }
 
     async fn get_positions(
@@ -175,11 +220,7 @@ impl ExchangeClient for BlockchainComGatewayAdapter {
     }
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
-        for symbol in &request.symbols {
-            self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
-        }
-        self.unsupported("blockchaincom.fees_offline_request_spec_only")
+        self.get_fees_impl(request).await
     }
 
     async fn place_order(
@@ -255,33 +296,21 @@ impl ExchangeClient for BlockchainComGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("blockchaincom.query_order_offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        if let Some(symbol) = request.symbol.as_ref() {
-            self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
-        }
-        self.unsupported("blockchaincom.open_orders_offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        if let Some(symbol) = request.symbol.as_ref() {
-            self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
-        }
-        self.unsupported("blockchaincom.recent_fills_offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

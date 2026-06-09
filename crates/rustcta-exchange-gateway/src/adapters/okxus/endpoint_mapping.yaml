@@ -6,7 +6,7 @@ metadata:
   status: validated
   source: OKX US API docs, API FAQ, US Risk & Compliance disclosures, US Terms of Service, and OKX API Agreement
   last_reviewed: "2026-06-08"
-  notes: OKX US is treated as an OKX v5 regional profile on us.okx.com. This adapter enables spot public REST only; private REST/WS and non-spot products remain Unsupported pending US credential and product-scope audit.
+  notes: OKX US is treated as an OKX v5 regional profile on us.okx.com. Spot private REST reuses OKX V5 runtime when explicit OKXUS credentials and enable flag are configured; non-spot products remain product-scope gaps.
 market_types: [spot]
 products: [spot]
 rest:
@@ -19,23 +19,23 @@ base_urls:
   business_ws: wss://wsus.okx.com:8443/ws/v5/business
 auth:
   public_rest: none
-  private_rest: unsupported_pending_us_scope_audit
+  private_rest: hmac_with_explicit_us_credential_gate
   inherited_shape: OK-ACCESS-SIGN = base64(HMAC_SHA256(timestamp + method + request_path + body))
 rate_limits:
   public_market: { scope: ip, retry_after: http_429_or_okx_rate_error, default_weight: 1 }
-  private_account: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
-  private_trade: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+  private_account: { scope: uid, retry_after: http_429_or_okx_rate_error, default_weight: 1 }
+  private_trade: { scope: uid, retry_after: http_429_or_okx_rate_error, default_weight: 1 }
 reconciliation:
   private_stream_fallback: unsupported
   public_stream_resync: rest_order_book_snapshot
   unknown_order_policy: unsupported_private_trading
 batch:
   place_orders:
-    support: unsupported
-    reason: OKX US private trading scope is not enabled in this profile.
+    support: native
+    reason: OKX V5 batch-order runtime is inherited through the US host after explicit credential/profile enablement.
   cancel_orders:
-    support: unsupported
-    reason: OKX US private trading scope is not enabled in this profile.
+    support: native
+    reason: OKX V5 batch-cancel runtime is inherited through the US host after explicit credential/profile enablement.
   cancel_all_orders:
     support: unsupported
     atomicity: unsupported
@@ -43,7 +43,58 @@ batch:
 websocket:
   public:
     support: spec_only
-    channels: [books5, trades, tickers, candle1m]
+    url: wss://wsus.okx.com:8443/ws/v5/public
+    channels: [bbo-tbt, books5, books, trades, tickers, candle1m]
+    public_channels:
+      - bbo-tbt.depth1.10ms.sequence_checksum.resync_REST
+      - books5.depth5.100ms.sequence_checksum.resync_REST
+      - books.depth400.100ms.sequence_checksum.resync_REST
+      - books-l2-tbt.depth400.10ms.login_or_vip
+      - books50-l2-tbt.depth50.10ms.login_or_vip
+    order_book:
+      host_scope: OKX US public v5 host for the regional profile
+      channels:
+        bbo_tbt:
+          channel: bbo-tbt
+          interval_ms: 10
+          depth_per_side: 1
+          access: public_no_login
+        books5:
+          channel: books5
+          interval_ms: 100
+          depth_per_side: 5
+          access: public_no_login
+        books:
+          channel: books
+          interval_ms: 100
+          depth_per_side: 400
+          access: public_no_login
+        books_l2_tbt:
+          channel: books-l2-tbt
+          interval_ms: 10
+          depth_per_side: 400
+          access: login_or_vip_required
+        books50_l2_tbt:
+          channel: books50-l2-tbt
+          interval_ms: 10
+          depth_per_side: 50
+          access: login_or_vip_required
+      sequence:
+        fields: [seqId, prevSeqId]
+        continuity: prevSeqId_links_to_previous_seqId
+        gap_policy: rest_snapshot_resync
+      checksum:
+        supported: true
+        field: checksum
+        algorithm: okx_crc32_order_book_checksum
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
+        path: /api/v5/market/books
+      limitations:
+        - regional_host_scope_wsus_okx_com
+        - tbt_depth_channels_require_login_or_vip_eligibility
+        - regional_product_scope_and_eligibility_pending_audit
     heartbeat: { mode: server_ping_client_pong, interval_ms: 25000, timeout_ms: 30000 }
     resync: rest_order_book_snapshot
   private:
@@ -51,24 +102,57 @@ websocket:
     auth: unsupported_pending_us_scope_audit
     fallback: unsupported
 unsupported:
-  - operation: non_spot_market_types
-    reason: OKX US profile is limited to spot public REST; perpetual swaps, futures, options, and margin are not enabled.
-  - operation: get_balances
-    reason: US private API credential scope and account product availability have not been audited.
+  - operation: contract_product
+    status: project_unimplemented
+    official_gap: us_regional_derivatives_and_event_contract_scope
+    boundary: project_unimplemented_product_line
+    scope: okxus_non_spot_products
+    source_boundary_fixture: tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [us_domain, credential_scope, state_eligibility, account_mode, api_product_scope, product_metadata, order_lifecycle, positions_reconciliation]
+    reason: OKX US regional materials and OKX v5 APIs expose derivatives/event contract product semantics, but this adapter only wires spot-first runtime pending US availability, credential scope, state eligibility, and product-scope audit.
+  - operation: market_type_non_spot
+    status: project_unimplemented
+    official_gap: okx_v5_non_spot_market_types
+    boundary: project_unimplemented_product_line
+    scope: okxus_perpetual_futures_options_event_margin
+    source_boundary_fixture: tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [us_domain, credential_scope, state_eligibility, account_mode, api_product_scope, product_metadata, order_lifecycle, positions_reconciliation]
+    reason: Perpetual swaps, expiry futures, options, event contracts, and margin are not enabled in this regional adapter pending US domain, credential, state eligibility, and product-scope audit.
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: okx_v5_margin_account_mode
+    boundary: project_unimplemented_product_line
+    scope: okxus_margin
+    source_boundary_fixture: tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [us_domain, credential_scope, state_eligibility, account_mode, margin_risk_policy, balances_positions_reconciliation]
+    reason: OKX v5 margin/account mode semantics exist, but OKX US margin access is not wired pending regional eligibility and account-mode audit.
+  - operation: futures_product
+    status: project_unimplemented
+    official_gap: okx_us_futures_event_contract_materials
+    boundary: project_unimplemented_product_line
+    scope: okxus_expiry_futures
+    source_boundary_fixture: tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [us_domain, credential_scope, state_eligibility, api_product_scope, futures_instruments, positions_reconciliation, order_lifecycle]
+    reason: OKX US futures/event-contract materials exist, but expiry futures access is not wired pending regional eligibility and API product-scope audit.
+  - operation: perpetual_product
+    status: project_unimplemented
+    official_gap: okx_v5_swap_perpetual_semantics
+    boundary: project_unimplemented_product_line
+    scope: okxus_perpetual
+    source_boundary_fixture: tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [us_domain, credential_scope, state_eligibility, api_product_scope, swap_instruments, positions_reconciliation, order_lifecycle]
+    reason: OKX v5 swap/perpetual semantics exist, but perpetual access is not wired for this regional profile pending product-scope audit.
+  - operation: event_contract_product
+    status: project_unimplemented
+    official_gap: okx_us_event_contracts
+    boundary: project_unimplemented_product_line
+    scope: okxus_event_contracts
+    source_boundary_fixture: tests/fixtures/exchanges/okxus/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [us_domain, credential_scope, state_eligibility, event_contract_instruments, event_order_lifecycle, settlement_reconciliation]
+    official_doc: https://www.okx.com/en-us/help/event-contracts-faq
+    reason: OKX US Event Contracts materials exist, but event-contract instruments/orders/positions are not wired pending US product-scope, credential, state eligibility, and API eligibility audit.
   - operation: get_positions
     reason: Positions are non-spot/derivatives account state and are Unsupported for this profile.
-  - operation: place_order
-    reason: No OKX US private write request is enabled without credential and product-scope audit.
-  - operation: cancel_order
-    reason: No OKX US private write request is enabled without credential and product-scope audit.
-  - operation: cancel_all_orders
-    reason: No OKX US private write request is enabled without credential and product-scope audit.
-  - operation: query_order
-    reason: Private order readback is disabled pending US scope audit.
-  - operation: get_open_orders
-    reason: Private order readback is disabled pending US scope audit.
-  - operation: get_recent_fills
-    reason: Private fills readback is disabled pending US scope audit.
   - operation: subscribe_private_stream
     reason: Private WS auth/subscriptions are disabled pending US scope audit.
 endpoints:
@@ -97,15 +181,18 @@ endpoints:
   - operation: get_balances
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/get_balances
-    auth: unsupported
+    method: GET
+    path: /api/v5/account/balance
+    auth: hmac
     credential_scopes: [read_only]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private REST read is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Guarded runtime reuses OKX V5 signed account balance against the OKX US host when regional private REST credentials and explicit enable flag are configured; default no-credential profile still returns Unsupported."
+    official_doc: https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-balance
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/okxus/request_specs/get_balances_account_balance.json }
+    response_parser: { status: implemented, parser: rustcta_exchange_gateway::adapters::okx::types::parse_balances }
   - operation: get_positions
     product: spot
     transport: rest
@@ -121,63 +208,66 @@ endpoints:
   - operation: get_fees
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/get_fees
-    auth: unsupported
+    method: GET
+    path: /api/v5/account/trade-fee
+    auth: hmac
     credential_scopes: [read_only]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private account fee readback is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Guarded runtime reuses OKX V5 signed account trade-fee against the OKX US host when regional private REST credentials and explicit enable flag are configured; default no-credential profile still returns Unsupported."
+    official_doc: https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-fee-rates
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/okxus/request_specs/get_fees_trade_fee.json, test: crates/rustcta-exchange-gateway/src/adapters/okxus/tests.rs }
+    response_parser: { status: implemented, parser: rustcta_exchange_gateway::adapters::okx::types::parse_fees, test: crates/rustcta-exchange-gateway/src/adapters/okxus/tests.rs }
   - operation: place_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/place_order
-    auth: unsupported
+    method: POST
+    path: /api/v5/trade/order
+    auth: hmac
     credential_scopes: [trade]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private write is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed create-order runtime on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."
   - operation: place_quote_market_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/place_quote_market_order
-    auth: unsupported
+    method: POST
+    path: /api/v5/trade/order
+    auth: hmac
     credential_scopes: [trade]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private write is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed quote-market order runtime on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."
   - operation: cancel_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/cancel_order
-    auth: unsupported
+    method: POST
+    path: /api/v5/trade/cancel-order
+    auth: hmac
     credential_scopes: [trade]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private write is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed cancel-order runtime on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."
   - operation: cancel_all_orders
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/cancel_all_orders
-    auth: unsupported
+    method: POST
+    path: /api/v5/trade/cancel-batch-orders
+    auth: hmac
     credential_scopes: [trade]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private write is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 open-orders readback plus batch-cancel runtime on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."
   - operation: amend_order
     product: spot
     transport: rest
@@ -193,36 +283,36 @@ endpoints:
   - operation: query_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/query_order
-    auth: unsupported
+    method: GET
+    path: /api/v5/trade/order
+    auth: hmac
     credential_scopes: [read_only]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private order readback is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed order readback on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."
   - operation: get_open_orders
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/get_open_orders
-    auth: unsupported
+    method: GET
+    path: /api/v5/trade/orders-pending
+    auth: hmac
     credential_scopes: [read_only]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private order readback is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed open-order readback on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."
   - operation: get_recent_fills
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/okxus/get_recent_fills
-    auth: unsupported
+    method: GET
+    path: /api/v5/trade/fills-history
+    auth: hmac
     credential_scopes: [read_only]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: OKX US private fills readback is disabled pending US credential and product-scope audit.
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed fills-history readback on the OKX US host; guarded by explicit OKXUS credentials and private REST enable flag."

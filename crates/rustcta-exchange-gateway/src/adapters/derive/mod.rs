@@ -2,14 +2,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    CancelOrderResponse, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
+    EndpointTransport, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -129,6 +131,7 @@ impl ExchangeClient for DeriveGatewayAdapter {
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
         capabilities.max_recent_fill_limit = Some(100);
+        apply_derive_capabilities_v2(&mut capabilities);
         capabilities
     }
 
@@ -206,7 +209,7 @@ impl ExchangeClient for DeriveGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("derive.replace_order_unverified")
+        self.unsupported(private::AMEND_ORDER_UNSUPPORTED)
     }
 
     async fn place_order_list(
@@ -227,7 +230,7 @@ impl ExchangeClient for DeriveGatewayAdapter {
             self.ensure_exchange(&order.symbol.exchange)?;
             self.ensure_supported_market_type(order.symbol.market_type)?;
         }
-        self.unsupported("derive.batch_place_orders_unverified")
+        self.unsupported("derive.batch_place_orders_unsupported")
     }
 
     async fn batch_cancel_orders(
@@ -235,7 +238,7 @@ impl ExchangeClient for DeriveGatewayAdapter {
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("derive.batch_cancel_orders_unverified")
+        self.unsupported("derive.batch_cancel_orders_unsupported")
     }
 
     async fn cancel_all_orders(
@@ -289,5 +292,103 @@ impl ExchangeClient for DeriveGatewayAdapter {
 fn validation_error(error: impl std::fmt::Display) -> ExchangeApiError {
     ExchangeApiError::InvalidRequest {
         message: error.to_string(),
+    }
+}
+
+fn apply_derive_capabilities_v2(capabilities: &mut ExchangeClientCapabilities) {
+    capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
+    capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
+        "derive private JSON-RPC has request-spec/source fixtures, but session/JWT/Stark signing and live reconciliation are not enabled",
+    );
+    capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
+    capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
+        "derive private WS auth is fixture-only until session login and REST reconciliation are live-validated",
+    );
+    capabilities.capabilities_v2.batch_place_orders =
+        BatchCapability::unsupported("derive.batch_place_orders_unsupported");
+    capabilities.capabilities_v2.batch_cancel_orders =
+        BatchCapability::unsupported("derive.batch_cancel_orders_unsupported");
+    capabilities.capabilities_v2.cancel_all_orders =
+        CapabilitySupport::unsupported("derive.cancel_all_orders_requires_admin_session");
+    capabilities.capabilities_v2.order_history =
+        HistoryCapability::unsupported("derive.order_history_requires_session_key");
+    capabilities.capabilities_v2.fills_history =
+        HistoryCapability::unsupported("derive.fills_history_requires_session_key");
+    capabilities.capabilities_v2.credential_scopes =
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade];
+    capabilities.capabilities_v2.endpoints = derive_capability_endpoints();
+}
+
+fn derive_capability_endpoints() -> Vec<EndpointCapability> {
+    vec![
+        derive_endpoint(
+            "derive.symbol_rules",
+            CapabilitySupport::native(),
+            EndpointAuth::None,
+            vec![],
+        ),
+        derive_endpoint(
+            "derive.order_book",
+            CapabilitySupport::native(),
+            EndpointAuth::None,
+            vec![],
+        ),
+        derive_endpoint(
+            "derive.place_order",
+            CapabilitySupport::unsupported("derive.place_order_session_signature_offline_only"),
+            EndpointAuth::Jwt,
+            vec![CredentialScope::Trade],
+        ),
+        derive_endpoint(
+            "derive.cancel_order",
+            CapabilitySupport::unsupported("derive.cancel_order_session_signature_offline_only"),
+            EndpointAuth::Jwt,
+            vec![CredentialScope::Trade],
+        ),
+        derive_endpoint(
+            "derive.amend_order",
+            CapabilitySupport::unsupported(private::AMEND_ORDER_UNSUPPORTED),
+            EndpointAuth::Jwt,
+            vec![CredentialScope::Trade],
+        ),
+        derive_endpoint(
+            "derive.place_order_list",
+            CapabilitySupport::unsupported("derive.order_list_unsupported"),
+            EndpointAuth::None,
+            vec![],
+        ),
+        derive_endpoint(
+            "derive.batch_place_orders",
+            CapabilitySupport::unsupported("derive.batch_place_orders_unsupported"),
+            EndpointAuth::None,
+            vec![],
+        ),
+        derive_endpoint(
+            "derive.batch_cancel_orders",
+            CapabilitySupport::unsupported("derive.batch_cancel_orders_unsupported"),
+            EndpointAuth::None,
+            vec![],
+        ),
+    ]
+}
+
+fn derive_endpoint(
+    operation: &str,
+    support: CapabilitySupport,
+    auth: EndpointAuth,
+    credential_scopes: Vec<CredentialScope>,
+) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support,
+        market_types: vec![MarketType::Option, MarketType::Perpetual],
+        transport: EndpointTransport::JsonRpc,
+        method: Some("POST".to_string()),
+        path: Some("/".to_string()),
+        auth,
+        credential_scopes,
+        rate_limit_bucket: Some("derive_json_rpc".to_string()),
+        weight: Some(1),
+        supports_testnet: false,
     }
 }

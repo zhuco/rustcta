@@ -1,0 +1,52 @@
+{
+  "exchange": "blockchaincom",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "exchange_spot_rest",
+    "exchange_spot_websocket"
+  ],
+  "official_product_lines": [
+    "app_perps_third_party_interface"
+  ],
+  "product_line_classification": {
+    "perps_third_party_product": {
+      "status": "project_unimplemented",
+      "reason": "App Perps / third-party derivatives require separate API ownership, credential scope, metadata, positions, funding, settlement, lifecycle, and reconciliation design."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "Blockchain.com Exchange v3 API used by this adapter does not expose standard futures, perpetual, or options contracts."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "exchange_v3_futures",
+    "exchange_v3_perpetual",
+    "exchange_v3_options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://api.blockchain.com/v3/",
+      "evidence": "The Exchange v3 API used by this adapter is scoped to exchange spot endpoints."
+    },
+    {
+      "url": "https://www.blockchain.com/",
+      "evidence": "Blockchain.com app Perps are treated as a separate app/third-party product surface and are not equivalent to Exchange v3 standard contracts."
+    }
+  ],
+  "runtime_isolation": "Do not route Blockchain.com app Perps or third-party derivatives through the Exchange Spot adapter until ownership, API surface, account scope, product metadata, private order lifecycle, positions, funding, settlement, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "separate product/API ownership and host policy",
+    "account and credential scope for perps access",
+    "perps market metadata, positions, funding, and settlement fixtures",
+    "private order lifecycle and reconciliation"
+  ],
+  "standard_contracts": {
+    "exchange_v3_futures": "unsupported_no_standard_contracts_in_exchange_v3_api",
+    "exchange_v3_perpetual": "unsupported_no_standard_contracts_in_exchange_v3_api",
+    "exchange_v3_options": "unsupported_no_standard_contracts_in_exchange_v3_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

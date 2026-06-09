@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "ask_px": "71291.23",
+      "ask_sz": "2.46310",
+      "bid_px": "71291.2",
+      "bid_sz": "2.30267",
+      "ms_t": 1773892368212,
+      "symbol": "BTC_USDT"
+    }
+  ],
+  "table": "spot/bookTicker"
+}

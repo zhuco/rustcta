@@ -1,0 +1,38 @@
+{
+  "exchange": "lighter",
+  "operation": "batch_cancel_orders",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/sendTxBatch",
+  "auth": "bearer",
+  "request_spec_required": true,
+  "requires_signed_tx": true,
+  "body": {
+    "account_index": 1,
+    "api_key_index": 2,
+    "nonce": "<redacted-nonce>",
+    "txs": [
+      {
+        "tx_type": "cancel_order",
+        "market_index": 0,
+        "order_index": "<redacted-order-index>"
+      }
+    ],
+    "signature": "<sdk-compatible-signed-tx-required>"
+  },
+  "signing_boundary": "tests/fixtures/exchanges/lighter/signing_vectors/signed_tx_boundary.json",
+  "source_boundary": {
+    "official_surfaces": ["/sendTxBatch", "/batchOrders"],
+    "runtime_status": "disabled"
+  },
+  "response_parser_fixture": "tests/fixtures/exchanges/lighter/parser/batch_cancel_orders_ack.json",
+  "trade_enabled": false,
+  "remaining_runtime": [
+    "sdk_compatible_signed_tx_batch",
+    "api_key_private_key_index_nonce",
+    "partial_failure_reconciliation",
+    "live_dry_run_guard"
+  ],
+  "expected_error": "lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard"
+}

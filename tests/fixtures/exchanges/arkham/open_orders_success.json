@@ -1,0 +1,16 @@
+[
+  {
+    "id": "ark-open-1",
+    "clientOrderId": "client-open-1",
+    "symbol": "BTC_USDT",
+    "side": "sell",
+    "type": "limitGtc",
+    "timeInForce": "gtc",
+    "size": "0.02000000",
+    "price": "66000.00",
+    "filledSize": "0.00000000",
+    "status": "open",
+    "createdAt": "2026-06-09T02:00:00Z",
+    "updatedAt": "2026-06-09T02:00:00Z"
+  }
+]

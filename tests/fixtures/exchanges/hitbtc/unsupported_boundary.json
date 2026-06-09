@@ -9,6 +9,12 @@
     "spot_cancel_order_request_spec",
     "spot_open_orders_request_spec",
     "spot_recent_fills_request_spec",
+    "spot_amend_order_replace_request_spec",
+    "spot_order_list_otoco_request_spec",
+    "spot_batch_cancel_orders_request_spec",
+    "spot_amend_order_replace_parser",
+    "spot_order_list_parser",
+    "spot_batch_cancel_orders_parser",
     "public_ws_orderbook_payload_and_parser",
     "private_ws_login_payload"
   ],
@@ -20,8 +26,44 @@
     "margin_trading",
     "futures_trading",
     "wallet_withdraw_transfer",
-    "batch_place_cancel",
-    "amend_order",
+    "batch_place_orders",
+    "batch_cancel_orders_runtime",
+    "amend_order_runtime",
+    "order_list_runtime",
     "quote_market_order"
-  ]
+  ],
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "guarded_runtime_existing",
+      "runtime_guard": "HITBTC_PRIVATE_REST_ENABLED plus API key/secret",
+      "official_path": "PATCH /api/3/spot/order/{client_order_id}",
+      "request_spec_fixture": "tests/fixtures/exchanges/hitbtc/request_specs/amend_order_replace.json",
+      "parser_fixture": "tests/fixtures/exchanges/hitbtc/parser/amend_order_ack.json",
+      "source_boundary": "existing guarded replace runtime remains unchanged in this P4 audit slice"
+    },
+    "place_order_list": {
+      "status": "guarded_runtime_existing",
+      "runtime_guard": "HITBTC_PRIVATE_REST_ENABLED plus API key/secret",
+      "official_path": "POST /api/3/spot/order/list",
+      "request_spec_fixture": "tests/fixtures/exchanges/hitbtc/request_specs/place_order_list_otoco.json",
+      "parser_fixture": "tests/fixtures/exchanges/hitbtc/parser/order_list_otoco_ack.json",
+      "source_boundary": "existing guarded order-list runtime remains unchanged in this P4 audit slice"
+    },
+    "batch_place_orders": {
+      "status": "unsupported",
+      "runtime_error": "hitbtc.batch_place_orders_not_mapped",
+      "official_path": null,
+      "request_spec_fixture": null,
+      "parser_fixture": null,
+      "source_boundary": "HitBTC has single-order create and order-list semantics, but no audited generic native batch-place endpoint with no lossless shared mapping from arbitrary BatchPlaceOrdersRequest items; runtime returns Unsupported and no generic batch runtime is enabled."
+    },
+    "batch_cancel_orders": {
+      "status": "unsupported",
+      "runtime_error": "hitbtc.batch_cancel_orders_filter_endpoint_overcancel_boundary",
+      "official_path": "DELETE /api/3/spot/order",
+      "request_spec_fixture": "tests/fixtures/exchanges/hitbtc/request_specs/batch_cancel_orders.json",
+      "parser_fixture": "tests/fixtures/exchanges/hitbtc/parser/batch_cancel_orders_ack.json",
+      "source_boundary": "HitBTC cancel-all/filter endpoint can cancel every matching open order by symbol/filter; mapping shared BatchCancelOrdersRequest cancel-list to this route would over-cancel orders outside the requested ids, so it stays an unsupported audit boundary."
+    }
+  }
 }

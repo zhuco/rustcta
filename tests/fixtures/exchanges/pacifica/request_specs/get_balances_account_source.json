@@ -1,0 +1,49 @@
+{
+  "exchange": "pacifica",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "boundary": "agent_wallet_account_equity_source_only",
+  "runtime_enabled": false,
+  "source": {
+    "surfaces": [
+      "Pacifica agent-wallet account model",
+      "account position/order/trade streams",
+      "account equity readback source to be wired"
+    ],
+    "requires": [
+      "account_address",
+      "agent_wallet_scope",
+      "signed_or_address_scoped_account_query"
+    ],
+    "address_shape": "base58 account address fixture",
+    "does_not_use": [
+      "real_private_key",
+      "real_signature",
+      "withdrawal_scope"
+    ]
+  },
+  "request_shape_sample": {
+    "method": "SOURCE_READ",
+    "path": "source://pacifica/agent-wallet-account-equity",
+    "auth": "account_query_or_signed_request_pending_runtime"
+  },
+  "decoded_sample": {
+    "account": "42trU9A5AccountFixture",
+    "collateral_asset": "USDC",
+    "available_balance": "750.000000",
+    "account_equity": "812.340000",
+    "unrealized_pnl": "62.340000"
+  },
+  "runtime_gap": [
+    "agent-wallet/address scope guard",
+    "account/equity parser",
+    "private WebSocket reconciliation",
+    "read-only live validation"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_account": false,
+    "live_call_allowed": false
+  }
+}

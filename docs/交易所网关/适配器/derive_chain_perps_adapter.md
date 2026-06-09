@@ -17,7 +17,7 @@ Product lines:
 Runtime boundary:
 - Product: `MarketType::Perpetual`
 - Chain: Derive Chain, chain id `957`
-- Public WS: 交易所不支持公共 WS 行情（本 profile 口径）；Derive Exchange 官方 WS runtime 归 `derive` adapter，不在 `derive_chain_perps` 重复实现
+- Public WS: 交易所不支持公共 WS 行情（本 profile 口径）；`endpoint_mapping.yaml` records `websocket.public.support: unsupported`; Derive Exchange 官方 WS runtime 归 `derive` adapter，不在 `derive_chain_perps` 重复实现
 - Public REST: unsupported unverified
 - Private reads: unsupported unverified
 - Orders/cancels/batch: unsupported unverified
@@ -32,6 +32,7 @@ Position official detail:
 - Source: [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)
 - 写法：`交易所不支持当前仓位接口 runtime`。
 - 原因：本 profile 不重复承接 Derive Exchange account/position runtime；仓位能力看 `derive` adapter。
+- 账户/余额接口写 `项目未实现/离线边界`：Derive Chain wallet/address settlement balance 可走链上或 indexer readback；`endpoint_mapping.yaml` 已将 `get_balances` 写成 `chain://derive-chain/wallet/settlement-balances` spec-only source boundary，并绑定 `tests/fixtures/exchanges/derive_chain_perps/request_specs/get_balances_account_source.json`。矩阵应为 `get_balances=离线`；Derive Exchange account runtime 仍归 `derive` adapter，当前 profile 不执行 live RPC/indexer。
 
 Non-compile validation:
 - `python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/derive_chain_perps/endpoint_mapping.yaml`
@@ -40,3 +41,7 @@ Non-compile validation:
 - template-residue grep for copied venue names and stale task IDs
 
 Per task instruction, do not run cargo build/check/test for this profile.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：本 profile 不承接 Derive Exchange fee runtime。

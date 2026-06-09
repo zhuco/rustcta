@@ -1,6 +1,8 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
-    EndpointTransport, ExchangeClientCapabilities, HistoryCapability,
+    BatchAtomicity, BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth,
+    EndpointCapability, EndpointTransport, ExchangeClientCapabilities, HeartbeatCapability,
+    HeartbeatDirection, HeartbeatPolicy, HistoryCapability, ReconnectCapability,
+    StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
@@ -8,6 +10,7 @@ pub(super) fn apply_toolchain_capabilities(
     capabilities: &mut ExchangeClientCapabilities,
     private_rest_enabled: bool,
     exchange_id: &str,
+    public_streams_enabled: bool,
 ) {
     let label = profile_label(exchange_id);
     let regional_profile = exchange_id != "okx";
@@ -23,17 +26,35 @@ pub(super) fn apply_toolchain_capabilities(
             "OKX private REST requires enabled API key, secret, and passphrase",
         )
     };
-    capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(format!(
-        "{label} public WS runtime is not wired in this adapter yet"
-    ));
+    capabilities.capabilities_v2.public_streams = if public_streams_enabled {
+        CapabilitySupport::rest_fallback(format!(
+            "{label} public WS books5/books/bbo-tbt subscription is mapped; REST books snapshot remains the resync source"
+        ))
+    } else {
+        CapabilitySupport::unsupported(format!("{label} public streams disabled by config"))
+    };
     capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(format!(
         "{label} private WS login/order stream is not wired; use REST reconciliation after private enablement"
     ));
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported(format!("{label} batch place order is not implemented"));
-    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability::unsupported(format!(
-        "{label} batch cancel order is only used internally by cancel_all_orders when private REST is enabled"
-    ));
+    capabilities.capabilities_v2.stream_runtime = stream_runtime(public_streams_enabled);
+    capabilities.capabilities_v2.batch_place_orders = if private_rest_enabled {
+        let mut capability = BatchCapability::native(BatchAtomicity::Partial, Some(20));
+        capability.same_market_type_required = true;
+        capability.supports_client_order_id = true;
+        capability.supports_partial_failure = true;
+        capability
+    } else {
+        BatchCapability::unsupported(format!("{label} batch place order requires private REST"))
+    };
+    capabilities.capabilities_v2.batch_cancel_orders = if private_rest_enabled {
+        let mut capability = BatchCapability::native(BatchAtomicity::Partial, Some(20));
+        capability.same_market_type_required = true;
+        capability.supports_client_order_id = true;
+        capability.supports_partial_failure = true;
+        capability
+    } else {
+        BatchCapability::unsupported(format!("{label} batch cancel order requires private REST"))
+    };
     capabilities.capabilities_v2.cancel_all_orders = if private_rest_enabled {
         CapabilitySupport::composed("loads open orders then calls native cancel-batch-orders")
     } else if regional_profile {
@@ -89,6 +110,55 @@ pub(super) fn apply_toolchain_capabilities(
     capabilities.apply_v2_to_legacy_flags();
 }
 
+fn stream_runtime(public_streams_enabled: bool) -> StreamRuntimeCapability {
+    StreamRuntimeCapability {
+        public: if public_streams_enabled {
+            CapabilitySupport::rest_fallback(
+                "REST /api/v5/market/books snapshot required after reconnect or seqId gap",
+            )
+        } else {
+            CapabilitySupport::unsupported("public streams disabled")
+        },
+        private: CapabilitySupport::unsupported("private WS login/order stream is not wired"),
+        supports_subscribe: public_streams_enabled,
+        supports_unsubscribe: public_streams_enabled,
+        supports_public_subscribe: public_streams_enabled,
+        supports_public_unsubscribe: public_streams_enabled,
+        supports_private_subscribe: false,
+        supports_private_unsubscribe: false,
+        heartbeat: HeartbeatCapability {
+            supported: true,
+            required: true,
+            direction: StreamHeartbeatDirection::ClientPing,
+            interval_ms: Some(25_000),
+            timeout_ms: Some(30_000),
+        },
+        reconnect: ReconnectCapability {
+            supported: true,
+            requires_resubscribe: true,
+            preserves_session: false,
+            max_reconnect_attempts: None,
+        },
+        resync: StreamResyncCapability {
+            order_book: true,
+            balances: false,
+            positions: false,
+            orders: false,
+        },
+        heartbeat_policy: HeartbeatPolicy {
+            direction: HeartbeatDirection::ClientPing,
+            ping_interval_ms: 25_000,
+            pong_timeout_ms: 30_000,
+            stale_message_ms: 30_000,
+            requires_pong_payload_echo: false,
+        },
+        reconnect_requires_login: false,
+        reconnect_requires_resubscribe: true,
+        orderbook_requires_snapshot_after_reconnect: true,
+        ..StreamRuntimeCapability::default()
+    }
+}
+
 fn endpoint_capabilities(private_rest_enabled: bool, exchange_id: &str) -> Vec<EndpointCapability> {
     let regional_profile = exchange_id != "okx";
     let mut endpoints = vec![
@@ -140,6 +210,13 @@ fn endpoint_capabilities(private_rest_enabled: bool, exchange_id: &str) -> Vec<E
             1,
         ),
         (
+            "get_positions",
+            "GET",
+            "/api/v5/account/positions",
+            CredentialScope::ReadOnly,
+            1,
+        ),
+        (
             "place_order",
             "POST",
             "/api/v5/trade/order",
@@ -157,6 +234,20 @@ fn endpoint_capabilities(private_rest_enabled: bool, exchange_id: &str) -> Vec<E
             "cancel_order",
             "POST",
             "/api/v5/trade/cancel-order",
+            CredentialScope::Trade,
+            1,
+        ),
+        (
+            "batch_place_orders",
+            "POST",
+            "/api/v5/trade/batch-orders",
+            CredentialScope::Trade,
+            1,
+        ),
+        (
+            "batch_cancel_orders",
+            "POST",
+            "/api/v5/trade/cancel-batch-orders",
             CredentialScope::Trade,
             1,
         ),
@@ -214,7 +305,7 @@ fn endpoint_capabilities(private_rest_enabled: bool, exchange_id: &str) -> Vec<E
                     Some(weight),
                 )
             };
-        endpoints.push(rest_endpoint(
+        let mut endpoint = rest_endpoint(
             operation,
             private_support.clone(),
             method,
@@ -223,7 +314,11 @@ fn endpoint_capabilities(private_rest_enabled: bool, exchange_id: &str) -> Vec<E
             vec![credential_scope],
             rate_limit_bucket,
             weight,
-        ));
+        );
+        if operation == "place_quote_market_order" {
+            endpoint.market_types = vec![MarketType::Spot];
+        }
+        endpoints.push(endpoint);
     }
 
     if regional_profile {
@@ -248,7 +343,12 @@ fn rest_endpoint(
     EndpointCapability {
         operation: operation.to_string(),
         support,
-        market_types: vec![MarketType::Spot, MarketType::Perpetual],
+        market_types: vec![
+            MarketType::Spot,
+            MarketType::Perpetual,
+            MarketType::Futures,
+            MarketType::Option,
+        ],
         transport: EndpointTransport::Rest,
         method: Some(method.to_string()),
         path: Some(path.to_string()),

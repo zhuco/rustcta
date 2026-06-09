@@ -6,10 +6,10 @@ use rustcta_exchange_api::{
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
     ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, RequestContext,
-    SymbolRulesRequest, SymbolRulesResponse, TenantId, TimeInForce,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    RequestContext, SymbolRulesRequest, SymbolRulesResponse, TenantId, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -208,7 +208,8 @@ impl ExchangeClient for CoinmetroGatewayAdapter {
             vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK];
         capabilities.supports_order_types = vec![OrderType::Market, OrderType::Limit];
         capabilities.max_order_book_depth = None;
-        capabilities.order_book = rustcta_exchange_api::OrderBookCapability::snapshot_only(None);
+        capabilities.order_book = rustcta_exchange_api::OrderBookCapability::strict_delta(None);
+        capabilities.order_book.supports_checksum = true;
         capabilities.max_recent_fill_limit = None;
         capabilities
     }
@@ -290,6 +291,15 @@ impl ExchangeClient for CoinmetroGatewayAdapter {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
         self.unsupported("coinmetro.modify_order_unmapped_requires_native_qty_fields")
+    }
+
+    async fn place_order_list(
+        &self,
+        request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        self.ensure_exchange(&request.symbol().exchange)?;
+        self.ensure_spot(request.symbol().market_type)?;
+        self.unsupported("coinmetro.order_list_unsupported")
     }
 
     async fn batch_place_orders(

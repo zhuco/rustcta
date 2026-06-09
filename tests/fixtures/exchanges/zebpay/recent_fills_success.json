@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "data": [
+    {
+      "trade_id": "zebpay-fill-1",
+      "order_id": "12345",
+      "trade_pair": "BTC-INR",
+      "side": "bid",
+      "price": "7000000",
+      "quantity": "0.00150000",
+      "fee": "10.5",
+      "fee_currency": "INR",
+      "timestamp": "2026-06-08T12:02:00Z"
+    },
+    {
+      "trade_id": "zebpay-fill-2",
+      "order_id": "12345",
+      "trade_pair": "BTC-INR",
+      "side": "bid",
+      "price": "7000000",
+      "quantity": "0.00100000",
+      "fee": "7",
+      "fee_currency": "INR",
+      "timestamp": "2026-06-08T12:03:00Z"
+    }
+  ]
+}

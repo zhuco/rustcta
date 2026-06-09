@@ -1,0 +1,17 @@
+{
+  "data": {
+    "order_id": "bsx-order-1001",
+    "client_order_id": "client-amend-1001",
+    "product_id": "BTC-PERP",
+    "side": "BUY",
+    "order_type": "LIMIT",
+    "status": "OPEN",
+    "size": "0.0200",
+    "price": "65000.5",
+    "filled_size": "0",
+    "reduce_only": false,
+    "post_only": true,
+    "created_at": "2026-06-08T12:00:00Z",
+    "updated_at": "2026-06-08T12:00:03Z"
+  }
+}

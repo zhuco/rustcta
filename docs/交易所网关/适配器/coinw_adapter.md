@@ -58,12 +58,14 @@ semantics as Perp. These return `Unsupported` through the standard
 | `place_order` Spot | `POST /api/v1/private?command=doTrade` | Limit/market orders; requires `client_order_id` as CoinW `out_trade_no`. |
 | `place_quote_market_order` Spot | `POST /api/v1/private?command=doTrade` | Uses market `funds` for quote-sized buy/sell orders. |
 | `place_order` Perp | `POST /v1/perpum/order` | Maps market/limit/IOC/FOK/PostOnly to CoinW `positionType`; default leverage is `1` in the standard request mapping. |
+| `amend_order` Spot/Perp | Unsupported | No standard in-place amend mapping; caller-level cancel/replace is required. |
+| `place_order_list` Spot/Perp | Unsupported | OCO/OTO order-list semantics are not mapped in this adapter. |
 | `cancel_order` Spot/Perp | Spot `cancelOrder`; Perp `DELETE /v1/perpum/order` | Requires exchange order id. |
 | `cancel_all_orders` Spot/Perp | Spot `cancelAllOrder`; Perp composed open-orders + `DELETE /v1/perpum/batchOrders` | Perp has no single cancel-all endpoint in the docs. |
 | `query_order` Spot/Perp | Spot `returnOrderStatus`; Perp `GET /v1/perpum/order` | Requires exchange order id. |
 | `get_open_orders` Spot/Perp | Spot `returnOpenOrders`; Perp `GET /v1/perpum/orders/open` | Symbol-scoped. |
 | `get_recent_fills` Spot/Perp | Spot `returnUTradeHistory`; Perp `GET /v1/perpum/orders/deals` | Symbol-scoped. |
-| Batch place/cancel | Gateway sequential fallback; Perp native batch cancel | Batch place is intentionally composed from standard single-order calls; Perp batch cancel sends all supported CoinW position types to avoid missing non-`plan` orders. |
+| Batch place/cancel | Gateway sequential fallback; Perp native batch cancel | `batch_place_orders` is composed sequentially from single orders; `batch_cancel_orders` is mixed composed/native: Spot uses single cancel fallback, Perp uses `/v1/perpum/batchOrders` for supported position types. |
 | WebSocket specs | Spot/Futures public/private streams | Subscription ids and payload specs for public book/trades/ticker/candles and private order/assets/position channels; session helpers provide `initial_requests`, ping/pong heartbeat, reconnect policy, public order book parsing, and private order/balance/position standard events. |
 
 Default REST base URL: `https://api.coinw.com`.
@@ -103,6 +105,10 @@ Default REST base URL: `https://api.coinw.com`.
   before live-dry-run.
 - Public WS capability is declared for Spot and perpetual subscriptions with
   ping/pong heartbeat, reconnect, resubscribe, and REST order book resync.
+  Spot records `spot/level2_20`, `depth_snapshot`, and `depth` channels with
+  `seq/startSeq/endSeq`; futures records 100-level `depth` pushes. CoinW does
+  not document a fixed ms cadence for those public depth pushes, and futures
+  has no sequence/checksum continuity field.
 - Private WS capability is declared as `rest_fallback`: private parser/session
   specs exist, authentication requires credentials, no listen-key renewal is
   used, and reconnect requires re-login plus REST reconciliation.

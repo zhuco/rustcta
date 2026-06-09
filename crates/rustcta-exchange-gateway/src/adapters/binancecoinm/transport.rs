@@ -208,7 +208,7 @@ async fn parse_response(
     Ok(value)
 }
 
-fn classify_binancecoinm_error(code: Option<&str>, message: &str) -> ExchangeErrorClass {
+pub(super) fn classify_binancecoinm_error(code: Option<&str>, message: &str) -> ExchangeErrorClass {
     let code = code.unwrap_or_default();
     let msg = message.to_ascii_lowercase();
     if matches!(code, "-2010" | "-2018") || msg.contains("insufficient") {

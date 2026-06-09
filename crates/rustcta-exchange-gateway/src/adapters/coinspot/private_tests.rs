@@ -1,8 +1,10 @@
 use rustcta_exchange_api::{
-    BalancesRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, CapabilitySupport, ExchangeApiError,
+    ExchangeClient, OpenOrdersRequest, OrderListConditionalLeg, OrderListLegType, OrderListRequest,
     PlaceOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{OrderSide, OrderStatus, OrderType};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{context, exchange_id, spawn_rest_server, symbol_scope, SeenRequest};
@@ -18,6 +20,9 @@ fn coinspot_fixture(name: &str) -> serde_json::Value {
         ),
         "signing_vectors/private_post.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/coinspot/signing_vectors/private_post.json"
+        ),
+        "unsupported_boundary.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/coinspot/unsupported_boundary.json"
         ),
         _ => panic!("unknown coinspot fixture {name}"),
     };
@@ -224,6 +229,138 @@ async fn coinspot_adapter_should_expose_unsupported_cancel_boundary() {
     assert!(
         matches!(error, ExchangeApiError::Unsupported { operation } if operation == "coinspot.cancel_order_side_specific")
     );
+}
+
+#[tokio::test]
+async fn coinspot_adapter_should_pin_advanced_order_unsupported_boundary() {
+    let adapter = CoinspotGatewayAdapter::new(CoinspotGatewayConfig {
+        api_key: "key".to_string(),
+        api_secret: "secret".to_string(),
+        enabled_private_rest: true,
+        ..CoinspotGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_cancel_all_orders);
+    assert!(matches!(
+        capabilities.capabilities_v2.batch_place_orders.support,
+        CapabilitySupport::Unsupported { .. }
+    ));
+    assert!(matches!(
+        capabilities.capabilities_v2.batch_cancel_orders.support,
+        CapabilitySupport::Unsupported { .. }
+    ));
+
+    let boundary = coinspot_fixture("unsupported_boundary.json");
+    assert_eq!(boundary["advanced_order_runtime"], false);
+    assert_eq!(
+        boundary["unsupported_operations"]["amend_order"],
+        "coinspot.edit_order_side_specific"
+    );
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("9001".to_string()),
+            new_client_order_id: Some("coinspot-amend-new".to_string()),
+            new_quantity: "0.02".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinspot.edit_order_side_specific"
+        }
+    ));
+
+    let order_list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("oco"),
+            symbol: symbol_scope(),
+            list_client_order_id: Some("coinspot-oco".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.01".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::Limit,
+                price: Some("101000".to_string()),
+                stop_price: None,
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("coinspot-oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("97000".to_string()),
+                stop_price: Some("98000".to_string()),
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("coinspot-oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        order_list_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinspot.order_list"
+        }
+    ));
+
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: Vec::new(),
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinspot.batch_place_orders"
+        }
+    ));
+
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: Vec::new(),
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinspot.batch_cancel_orders"
+        }
+    ));
+
+    let cancel_all_error = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect_err("cancel-all unsupported");
+    assert!(matches!(
+        cancel_all_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinspot.cancel_all_orders"
+        }
+    ));
 }
 
 fn assert_signed_request(request: &SeenRequest, path: &str) {

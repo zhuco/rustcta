@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::private::ZebpayPrivateRequestSpec;
+
 #[derive(Clone)]
 pub struct ZebpayRest {
     exchange_id: ExchangeId,
@@ -48,6 +50,44 @@ impl ZebpayRest {
                 self.rest_base_url.trim_end_matches('/'),
                 build_path(endpoint, params)
             ))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_request(
+        &self,
+        spec: &ZebpayPrivateRequestSpec,
+    ) -> ExchangeApiResult<Value> {
+        let method = spec
+            .method
+            .parse()
+            .map_err(|error| ExchangeApiError::InvalidRequest {
+                message: format!("invalid ZebPay private method: {error}"),
+            })?;
+        let mut builder = self.http.request(
+            method,
+            format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                build_path_from_pairs(
+                    &spec.path,
+                    spec.query.iter().map(|(key, value)| (key, value))
+                )
+            ),
+        );
+        builder = builder
+            .header("client_id", &spec.headers.client_id)
+            .header("timestamp", &spec.headers.timestamp)
+            .header("RequestId", &spec.headers.request_id)
+            .header("Authorization", &spec.headers.authorization);
+        if let Some(body) = &spec.body {
+            builder = builder.json(body);
+        }
+        let response = builder
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {
@@ -113,9 +153,16 @@ fn classify_zebpay_error(message: &str, status: u16) -> ExchangeErrorClass {
 }
 
 fn build_path(endpoint: &str, params: &HashMap<String, String>) -> String {
+    build_path_from_pairs(endpoint, params.iter())
+}
+
+fn build_path_from_pairs<'a, I>(endpoint: &str, params: I) -> String
+where
+    I: IntoIterator<Item = (&'a String, &'a String)>,
+{
     let mut path = endpoint.to_string();
-    if !params.is_empty() {
-        let mut pairs = params.iter().collect::<Vec<_>>();
+    let mut pairs = params.into_iter().collect::<Vec<_>>();
+    if !pairs.is_empty() {
         pairs.sort_by(|left, right| left.0.cmp(right.0));
         path.push('?');
         path.push_str(

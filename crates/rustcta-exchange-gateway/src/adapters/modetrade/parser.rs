@@ -1,10 +1,14 @@
 use chrono::{DateTime, TimeZone, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, AmendOrderResponse, BatchItemResult, BatchOperationReport, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, ExchangeApiError, ExchangeApiResult, OrderState, ReconcilePlan,
+    ReconcileTrigger, ResponseMetadata, RetryReconcilePolicy, SymbolRules, SymbolScope, TenantId,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, Fill,
+    FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion, TimeInForce,
 };
 use serde_json::Value;
 
@@ -77,6 +81,168 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_amend_order_ack(
+    exchange_id: &ExchangeId,
+    fallback_symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<AmendOrderResponse> {
+    ensure_success(exchange_id, value)?;
+    let data = value.get("data").unwrap_or(value);
+    let order = parse_order_state(exchange_id, Some(fallback_symbol), data)?;
+    let mut metadata = ResponseMetadata::new(exchange_id.clone(), Utc::now());
+    metadata.exchange_timestamp = Some(order.updated_at);
+    Ok(AmendOrderResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata,
+        order,
+    })
+}
+
+pub fn parse_batch_place_orders_ack(
+    exchange_id: &ExchangeId,
+    request: &BatchPlaceOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+    ensure_success(exchange_id, value)?;
+    let rows = batch_items(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ModeTrade batch create response missing order rows",
+            value,
+        )
+    })?;
+
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.orders.len());
+    for (index, order_request) in request.orders.iter().enumerate() {
+        let Some(row) = rows.get(index) else {
+            let error = batch_item_error(
+                exchange_id,
+                "ModeTrade batch create response omitted item",
+                Value::Null,
+            );
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "ModeTrade/Orderly batch-create did not return a result for this request item",
+                )),
+            ));
+            continue;
+        };
+
+        if !batch_item_success(row) {
+            let error = batch_item_error(
+                exchange_id,
+                "ModeTrade batch create item failed",
+                row.clone(),
+            );
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                value_as_string(row.get("order_id")).or_else(|| value_as_string(row.get("id"))),
+                error,
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchPlacePartialFailure,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "ModeTrade/Orderly batch-create returned an item failure; reconcile before retry",
+                )),
+            ));
+            continue;
+        }
+
+        let order = parse_order_state(exchange_id, Some(&order_request.symbol), row)?;
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+
+    let mut metadata = ResponseMetadata::new(exchange_id.clone(), Utc::now());
+    metadata.exchange_timestamp = orders.iter().map(|order| order.updated_at).max();
+    Ok(BatchPlaceOrdersResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata,
+        orders,
+        report: Some(BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.orders.len(),
+            results,
+        }),
+    })
+}
+
+pub fn parse_single_order(
+    exchange_id: &ExchangeId,
+    fallback_symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    ensure_success(exchange_id, value)?;
+    let data = value.get("data").unwrap_or(value);
+    parse_order_state(exchange_id, Some(fallback_symbol), data)
+}
+
+pub fn parse_orders(
+    exchange_id: &ExchangeId,
+    fallback_symbol: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    ensure_success(exchange_id, value)?;
+    let rows = value
+        .get("data")
+        .and_then(|data| data.get("rows"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "ModeTrade orders response missing rows",
+                value,
+            )
+        })?;
+    rows.iter()
+        .map(|row| parse_order_state(exchange_id, fallback_symbol, row))
+        .collect()
+}
+
+pub fn parse_recent_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    fallback_symbol: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    ensure_success(exchange_id, value)?;
+    let rows = value
+        .get("data")
+        .and_then(|data| data.get("rows"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "ModeTrade trades response missing rows",
+                value,
+            )
+        })?;
+    rows.iter()
+        .map(|row| {
+            parse_fill(
+                exchange_id,
+                tenant_id.clone(),
+                account_id.clone(),
+                fallback_symbol,
+                row,
+            )
+        })
+        .collect()
+}
+
 fn parse_market(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
     let symbol_text = required_str(exchange_id, value, "symbol")?;
     let canonical_symbol = canonical_from_orderly_symbol(symbol_text)?;
@@ -133,6 +299,159 @@ fn parse_market(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<Sy
     })
 }
 
+fn parse_order_state(
+    exchange_id: &ExchangeId,
+    fallback_symbol: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let symbol_text = value
+        .get("symbol")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| fallback_symbol.map(|symbol| symbol.exchange_symbol.symbol.clone()))
+        .ok_or_else(|| parse_error(exchange_id.clone(), "ModeTrade order missing symbol", value))?;
+    let exchange_symbol =
+        ExchangeSymbol::new(exchange_id.clone(), MarketType::Perpetual, &symbol_text)
+            .map_err(validation_error)?;
+    let canonical_symbol = canonical_from_orderly_symbol(&symbol_text).ok();
+    let order_type = value
+        .get("order_type")
+        .or_else(|| value.get("type"))
+        .and_then(Value::as_str)
+        .and_then(parse_order_type)
+        .unwrap_or(OrderType::Limit);
+    let side = value
+        .get("side")
+        .and_then(Value::as_str)
+        .and_then(parse_side)
+        .unwrap_or(OrderSide::Buy);
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol,
+        exchange_symbol,
+        client_order_id: value_as_string(value.get("client_order_id")),
+        exchange_order_id: value_as_string(value.get("order_id")),
+        side,
+        position_side: Some(PositionSide::Net),
+        order_type,
+        time_in_force: order_type_to_time_in_force(order_type),
+        status: value
+            .get("status")
+            .or_else(|| value.get("order_status"))
+            .and_then(Value::as_str)
+            .and_then(parse_order_status)
+            .unwrap_or(OrderStatus::Open),
+        quantity: decimal_path(value, &["order_quantity"])
+            .or_else(|| decimal_path(value, &["quantity"]))
+            .unwrap_or_else(|| "0".to_string()),
+        price: decimal_path(value, &["order_price"]).or_else(|| decimal_path(value, &["price"])),
+        filled_quantity: decimal_path(value, &["total_executed_quantity"])
+            .or_else(|| decimal_path(value, &["executed_quantity"]))
+            .or_else(|| decimal_path(value, &["executed"]))
+            .unwrap_or_else(|| "0".to_string()),
+        average_fill_price: decimal_path(value, &["average_executed_price"]),
+        reduce_only: value
+            .get("reduce_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        post_only: order_type == OrderType::PostOnly,
+        created_at: value
+            .get("created_time")
+            .or_else(|| value.get("created_at"))
+            .and_then(value_as_i64)
+            .and_then(timestamp_millis),
+        updated_at: value
+            .get("updated_time")
+            .or_else(|| value.get("updated_at"))
+            .or_else(|| value.get("timestamp"))
+            .and_then(value_as_i64)
+            .and_then(timestamp_millis)
+            .unwrap_or_else(Utc::now),
+    })
+}
+
+fn parse_fill(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    fallback_symbol: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<Fill> {
+    let symbol_text = value
+        .get("symbol")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| fallback_symbol.map(|symbol| symbol.exchange_symbol.symbol.clone()))
+        .ok_or_else(|| parse_error(exchange_id.clone(), "ModeTrade fill missing symbol", value))?;
+    let exchange_symbol =
+        ExchangeSymbol::new(exchange_id.clone(), MarketType::Perpetual, &symbol_text)
+            .map_err(validation_error)?;
+    let price = value
+        .get("executed_price")
+        .or_else(|| value.get("price"))
+        .and_then(value_as_f64)
+        .ok_or_else(|| parse_error(exchange_id.clone(), "ModeTrade fill missing price", value))?;
+    let quantity = value
+        .get("executed_quantity")
+        .or_else(|| value.get("quantity"))
+        .and_then(value_as_f64)
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "ModeTrade fill missing quantity",
+                value,
+            )
+        })?;
+    let side = value
+        .get("side")
+        .and_then(Value::as_str)
+        .and_then(parse_side)
+        .unwrap_or(OrderSide::Buy);
+    let fill = Fill {
+        schema_version: SchemaVersion::current(),
+        tenant_id,
+        account_id,
+        exchange_id: exchange_id.clone(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: canonical_from_orderly_symbol(&symbol_text)?,
+        exchange_symbol: Some(exchange_symbol),
+        order_id: value_as_string(value.get("order_id")),
+        client_order_id: value_as_string(value.get("client_order_id")),
+        fill_id: value_as_string(value.get("id"))
+            .or_else(|| value_as_string(value.get("match_id")))
+            .or_else(|| value_as_string(value.get("trade_id"))),
+        side,
+        position_side: PositionSide::Net,
+        status: FillStatus::Confirmed,
+        liquidity_role: match value.get("is_maker").and_then(value_as_i64) {
+            Some(1) => LiquidityRole::Maker,
+            Some(0) => LiquidityRole::Taker,
+            _ => LiquidityRole::Unknown,
+        },
+        price,
+        quantity,
+        quote_quantity: Some(price * quantity),
+        fee_asset: value
+            .get("fee_asset")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        fee_amount: value.get("fee").and_then(value_as_f64),
+        fee_rate: value.get("order_enum_fee_rate").and_then(value_as_f64),
+        realized_pnl: value.get("realized_pnl").and_then(value_as_f64),
+        filled_at: value
+            .get("executed_timestamp")
+            .or_else(|| value.get("timestamp"))
+            .and_then(value_as_i64)
+            .and_then(timestamp_millis)
+            .unwrap_or_else(Utc::now),
+        received_at: Utc::now(),
+    };
+    fill.validate().map_err(validation_error)?;
+    Ok(fill)
+}
+
 fn canonical_from_orderly_symbol(symbol: &str) -> ExchangeApiResult<CanonicalSymbol> {
     let parts = symbol.trim().split('_').collect::<Vec<_>>();
     if parts.len() < 3 || !parts[0].eq_ignore_ascii_case("PERP") {
@@ -141,6 +460,48 @@ fn canonical_from_orderly_symbol(symbol: &str) -> ExchangeApiResult<CanonicalSym
         });
     }
     CanonicalSymbol::new(parts[1], parts[2]).map_err(validation_error)
+}
+
+fn parse_side(value: &str) -> Option<OrderSide> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "BUY" => Some(OrderSide::Buy),
+        "SELL" => Some(OrderSide::Sell),
+        _ => None,
+    }
+}
+
+fn parse_order_type(value: &str) -> Option<OrderType> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "MARKET" => Some(OrderType::Market),
+        "LIMIT" => Some(OrderType::Limit),
+        "POST_ONLY" => Some(OrderType::PostOnly),
+        "IOC" => Some(OrderType::IOC),
+        "FOK" => Some(OrderType::FOK),
+        _ => None,
+    }
+}
+
+fn parse_order_status(value: &str) -> Option<OrderStatus> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "NEW" => Some(OrderStatus::New),
+        "OPEN" => Some(OrderStatus::Open),
+        "PARTIAL_FILLED" | "PARTIALLY_FILLED" => Some(OrderStatus::PartiallyFilled),
+        "FILLED" => Some(OrderStatus::Filled),
+        "CANCEL_SENT" | "CANCEL_ALL_SENT" => Some(OrderStatus::PendingCancel),
+        "CANCELLED" | "CANCELED" => Some(OrderStatus::Cancelled),
+        "REJECTED" => Some(OrderStatus::Rejected),
+        "EXPIRED" => Some(OrderStatus::Expired),
+        _ => Some(OrderStatus::Unknown),
+    }
+}
+
+fn order_type_to_time_in_force(order_type: OrderType) -> Option<TimeInForce> {
+    match order_type {
+        OrderType::IOC => Some(TimeInForce::IOC),
+        OrderType::FOK => Some(TimeInForce::FOK),
+        OrderType::PostOnly => Some(TimeInForce::GTX),
+        _ => None,
+    }
 }
 
 fn parse_levels(
@@ -208,6 +569,58 @@ fn ensure_success(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<
     ))
 }
 
+fn response_data(value: &Value) -> &Value {
+    value.get("data").unwrap_or(value)
+}
+
+fn batch_items(value: &Value) -> Option<&Vec<Value>> {
+    if let Some(items) = response_data(value).as_array() {
+        return Some(items);
+    }
+    response_data(value)
+        .get("rows")
+        .or_else(|| response_data(value).get("orders"))
+        .or_else(|| response_data(value).get("data"))
+        .and_then(Value::as_array)
+}
+
+fn batch_item_success(value: &Value) -> bool {
+    if value
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    value
+        .get("status")
+        .or_else(|| value.get("order_status"))
+        .and_then(Value::as_str)
+        .is_some_and(|status| {
+            matches!(
+                status.to_ascii_uppercase().as_str(),
+                "NEW" | "OPEN" | "PARTIAL_FILLED" | "PARTIALLY_FILLED" | "FILLED"
+            )
+        })
+}
+
+fn batch_item_error(exchange_id: &ExchangeId, fallback: &str, raw: Value) -> ExchangeError {
+    let message = raw
+        .get("message")
+        .or_else(|| raw.get("error_message"))
+        .or_else(|| raw.get("error"))
+        .and_then(Value::as_str)
+        .unwrap_or(fallback);
+    let mut error = ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::OrderRejected,
+        message.to_string(),
+        Utc::now(),
+    );
+    error.raw = Some(raw);
+    error
+}
+
 fn decimal_path(value: &Value, path: &[&str]) -> Option<String> {
     let mut cursor = value;
     for key in path {
@@ -218,6 +631,14 @@ fn decimal_path(value: &Value, path: &[&str]) -> Option<String> {
 
 fn value_as_decimal_string(value: &Value) -> Option<String> {
     match value {
+        Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn value_as_string(value: Option<&Value>) -> Option<String> {
+    match value? {
         Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
         Value::Number(number) => Some(number.to_string()),
         _ => None,

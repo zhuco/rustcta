@@ -1,0 +1,12 @@
+{
+  "exchange": "bybit",
+  "name": "batch_cancel_orders",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/v5/order/cancel-batch",
+  "payload": "1700000000000test-key5000{\"category\":\"linear\",\"request\":[{\"orderId\":\"3001\",\"orderLinkId\":\"cli-batch-1\",\"symbol\":\"BTCUSDT\"}]}",
+  "expected_signature": "72a787b1a1e27c1600185ed0a7acfaf3723213bd7698603dcc7d3851bbb9cf6c",
+  "payload_format": "raw_payload"
+}

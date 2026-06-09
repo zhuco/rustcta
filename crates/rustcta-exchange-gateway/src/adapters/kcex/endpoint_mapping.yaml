@@ -1,0 +1,211 @@
+schema_version: 1
+exchange: kcex
+adapter: rustcta_exchange_gateway::adapters::kcex
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: KCEX official website/support pages; no stable OpenAPI documentation found during 2026-06-08 audit
+  last_reviewed: "2026-06-08"
+  notes: B-07 conservative shell. KCEX Spot and perpetual product pages/support guides are public, but official programmatic REST/WS endpoint, signing, rate-limit and order-book stream specs are not verified; all live runtime surfaces remain unsupported.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+rest:
+  base_url: https://www.kcex.com
+base_urls:
+  website: https://www.kcex.com
+  spot_page: https://www.kcex.com/en-US/exchange/BTC_USDT
+  futures_page: https://www.kcex.com/en-US/futures/exchange/BTC_USDT
+auth:
+  private_rest: unsupported; official OpenAPI signing scheme not verified
+rate_limits:
+  kcex_account_source: { scope: account, interval_ms: 1000, limit: 1 }
+  unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  all: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: No verified order/fill/account readback endpoint; adapter must not be promoted to live-dry-run.
+batch:
+  place: { support: unsupported, reason: kcex.batch_place_orders_unverified_openapi }
+  cancel: { support: unsupported, reason: kcex.batch_cancel_orders_unverified_openapi }
+websocket:
+  public:
+    support: unsupported
+    reason: kcex.public_streams_unverified_openapi
+    order_book: { support: unsupported, reason: official public WS order-book channel not verified }
+  private:
+    support: unsupported
+    reason: kcex.private_streams_unverified_openapi
+unsupported:
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/kcex/request_specs/get_balances_account_source.json
+    reason: "KCEX exchange account balances should be modeled through a verified account/balance API, but stable OpenAPI readback docs and signing rules are not implemented in this adapter yet."
+endpoints:
+  - operation: symbol_rules
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/kcex/symbol_rules
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: kcex.symbol_rules_unverified_openapi
+  - operation: order_book
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/kcex/order_book
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: kcex.order_book_unverified_openapi
+  - operation: get_balances
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: SOURCE_READ
+    path: source://kcex/account-balance-openapi-unverified
+    auth: none
+    rate_limit_bucket: kcex_account_source
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "Account/balance readback boundary only; shared get_balances runtime remains project-unimplemented pending official KCEX OpenAPI verification, signing rules, parser, and read-only reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/kcex/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/kcex/request_specs/get_balances_account_source.json }
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/kcex/positions
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: kcex.positions_unverified_openapi
+  - operation: fees
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/kcex/fees
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: kcex.fees_unverified_openapi
+  - operation: place_order
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/kcex/place_order
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: kcex.place_order_unverified_openapi
+  - operation: cancel_order
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/kcex/cancel_order
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: kcex.cancel_order_unverified_openapi
+  - operation: batch_place_orders
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/kcex/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: kcex.batch_place_orders_unverified_openapi
+  - operation: batch_cancel_orders
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/kcex/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: kcex.batch_cancel_orders_unverified_openapi
+  - operation: open_orders
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/kcex/open_orders
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: kcex.open_orders_unverified_openapi
+  - operation: recent_fills
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/kcex/recent_fills
+    auth: unsupported
+    rate_limit_bucket: kcex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: kcex.recent_fills_unverified_openapi

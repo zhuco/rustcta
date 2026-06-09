@@ -1,0 +1,11 @@
+{
+  "table": "orderBookL2",
+  "action": "delete",
+  "data": [
+    {
+      "symbol": "XBTUSD",
+      "id": 8799999950,
+      "side": "Buy"
+    }
+  ]
+}

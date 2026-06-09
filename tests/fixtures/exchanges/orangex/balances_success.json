@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "result": {
+    "SPOT": {
+      "details": [
+        {
+          "coin_type": "USDT",
+          "available": "10",
+          "freeze": "2",
+          "total": "12"
+        }
+      ]
+    }
+  }
+}

@@ -56,11 +56,60 @@ websocket:
     heartbeat:
       accepts: ['{"method":"heartbeat"}']
     resync: rest_order_book_snapshot
+    order_book:
+      channel: book.{instrument_name}.{group}.{depth}.{interval}
+      channel_template: book.{instrument_name}.{group}.{depth}.{interval}
+      default_channel: book.{instrument_name}.none.20.100ms
+      subscription_method: public/subscribe
+      groups:
+        supported: [none, "1", "2", "5", "10", "25", "100", "250"]
+        notes: "Use none for no price grouping; ETH group values are scaled by 1/100 per Deribit API."
+      depth:
+        supported: [1, 10, 20]
+        default: 20
+      interval:
+        supported: [raw, 100ms, agg2]
+        default: 100ms
+        notes: "raw is only available to authorized users; public runtime defaults to 100ms."
+      sequence:
+        change_id: monotonic
+        prev_change_id: "every non-initial message must equal previous change_id"
+        continuity_action: rest_snapshot_resync
+      checksum: none
+      snapshot_resync:
+        endpoint: /api/v2/public/get_order_book
+        params: [instrument_name, depth]
+        default_depth: 20
+        triggers: [connect, reconnect, prev_change_id_gap, parse_gap]
   private:
     support: native
     auth: client_credentials
     channels: [user.orders.any.any.100ms, user.trades.any.any.100ms, user.portfolio.any]
     fallback: rest_reconciliation
+streams:
+  - operation: subscribe_public_stream
+    scope: public
+    channel: book.{instrument_name}.{group}.{depth}.{interval}
+    product: mixed
+    support: native
+    subscription_method: public/subscribe
+    default_channel: book.{instrument_name}.none.20.100ms
+    groups: [none, "1", "2", "5", "10", "25", "100", "250"]
+    depths: [1, 10, 20]
+    intervals: [raw, 100ms, agg2]
+    sequence_fields: [change_id, prev_change_id]
+    checksum: none
+    resync: get_order_book
+    fixture: tests/fixtures/exchanges/deribit/ws/public_book_grouped.json
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Deribit instruments with kind=spot exist, but this adapter scope is options, futures, and perpetual instruments/order lifecycle only; remaining Spot runtime work is kind=spot instrument filtering, spot order-book/ticker public parsers, private spot buy/sell/open-orders/user-trades specs, balance scope audit, and spot order reconciliation."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/deribit/request_specs/product_line_source_boundary.json
+    current_scope: "Deribit options, futures, and perpetual instruments/order lifecycle."
+    runtime_gap: "kind=spot instrument filtering, spot book/ticker parsing, and any spot order/account lifecycle have not been wired."
+    required_endpoints: [public_get_instruments_kind_spot, public_get_order_book_spot, public_ticker_spot, private_buy_sell_spot, private_open_orders_spot, private_user_trades_spot]
 endpoints:
   - operation: get_symbol_rules
     product: mixed
@@ -96,6 +145,21 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/deribit/request_specs/get_positions.json
+  - operation: get_fees
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/private/get_account_summary
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/deribit/request_specs/get_positions.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/deribit/account_summary.json
   - operation: get_positions
     product: mixed
     transport: rest
@@ -130,6 +194,66 @@ endpoints:
     rate_limit_bucket: matching_engine
     weight: 1
     request_spec_required: true
+  - operation: batch_place_orders
+    product: mixed
+    market_types: [option, futures, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v2/private/buy|sell
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: matching_engine
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Composed by submitting each order through the single-order buy/sell endpoints.
+  - operation: batch_cancel_orders
+    product: mixed
+    market_types: [option, futures, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v2/private/cancel
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: matching_engine
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Composed by submitting each cancel through the single-order cancel endpoint.
+  - operation: amend_order
+    product: mixed
+    market_types: [option, futures, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v2/private/edit
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: matching_engine
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: native
+    notes: Runtime calls private/edit and parses the returned order state.
+  - operation: place_order_list
+    product: mixed
+    market_types: [option, futures, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/deribit/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: matching_engine
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: deribit.order_list_not_in_shared_advanced_model
   - operation: option_chain_helper
     product: option
     transport: rest

@@ -244,6 +244,7 @@ impl ExchangeClient for TapbitGatewayAdapter {
         capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
             "tapbit.subscribe_private_stream.no_official_private_ws_topics",
         );
+        capabilities.capabilities_v2.stream_runtime = streams::tapbit_stream_runtime_capability();
         capabilities.capabilities_v2.batch_place_orders = if private {
             BatchCapability {
                 support: CapabilitySupport::composed(

@@ -1,0 +1,37 @@
+{
+  "exchange": "aark",
+  "operation": "get_fees",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/broker/user_info",
+  "auth": "orderly_ed25519",
+  "credential_scope": "read_only_builder_or_account_fee_source",
+  "query": {
+    "account_id": "0x0000000000000000000000000000000000000000"
+  },
+  "headers": {
+    "orderly-account-id": {
+      "match": "non_empty"
+    },
+    "orderly-key": {
+      "match": "non_empty"
+    },
+    "orderly-signature": {
+      "match": "non_empty"
+    },
+    "orderly-timestamp": {
+      "match": "unix_ms"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "real-secret",
+    "production-secret"
+  ],
+  "official_source": "Orderly Get User Fee Rates returns account/product fee rates for builder/account-scoped reads.",
+  "runtime_boundary": "request_spec_only; shared get_fees remains project-unimplemented until Aark builder/account eligibility, Ed25519 signing, and maker/taker parser are wired."
+}

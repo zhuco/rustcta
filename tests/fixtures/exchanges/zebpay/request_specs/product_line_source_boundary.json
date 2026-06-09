@@ -1,0 +1,60 @@
+{
+  "exchange": "zebpay",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "futures_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://zebpay.com/in/api-services-for-spot-and-futures",
+      "evidence": "ZebPay API service material describes reviewed API access covering spot and futures markets."
+    },
+    {
+      "url": "https://docs.zebpay.com/",
+      "evidence": "Current public docs are used for spot REST market/order surfaces; futures runtime remains unwired."
+    }
+  ],
+  "runtime_isolation": "ZebPay futures/perpetual API access requires onboarding, product scope and bearer-token validation separate from the scan-only spot adapter.",
+  "unsupported_runtime_reason": "ZebPay API service material covers futures, but stable futures endpoint specs, onboarding approval, positions/margin parsers and product-scoped bearer-token write/readback validation are not implemented.",
+  "required_endpoints": {
+    "market_metadata": [
+      "futures/perpetual instruments",
+      "contract specifications",
+      "funding or settlement schedule if exposed"
+    ],
+    "public_market_data": [
+      "futures/perpetual order book",
+      "futures/perpetual ticker",
+      "futures/perpetual trades"
+    ],
+    "private_account": [
+      "futures/perpetual balances or margin account",
+      "positions",
+      "risk or leverage limits"
+    ],
+    "private_order_lifecycle": [
+      "futures/perpetual place order",
+      "futures/perpetual cancel order",
+      "futures/perpetual query/open orders",
+      "futures/perpetual fills"
+    ]
+  },
+  "required_parsers": [
+    "contract metadata",
+    "position and margin snapshots",
+    "futures/perpetual order acknowledgements",
+    "futures/perpetual fills"
+  ],
+  "unsafe_to_promote_without": [
+    "ZebPay API onboarding approval for futures/perpetual scope",
+    "product-scoped bearer-token dry-run guard",
+    "stable endpoint specs for futures/perpetual market data and trading",
+    "post-write query/open/fills reconciliation"
+  ],
+  "remaining_work": [
+    "verify futures endpoint paths and onboarding requirements",
+    "add futures market, position and margin parsers",
+    "add product-scoped private runtime and dry-run guard"
+  ]
+}

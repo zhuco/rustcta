@@ -1,0 +1,48 @@
+{
+  "exchange": "bitso",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "spot_private_request_specs"
+  ],
+  "official_product_lines": [
+    "margin_trading_wip"
+  ],
+  "product_line_classification": {
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Margin Trading is documented as WIP and requires API stability, eligibility, parsers, lifecycle, and reconciliation before runtime."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "The current official/API profile does not expose standard futures, perpetual, or options contracts."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "futures",
+    "perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://docs.bitso.com/bitso-api/reference/margin-trading",
+      "evidence": "Bitso documents Margin Trading as a WIP product surface; it is not wired into this spot adapter's runtime."
+    }
+  ],
+  "runtime_isolation": "Do not route Bitso Margin Trading through spot order/account runtime until the WIP product has an audited account eligibility guard, margin metadata, signed readbacks, private order lifecycle, parser fixtures, and reconciliation.",
+  "required_audit_gaps": [
+    "margin product availability and region/account eligibility",
+    "margin collateral, balance, position, and risk parser fixtures",
+    "margin order lifecycle request specs and error taxonomy",
+    "post-write readback/reconciliation and live dry-run gate"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_standard_futures_api",
+    "perpetual": "unsupported_no_standard_perpetual_api",
+    "options": "unsupported_no_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

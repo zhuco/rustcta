@@ -36,24 +36,26 @@ P9 official verification confirms matcher WebSocket common streams update every
 `{"T":"obs","S":"amountAsset-priceAsset","d":10}`, where `d` is price depth.
 Incoming order book messages include update id `U`, asks `a`, bids `b`,
 optional last trade `t`, and subscription id `S`; no checksum is documented.
-One connection currently allows 10 order book subscriptions.
+Unsubscribe uses `{"T":"obu","S":"amountAsset-priceAsset"}`. One connection
+currently allows 10 order book subscriptions. On reconnect, stale `U`, or a
+suspected gap, rebuild from the matcher REST order book snapshot.
 
 ## Official Core Trading Detail
 
 官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。WX Network matcher API 支持 Place Limit Order、Place Market Order、Cancel Order、Cancel All、Get Order Status、Order History 和 Tradable Balance；订单签名是 Waves order/public-key signature，不是 API-key HMAC。
 
-当前 adapter 只做 public matcher REST scan，signed order placement/cancel 仍是 `项目未实现`。后续要补 Waves signed order payload、public-key cancellation signature、order status/history parser 和 matcher fee/rate 对账。
+当前 adapter 只做 public matcher REST scan，signed order placement/cancel/cancel-all/query/open/fills 仍是 `项目未实现/未启用`。相关 matcher path 和离线 request-spec 边界已记录；后续要补 Waves signed order payload、public-key cancellation signature、order status/history parser 和 matcher fee/rate 对账。
 
 ## Unsupported Boundary
 
-- Balances require Waves address/node balance mapping and are not represented as gateway account balances yet.
+- Balances now have an offline Waves address/node source boundary in `request_specs/get_balances_address_source.json`, so the matrix records `get_balances=离线`; runtime still needs address/public-key scope, asset precision parser, chain latency/reorg policy and matcher/account reconciliation.
 - Positions are not applicable to spot.
 - P6 official product-line verification found WX matcher is a Waves spot asset
   pair matcher without standard futures/perpetual/options semantics; standard
   contracts are `交易所不支持合约`.
 - Fee rates are matcher asset rates, not an account-scoped maker/taker fee contract.
 - Place/cancel order flows require signed Waves order payloads or public-key cancellation signatures, not API-key HMAC signing.
-- Batch place/cancel, amend, order lists, cancel-all, open orders, recent fills, private streams, withdrawals, transfers, and admin matcher endpoints are unsupported.
+- Batch place/cancel, amend, order lists, private streams, withdrawals, transfers, and admin matcher endpoints are unsupported; cancel-all, core open orders and recent fills are official-readback project-unimplemented boundaries.
 
 ## Fixtures
 
@@ -78,3 +80,10 @@ cargo test -p rustcta-gateway wavesexchange --message-format short
 ```
 
 Do not run `cargo build` for this task.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：matcher asset rates 不是 account-scoped maker/taker fee contract。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core trading/readback is offline/spec-only for signed matcher place/cancel/cancel-all/query/open/fills. Runtime promotion is blocked on Waves order/cancel signing, public-key/account mapping, matcher fee/rate handling, parsers, and readback reconciliation.

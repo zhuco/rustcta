@@ -1,0 +1,10 @@
+{
+  "ch": "market.btcusdt.mbp.refresh.20",
+  "ts": 1780876800000,
+  "tick": {
+    "seqNum": 200,
+    "prevSeqNum": 199,
+    "bids": [["65000", "2"]],
+    "asks": [["65001", "1.5"]]
+  }
+}

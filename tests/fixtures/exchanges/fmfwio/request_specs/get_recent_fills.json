@@ -1,0 +1,20 @@
+{
+  "exchange": "fmfwio",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/3/spot/history/trade",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": { "match": "non_empty" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": ["test-secret"],
+  "runtime_boundary": "FMFW.io trade-history readback is request-spec only; parser and reconciliation are not enabled at runtime."
+}

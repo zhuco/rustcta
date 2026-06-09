@@ -69,6 +69,30 @@ websocket:
   public:
     support: native
     url: wss://ws-api-spot.kucoin.com/endpoint
+    channels:
+      - obu_depth1_realtime_bbo
+      - obu_depth5_100ms
+      - obu_depth50_100ms
+      - obu_increment_realtime
+    orderbook:
+      subscription_mode: json_subscribe
+      channel: obu
+      depths: [1, 5, 50, increment]
+      push_interval:
+        bbo: real_time_no_fixed_ms
+        depth5: 100ms
+        depth50: 100ms
+        increment: real_time_no_fixed_ms
+      sequence_fields: [sequenceStart, sequenceEnd, sequence]
+      checksum: none
+      resync: rest_snapshot_then_replay_delta
+      future_migration:
+        effective_utc: 2026-06-17
+        channel: obu_depth500_increment@10ms
+        status: planned_not_current
+      source:
+        url: https://www.kucoin.com/docs-new/3470221w0
+        reviewed_at: 2026-06-08
     heartbeat:
       direction: client_ping
       interval_ms: 20000
@@ -81,6 +105,11 @@ websocket:
     renewal: refresh_before_expiry
     renew_before_expiry_ms: 3600000
     fallback: rest_reconciliation
+unsupported:
+  - operation: contract_product
+    status: delegated
+    delegate_adapter: kucoinfutures
+    reason: "KuCoin Futures is handled by the separate kucoinfutures adapter; this kucoin adapter remains Spot-only."
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -120,6 +149,18 @@ endpoints:
     rate_limit_bucket: spot_private_hf
     weight: 1
     request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/trade-fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private_hf
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoin/request_specs/trade_fees.json
   - operation: place_order
     product: spot
     transport: rest
@@ -205,3 +246,32 @@ endpoints:
     rate_limit_bucket: spot_private_hf
     weight: 1
     request_spec_required: true
+streams:
+  - operation: public_orderbook_bbo
+    product: spot
+    transport: websocket
+    channel: obu_depth1_realtime_bbo
+    auth: none
+    support: native
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot
+  - operation: public_orderbook_delta
+    product: spot
+    transport: websocket
+    channel: obu_increment_realtime
+    auth: none
+    support: native
+    sequence: [sequenceStart, sequenceEnd]
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_delta_replay
+    parser_fixture: tests/fixtures/exchanges/kucoin/ws/obu_increment.json
+  - operation: public_orderbook_depth50
+    product: spot
+    transport: websocket
+    channel: obu_depth50_100ms
+    auth: none
+    support: native
+    sequence: [sequence]
+    parser_fixture: tests/fixtures/exchanges/kucoin/ws/obu_depth50_snapshot.json

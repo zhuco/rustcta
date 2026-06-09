@@ -4,7 +4,7 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    CancelOrderResponse, CapabilitySupport, ExchangeApiError, ExchangeApiResult, ExchangeClient,
     ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
     OrderBookCapability, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
     PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
@@ -83,7 +83,7 @@ impl GatewayAdapter for BsxGatewayAdapter {
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
             message: Some(
-                "BSX Base perpetual profile: public REST market data enabled; private trading request-spec-only"
+                "BSX Base perpetual profile: public REST market data plus guarded private readbacks; private trading request-spec-only"
                     .to_string(),
             ),
         }
@@ -111,9 +111,9 @@ impl ExchangeClient for BsxGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = self.config.private_rest_available();
+        capabilities.supports_open_orders = self.config.private_rest_available();
+        capabilities.supports_recent_fills = self.config.private_rest_available();
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -130,11 +130,19 @@ impl ExchangeClient for BsxGatewayAdapter {
         capabilities.max_recent_fill_limit = None;
         toolchain::apply_toolchain_capabilities(&mut capabilities);
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = self.config.private_rest_available();
+        capabilities.capabilities_v2.private_rest = if self.config.private_rest_available() {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED)
+        };
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
         capabilities.supports_order_book_snapshot = self.config.enabled_public_rest;
+        capabilities.supports_query_order = self.config.private_rest_available();
+        capabilities.supports_open_orders = self.config.private_rest_available();
+        capabilities.supports_recent_fills = self.config.private_rest_available();
         capabilities
     }
 
@@ -235,6 +243,10 @@ impl ExchangeClient for BsxGatewayAdapter {
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
+        for cancel in &request.cancels {
+            self.ensure_exchange(&cancel.symbol.exchange)?;
+            self.ensure_supported_market_type(cancel.symbol.market_type)?;
+        }
         private::unsupported(private::BATCH_CANCEL_UNSUPPORTED)
     }
 
@@ -252,7 +264,7 @@ impl ExchangeClient for BsxGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        private::unsupported(private::QUERY_ORDER_UNSUPPORTED)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -260,7 +272,7 @@ impl ExchangeClient for BsxGatewayAdapter {
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        private::unsupported(private::OPEN_ORDERS_UNSUPPORTED)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -268,7 +280,7 @@ impl ExchangeClient for BsxGatewayAdapter {
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        private::unsupported(private::RECENT_FILLS_UNSUPPORTED)
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

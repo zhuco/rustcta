@@ -1,0 +1,24 @@
+{
+  "results": [
+    {
+      "success": true,
+      "order_id": "bsx-order-2001",
+      "client_order_id": "cancel-client-1",
+      "product_id": "BTC-PERP",
+      "side": "SELL",
+      "order_type": "LIMIT",
+      "status": "CANCELLED",
+      "size": "0.0100",
+      "price": "65100",
+      "filled_size": "0",
+      "updated_at": "2026-06-08T12:01:00Z"
+    },
+    {
+      "success": false,
+      "order_id": "bsx-order-2002",
+      "client_order_id": "cancel-client-2",
+      "code": "ORDER_NOT_FOUND",
+      "message": "order not found or already closed"
+    }
+  ]
+}

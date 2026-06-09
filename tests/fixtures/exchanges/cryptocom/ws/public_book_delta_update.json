@@ -1,0 +1,18 @@
+{
+  "id": -1,
+  "method": "subscribe",
+  "result": {
+    "channel": "book.BTC_USDT.50",
+    "subscription": "SNAPSHOT_AND_UPDATE",
+    "data": [
+      {
+        "bids": [["65000.5", "1.10", "1"]],
+        "asks": [["65001.5", "0.75", "1"]],
+        "t": 1743054548223,
+        "u": 101,
+        "pu": 100,
+        "tt": "UPDATE"
+      }
+    ]
+  }
+}

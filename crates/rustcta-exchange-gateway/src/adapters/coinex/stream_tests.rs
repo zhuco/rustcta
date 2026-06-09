@@ -5,12 +5,31 @@ use rustcta_exchange_api::{
 use rustcta_types::{AccountId, MarketType};
 
 use super::streams::{
-    coinex_ping_payload, coinex_private_login_payload, coinex_private_subscribe_payload,
-    coinex_public_subscribe_payload, coinex_reconnect_policy_ms, parse_coinex_stream_control,
-    CoinExStreamControlMessage, COINEX_PRIVATE_WS_URL, COINEX_PUBLIC_WS_URL,
+    coinex_custom_depth_subscription_spec, coinex_depth_checksum_string,
+    coinex_depth_subscription_spec, coinex_ping_payload, coinex_private_login_payload,
+    coinex_private_subscribe_payload, coinex_public_orderbook_ws_policy,
+    coinex_public_subscribe_payload, coinex_reconnect_policy_ms,
+    parse_coinex_public_orderbook_update, parse_coinex_stream_control, CoinExStreamControlMessage,
+    COINEX_PRIVATE_WS_URL, COINEX_PUBLIC_WS_URL,
 };
 use super::test_support::{context, exchange_id, symbol_scope};
 use super::{CoinExGatewayAdapter, CoinExGatewayConfig};
+
+fn ws_fixture(name: &str) -> serde_json::Value {
+    let text = match name {
+        "public_depth_subscribe.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/coinex/ws/public_depth_subscribe.json"
+        ),
+        "public_depth_full.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/coinex/ws/public_depth_full.json")
+        }
+        "public_depth_incremental.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/coinex/ws/public_depth_incremental.json"
+        ),
+        _ => panic!("unknown CoinEx WS fixture {name}"),
+    };
+    serde_json::from_str(text).expect("CoinEx WS fixture")
+}
 
 #[test]
 fn coinex_public_stream_spec_should_normalize_symbol_and_heartbeat() {
@@ -24,9 +43,95 @@ fn coinex_public_stream_spec_should_normalize_symbol_and_heartbeat() {
     let payload = coinex_public_subscribe_payload(&subscription, 1).expect("payload");
 
     assert_eq!(payload["method"], "depth.subscribe");
-    assert_eq!(payload["params"][0], "BTCUSDT");
+    assert_eq!(payload["params"]["market_list"][0][0], "BTCUSDT");
+    assert_eq!(payload["params"]["market_list"][0][1], 50);
+    assert_eq!(payload["params"]["market_list"][0][2], "0");
+    assert_eq!(payload["params"]["market_list"][0][3], true);
     assert_eq!(coinex_ping_payload(2)["method"], "server.ping");
     assert_eq!(coinex_reconnect_policy_ms(), (30_000, 10_000, 45_000));
+}
+
+#[test]
+fn coinex_public_orderbook_policy_should_capture_depth_structured_details() {
+    let policy = coinex_public_orderbook_ws_policy();
+
+    assert_eq!(policy.subscribe_method, "depth.subscribe");
+    assert_eq!(policy.update_method, "depth.update");
+    assert_eq!(policy.push_delay_ms, 200);
+    assert_eq!(policy.full_refresh_interval_ms, 60_000);
+    assert_eq!(policy.supported_limits, &[5, 10, 20, 50]);
+    assert!(policy.supported_merge_intervals.contains(&"0.0001"));
+    assert_eq!(policy.default_merge_interval, "0");
+    assert_eq!(policy.checksum_algorithm, "crc32");
+    assert_eq!(policy.checksum_type, "signed_i32");
+
+    let json = policy.as_json();
+    assert_eq!(json["params_shape"]["field"], "market_list");
+    assert_eq!(json["checksum"]["resync_on_mismatch"], true);
+}
+
+#[test]
+fn coinex_depth_subscription_spec_should_validate_limit_interval_and_full_mode() {
+    let delta =
+        coinex_depth_subscription_spec("btc/usdt", &PublicStreamKind::OrderBookDelta).unwrap();
+    assert_eq!(
+        delta.params_entry(),
+        ws_fixture("public_depth_subscribe.json")["params"]["market_list"][0]
+    );
+    assert!(!delta.is_full);
+
+    let snapshot =
+        coinex_depth_subscription_spec("BTCUSDT", &PublicStreamKind::OrderBookSnapshot).unwrap();
+    assert!(snapshot.is_full);
+
+    let custom = coinex_custom_depth_subscription_spec("BTCUSDT", 10, "0.01", false).unwrap();
+    assert_eq!(
+        custom.params_entry(),
+        serde_json::json!(["BTCUSDT", 10, "0.01", false])
+    );
+
+    assert!(coinex_custom_depth_subscription_spec("BTCUSDT", 7, "0", false).is_err());
+    assert!(coinex_custom_depth_subscription_spec("BTCUSDT", 10, "0.0002", false).is_err());
+}
+
+#[test]
+fn coinex_depth_update_parser_should_capture_full_incremental_and_crc32() {
+    let full = parse_coinex_public_orderbook_update(
+        &exchange_id(),
+        symbol_scope(),
+        &ws_fixture("public_depth_full.json"),
+    )
+    .expect("full update");
+    assert_eq!(full.market, "BTCUSDT");
+    assert!(full.is_full);
+    assert_eq!(full.order_book.bids[0].price, 100.0);
+    assert_eq!(full.order_book.asks[0].price, 100.5);
+    assert_eq!(full.checksum, Some(1_213_826_333));
+    assert_eq!(full.checksum_matches_payload, Some(true));
+
+    let incremental = parse_coinex_public_orderbook_update(
+        &exchange_id(),
+        symbol_scope(),
+        &ws_fixture("public_depth_incremental.json"),
+    )
+    .expect("incremental update");
+    assert!(!incremental.is_full);
+    assert_eq!(incremental.deleted_bid_prices, vec!["100.0"]);
+    assert_eq!(incremental.order_book.bids[0].price, 99.5);
+    assert_eq!(incremental.order_book.bids[0].quantity, 0.5);
+    assert_eq!(incremental.checksum, Some(43_041_355));
+    assert_eq!(incremental.checksum_matches_payload, Some(true));
+}
+
+#[test]
+fn coinex_depth_checksum_should_preserve_wire_string_format() {
+    let full = ws_fixture("public_depth_full.json");
+    let depth = &full["data"]["depth"];
+
+    assert_eq!(
+        coinex_depth_checksum_string(depth).expect("checksum string"),
+        "100.0:1.0:99.5:0.5:100.5:2.0:101.0:3.0"
+    );
 }
 
 #[test]

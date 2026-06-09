@@ -1,12 +1,12 @@
 schema_version: 1
 exchange: bsx
 adapter: BsxGatewayAdapter
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: draft
   source: docs/bsx_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: Task C-46 BSX Base perpetual adapter. Public products and orderbook REST are native; private account reads, EIP-712 order writes and WS runtime remain request-spec-only or unsupported.
+  last_reviewed: "2026-06-09"
+  notes: Task C-46 BSX Base perpetual adapter. Public products/orderbook REST and guarded private order/fill readbacks are native; account/fee/position reads, EIP-712/session order writes and WS runtime remain request-spec-only or unsupported until stable account sources, sequence/dry-run and reconciliation are wired.
 market_types: [perpetual]
 products: [perpetual]
 base_urls:
@@ -17,28 +17,59 @@ base_urls:
 auth:
   public_rest: none
   signed_read_rest: BSX-KEY/BSX-SIGNATURE/BSX-TIMESTAMP account headers
-  private_write_rest: EIP-712 wallet order signature plus API headers; request-spec-only until account and cancel semantics are audited
+  private_write_rest: EIP-712 wallet or session signature plus API headers; request-spec-only until account headers, sequence/dry-run, cancel shape and reconciliation are audited
 rate_limits:
   bsx_public: { scope: ip, interval_ms: 1000, limit: 10 }
   bsx_private: { scope: account, interval_ms: 1000, limit: 5 }
   bsx_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   products: { mode: none }
-  private_history: { mode: unsupported }
+  private_history: { mode: cursor_or_limit, max_limit: 500 }
 reconciliation:
-  private_state: unsupported
-  notes: REST reconciliation fallback is not enabled because account-scoped reads are not audited.
+  private_state: query_order/get_open_orders/get_recent_fills guarded runtime
+  notes: Read-only REST reconciliation is enabled only when RUSTCTA_BSX_PRIVATE_REST_ENABLED plus API key/secret/wallet are configured; write and account state runtime remains disabled.
 batch:
   place: { support: unsupported, reason: bsx.batch_place_orders_requires_eip712_wallet_signature_audit }
-  cancel: { support: unsupported, reason: bsx.batch_cancel_orders_requires_cancel_v2_semantics_audit }
+  cancel: { support: spec_only, reason: "Official BSX docs expose cancel surfaces; shared batch_cancel_orders remains fixture-backed/offline pending selected safe cancel shape, account headers, EIP-712/session audit, parser, partial-failure reconciliation, and dry-run guard." }
 websocket:
   public:
     support: spec_only
     helper_only: true
+    channels: [book]
+    order_book:
+      channel: book
+      subscription: { op: sub, channel: book, product: "<product_id>" }
+      update_interval_ms: 25
+      snapshot_interval_ms: 60000
+      depth: unspecified
+      sequence: gsn
+      checksum: unsupported
+      resync: rest_order_book_snapshot
     heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official BSX spot/perpetuals exchange material exists, but this adapter scope is Base perpetual products from /products and /products/{product_id}/book only; remaining Spot runtime work is separate spot products/order-book public specs, spot account/balance/open-order/fill private readback, spot order/cancel lifecycle, account-header and EIP-712 signing audit, and reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/bsx/request_specs/product_line_source_boundary.json
+    current_scope: "Base perpetual products from /products and /products/{product_id}/book."
+    runtime_gap: "No BSX spot product profile, spot order-book parser, spot account readback, or spot order lifecycle is wired."
+    required_endpoints: [spot_products, spot_order_book, spot_orders, spot_open_orders, spot_fills, spot_balances]
+  - operation: get_fees
+    status: project_unimplemented
+    reason: "BSX exposes account/app fee-rate source evidence and authenticated account headers, but no stable fee endpoint path is pinned; shared get_fees runtime is project-unimplemented pending account-scoped fee source selection, permission audit, and parser wiring."
+    source_boundary_fixture: tests/fixtures/exchanges/bsx/request_specs/get_fees_source_boundary.json
+  - operation: get_balances
+    status: project_unimplemented
+    source_boundary_fixture: tests/fixtures/exchanges/bsx/request_specs/get_balances_source_boundary.json
+    reason: "Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending BSX account headers, permission audit, and balance parser wiring."
+  - operation: get_positions
+    status: project_unimplemented
+    source_boundary_fixture: tests/fixtures/exchanges/bsx/request_specs/get_positions_source_boundary.json
+    reason: "BSX account/position or margin-state readback source evidence exists, but shared get_positions runtime is project-unimplemented pending stable endpoint path audit, account headers, permission scope, position parser, and reconciliation."
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -86,40 +117,65 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
-    reason: bsx.open_orders_require_account_scope_audit
+    support: native
+    reason: "Guarded read runtime: enabled only with RUSTCTA_BSX_PRIVATE_REST_ENABLED plus BSX API key/secret/wallet; writes/account reads remain offline."
     official_doc: https://api-docs.bsx.exchange/reference/get-orders
-    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/open_orders_spec_only.json
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/get_open_orders.json
+    response_parser:
+      status: implemented
+      parser: parse_orders
+      fixture: tests/fixtures/exchanges/bsx/open_orders_success.json
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /source/bsx/account-fee-rate
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bsx_private
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "bsx.get_fees_source_boundary_only: account/app Fee Rate source and BSX auth headers are recorded, but no stable REST fee endpoint path, parser, account tier mapping, or shared FeeRateSnapshot runtime is enabled."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/get_fees_source_boundary.json
   - operation: get_balances
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/bsx/balances
-    auth: unsupported
-    rate_limit_bucket: bsx_unsupported
+    path: /source/bsx/account-balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bsx_private
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: bsx.balances_require_account_scope_audit
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "BSX account-scoped balance/equity readback source is fixture-backed as an offline boundary; runtime remains disabled pending stable endpoint path audit, account header auth smoke, permission scope, balance parser, and private REST/WS reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/get_balances_source_boundary.json
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/bsx/positions
-    auth: unsupported
-    rate_limit_bucket: bsx_unsupported
+    method: SOURCE_READ
+    path: source://bsx/account-positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bsx_private
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: bsx.positions_require_account_scope_audit
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "BSX account-scoped position/margin-state readback is fixture-backed as an offline source boundary; runtime remains disabled pending stable endpoint path audit, account header auth smoke, permission scope, position parser, and private REST/WS reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/get_positions_source_boundary.json
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
@@ -150,14 +206,71 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported
+    support: spec_only
     reason: bsx.cancel_order_requires_cancel_v2_semantics_audit
     request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/cancel_order_unsupported.json
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /orders/{order_id}
+    auth: signed
+    rate_limit_bucket: bsx_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    reason: "Guarded read runtime: enabled only with RUSTCTA_BSX_PRIVATE_REST_ENABLED plus BSX API key/secret/wallet and exchange_order_id; client-order-id lookup remains unsupported."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      parser: parse_single_order
+      fixture: tests/fixtures/exchanges/bsx/order_success.json
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PATCH
+    path: /source/bsx/amend-order-boundary
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bsx_private
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "bsx.amend_order_spec_only_no_eip712_session_headers_reconciliation_guard: official order update/amend-like evidence is recorded in a signed request-spec boundary with parser fixture; live runtime remains disabled pending BSX account headers, EIP-712/session signing audit, sequence/dry-run guard, and post-write order-state reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/amend_order_request_spec_only.json
+    notes: Source boundary fixture is tests/fixtures/exchanges/bsx/request_specs/amend_order_source_boundary.json.
+    response_parser:
+      status: fixture_only
+      parser: parse_amend_order_ack
+      fixture: tests/fixtures/exchanges/bsx/parser/amend_order_ack.json
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bsx/order_list
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.order_list_not_mapped_to_lossless_shared_semantics
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/bsx/batch_place_orders
     auth: unsupported
     rate_limit_bucket: bsx_unsupported
@@ -173,16 +286,23 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: DELETE
-    path: /unsupported/bsx/batch_cancel_orders
-    auth: unsupported
-    rate_limit_bucket: bsx_unsupported
+    path: /source/bsx/batch-cancel-orders-boundary
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bsx_private
     weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: bsx.batch_cancel_orders_requires_cancel_v2_semantics_audit
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: "bsx.batch_cancel_orders_spec_only_no_safe_cancel_shape_session_reconciliation_guard: cancel surfaces are recorded in a signed request-spec boundary with per-item parser fixture; shared batch_cancel_orders remains offline pending selected non-overcancel request shape, BSX account headers, EIP-712/session signing audit, sequence/dry-run guard, and partial-failure reconciliation runtime."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/batch_cancel_orders_request_spec_only.json
+    notes: Source boundary fixture is tests/fixtures/exchanges/bsx/request_specs/batch_cancel_orders_source_boundary.json.
+    response_parser:
+      status: fixture_only
+      parser: parse_batch_cancel_orders_ack
+      fixture: tests/fixtures/exchanges/bsx/parser/batch_cancel_orders_ack.json
   - operation: cancel_all_orders
     product: perpetual
     market_types: [perpetual]
@@ -203,16 +323,21 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/bsx/recent_fills
-    auth: unsupported
-    rate_limit_bucket: bsx_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /trades
+    auth: signed
+    rate_limit_bucket: bsx_private
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: bsx.recent_fills_require_account_scope_audit
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    reason: "Guarded read runtime: enabled only with RUSTCTA_BSX_PRIVATE_REST_ENABLED plus BSX API key/secret/wallet and request context account; unsupported id filters fail closed."
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/get_recent_fills.json
+    response_parser:
+      status: implemented
+      parser: parse_recent_fills
+      fixture: tests/fixtures/exchanges/bsx/recent_fills_success.json
 streams:
   - operation: public_orderbook_delta
     product: perpetual

@@ -1,6 +1,6 @@
 # Tapbit Gateway Adapter
 
-Status date: 2026-06-07.
+Status date: 2026-06-08.
 
 The `tapbit` gateway adapter implements the `rustcta_exchange_api::ExchangeClient`
 surface for Tapbit Spot plus USDT perpetual REST, venue-specific public market
@@ -101,6 +101,14 @@ perpetual uses `usdt/orderBook.{instrument_id}.[depth]`. Supported depths are
 can be used for continuity checks; official docs do not state a fixed push
 interval or checksum.
 
+2026-06-08 implementation update: `endpoint_mapping.yaml`,
+`subscribe_public_stream`, stream runtime capabilities, and order-book parser
+fixtures now expose this structure. Stream order-book payload `version` is
+copied into `OrderBookSnapshot.sequence`; callers must fetch a REST order-book
+snapshot after reconnect or version gap before applying fresh updates.
+The mapping also records the order-book 5s server ping/pong heartbeat and REST
+snapshot fallback endpoints for Spot and USDT perpetual books.
+
 ## Explicit Unsupported
 
 Spot market, quote-sized market, post-only, IOC, FOK, client order id, Spot
@@ -112,3 +120,7 @@ WebSocket auth/subscriptions, and full socket task orchestration remain explicit
 Tapbit's current official
 Spot/USDT perpetual WebSocket docs list public order book/ticker topics and
 heartbeat behavior, but do not publish private order/account stream topics.
+
+## Fee Boundary
+
+Spot `get_fees` 当前使用 public `trade_pair_list` 的 maker/taker metadata fallback；账户实际费率仍保留为 credential/account-tier 边界。

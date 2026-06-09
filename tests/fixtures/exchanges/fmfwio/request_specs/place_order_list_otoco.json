@@ -1,0 +1,63 @@
+{
+  "exchange": "fmfwio",
+  "operation": "place_order_list",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/3/spot/order/list",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6OWRjZGQwOTRhYjExODI3NGY2MTQzMzViM2QwOGNiMjI5OGFmN2FjMWZiODU4OTA5YTQxY2M1ZDQ0ZmFjZDkzNDoxNzEwMDAwMDAwMDAwOjEwMDAw"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/json"
+    }
+  },
+  "body": {
+    "contingency_type": "oneTriggerOneCancelOther",
+    "orders": [
+      {
+        "client_order_id": "cli-fmfwio-otoco-primary",
+        "symbol": "ETHBTC",
+        "side": "buy",
+        "type": "limit",
+        "time_in_force": "GTC",
+        "quantity": "0.063",
+        "price": "0.046016",
+        "post_only": false
+      },
+      {
+        "client_order_id": "cli-fmfwio-otoco-tp",
+        "symbol": "ETHBTC",
+        "side": "sell",
+        "type": "limit",
+        "time_in_force": "GTC",
+        "quantity": "0.063",
+        "price": "0.050000",
+        "post_only": false
+      },
+      {
+        "client_order_id": "cli-fmfwio-otoco-sl",
+        "symbol": "ETHBTC",
+        "side": "sell",
+        "type": "stopMarket",
+        "time_in_force": "GTC",
+        "quantity": "0.063",
+        "stop_price": "0.044050",
+        "post_only": false
+      }
+    ]
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "fmfwio/place_order_list_otoco_hs256",
+  "runtime_boundary": "request_spec_only"
+}

@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "result": {
+    "results": [
+      {
+        "success": true,
+        "order_id": "grvt-order-2001",
+        "client_order_id": "grvt-bulk-create-1",
+        "instrument": "BTC_USDT_Perp",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "status": "OPEN",
+        "size": "0.001",
+        "limit_price": "64000",
+        "filled_size": "0",
+        "reduce_only": false,
+        "post_only": false,
+        "updated_at": "2026-06-08T12:01:00Z"
+      },
+      {
+        "success": false,
+        "client_order_id": "grvt-bulk-create-2",
+        "code": "INSUFFICIENT_MARGIN",
+        "message": "insufficient margin"
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "exchange": "bsx",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "spec_only",
+  "method": "PATCH",
+  "path": "/source/bsx/amend-order-boundary",
+  "auth": "signed",
+  "headers": {
+    "BSX-KEY": "test-api-key",
+    "BSX-SIGNATURE": "0xredacted_session_or_eip712_signature",
+    "BSX-TIMESTAMP": "1700000000000000000",
+    "BSX-ACCOUNT": "0xredacted_account"
+  },
+  "body_contains": {
+    "product_id": "BTC-PERP",
+    "order_id": "bsx-order-1001",
+    "client_order_id": "client-amend-1001",
+    "size": "0.0200",
+    "price": "65000.5",
+    "signature": "0xredacted_eip712_or_session_signature"
+  },
+  "strict_headers": false,
+  "strict_body": false,
+  "trade_enabled": false,
+  "source_boundary_fixture": "tests/fixtures/exchanges/bsx/request_specs/amend_order_source_boundary.json",
+  "parser_fixture": "tests/fixtures/exchanges/bsx/parser/amend_order_ack.json",
+  "expected_error": "bsx.amend_order_spec_only_no_eip712_session_headers_reconciliation_guard",
+  "remaining_runtime_work": [
+    "select exact REST/WS order update surface for this adapter profile",
+    "BSX account header audit",
+    "EIP-712 or session signing implementation",
+    "sequence and live dry-run guard",
+    "post-write order-state reconciliation"
+  ]
+}

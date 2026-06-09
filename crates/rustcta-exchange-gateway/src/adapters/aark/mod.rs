@@ -4,13 +4,13 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamCapabilities,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse,
+    CancelOrderResponse, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeApiResult,
+    ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamCapabilities, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse,
 };
 use rustcta_types::{ExchangeId, MarketType};
 
@@ -98,9 +98,10 @@ impl ExchangeClient for AarkGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
+        let private_read_enabled = self.config.private_rest_available();
         capabilities.market_types = vec![MarketType::Perpetual];
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = self.config.private_rest_available();
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -113,9 +114,9 @@ impl ExchangeClient for AarkGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -132,11 +133,60 @@ impl ExchangeClient for AarkGatewayAdapter {
         capabilities.max_recent_fill_limit = None;
         toolchain::apply_toolchain_capabilities(&mut capabilities);
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
         capabilities.supports_order_book_snapshot = false;
+        capabilities.supports_balances = false;
+        capabilities.supports_positions = false;
+        capabilities.supports_fees = false;
+        capabilities.supports_place_order = false;
+        capabilities.supports_cancel_order = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
+        capabilities.supports_batch_place_order = false;
+        capabilities.supports_batch_cancel_order = false;
+        capabilities.supports_cancel_all_orders = false;
+        capabilities.supports_quote_market_order = false;
+        capabilities.supports_amend_order = false;
+        capabilities.capabilities_v2.private_rest = if private_read_enabled {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "aark private readbacks require RUSTCTA_AARK_PRIVATE_REST_ENABLED plus Orderly account/key/secret; writes remain disabled",
+            )
+        };
+        capabilities.capabilities_v2.order_history = if private_read_enabled {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_limit: true,
+                supports_cursor: true,
+                max_limit: Some(500),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "aark order readbacks require RUSTCTA_AARK_PRIVATE_REST_ENABLED plus Orderly credentials",
+            )
+        };
+        capabilities.capabilities_v2.fills_history = if private_read_enabled {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: true,
+                supports_until: true,
+                supports_limit: true,
+                supports_cursor: true,
+                max_limit: Some(500),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "aark fill readbacks require RUSTCTA_AARK_PRIVATE_REST_ENABLED plus Orderly credentials",
+            )
+        };
+        capabilities.capabilities_v2.credential_scopes = vec![CredentialScope::ReadOnly];
         capabilities
     }
 
@@ -252,25 +302,21 @@ impl ExchangeClient for AarkGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        private::unsupported(private::QUERY_ORDER_UNSUPPORTED)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        private::unsupported(private::OPEN_ORDERS_UNSUPPORTED)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        private::unsupported(private::RECENT_FILLS_UNSUPPORTED)
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

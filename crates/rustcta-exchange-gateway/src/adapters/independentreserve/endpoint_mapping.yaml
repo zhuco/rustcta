@@ -35,13 +35,64 @@ reconciliation:
 websocket:
   public:
     support: spec_only
+    url: wss://websockets.independentreserve.com
     channels: [orderbook, trade]
+    order_book:
+      channel_template: "orderbook-{primaryCurrencyCode_lower}"
+      subscribe:
+        query: "?subscribe=orderbook-{primaryCurrencyCode_lower}"
+        message:
+          Event: Subscribe
+          Data: ["orderbook-{primaryCurrencyCode_lower}"]
+      unsubscribe:
+        message:
+          Event: Unsubscribe
+          Data: ["orderbook-{primaryCurrencyCode_lower}"]
+      update_events: [NewOrder, OrderChanged, OrderCanceled]
+      update_semantics:
+        NewOrder: "Limit order was placed on the book; Data carries OrderType, OrderGuid, optional ClientId, Price map by fiat, and Volume."
+        OrderChanged: "Remaining unfilled Volume changed after a partial/full fill; Volume=0 means fully filled and should delete the order from the local book."
+        OrderCanceled: "Order was canceled; remove OrderGuid from the local book."
+      interval_ms: null
+      interval_source: "official docs do not publish a fixed orderbook event interval"
+      depth: null
+      depth_source: "official public orderbook stream docs do not publish a fixed depth"
+      sequence:
+        field: Nonce
+        scope: per_channel_and_currency
+        contiguous: true
+        gap_detection: reconnect_on_gap_or_regression
+      checksum:
+        supported: false
+        mode: none_documented
+        risk: "No checksum is documented for Independent Reserve public orderbook WS."
+      heartbeat:
+        interval_ms: 60000
+        mode: server_heartbeat
+        risk: "Official docs note heartbeat interval may change."
+      resync:
+        mode: rest_snapshot_rebuild
+        rest_endpoint_operation: get_order_book
+        triggers: [connect, reconnect, nonce_gap, nonce_regression, stale_stream, parse_error, suspected_message_loss]
     resync: rest_order_book_snapshot
   private:
     support: spec_only
     channels: [order, trade, account]
     fallback: rest_reconciliation
 unsupported:
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_standard_futures_perpetual_options_api
+    scope: standard_contracts_only
+    reason: "Independent Reserve leveraged trading is separate from standard futures/perpetual/options; current official/API profile exposes no standard contract API, so unsupported applies only to standard contracts."
+  - operation: leveraged_product
+    status: project_unimplemented
+    official_gap: leveraged_trading
+    boundary: project_unimplemented_product_line
+    scope: independentreserve_leveraged_trading
+    source_boundary_fixture: tests/fixtures/exchanges/independentreserve/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [leveraged_account_eligibility, leverage_collateral_position_risk_parsers, product_scoped_private_lifecycle, reconciliation_dry_run_gate]
+    reason: "Official leveraged trading is a separate project-unimplemented Margin-like product in this spot adapter and must not be inferred from Spot private endpoints."
   - positions
   - quote_market_order
   - amend_order
@@ -83,6 +134,9 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: native
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::independentreserve::private_parser::parse_balances
   - operation: get_fees
     product: spot
     transport: rest
@@ -95,6 +149,7 @@ endpoints:
     support: composed
     notes: "Independent Reserve fees are account-tiered and not exposed as a symbol fee endpoint in this adapter."
   - operation: place_order
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -105,6 +160,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_order
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -115,6 +171,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -125,6 +182,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -135,6 +193,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -144,3 +203,45 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    market_types: [spot]
+    transport: websocket
+    protocol: json
+    url: wss://websockets.independentreserve.com
+    channel: "orderbook-{primaryCurrencyCode_lower}"
+    support: spec_only
+    subscribe:
+      query: "?subscribe=orderbook-{primaryCurrencyCode_lower}"
+      payload:
+        Event: Subscribe
+        Data: ["orderbook-{primaryCurrencyCode_lower}"]
+      helper: independentreserve_public_subscribe_payload
+      query_helper: independentreserve_public_query_subscription
+    unsubscribe:
+      payload:
+        Event: Unsubscribe
+        Data: ["orderbook-{primaryCurrencyCode_lower}"]
+      helper: independentreserve_public_unsubscribe_payload
+    message:
+      parser: parse_independentreserve_public_stream_message
+      fixture: tests/fixtures/exchanges/independentreserve/ws/public_orderbook_new_order.json
+      events: [NewOrder, OrderChanged, OrderCanceled]
+      event_fields:
+        order_id: Data.OrderGuid
+        side: Data.OrderType
+        price_map: Data.Price
+        remaining_volume: Data.Volume
+      update_semantics: "Order-level event stream: NewOrder inserts, OrderChanged updates remaining volume or deletes on Volume=0, OrderCanceled deletes."
+    interval_ms: null
+    depth: null
+    sequence_fields: [Nonce]
+    checksum: none_documented
+    heartbeat:
+      interval_ms: 60000
+      mode: server_heartbeat
+    resync:
+      mode: rest_snapshot_rebuild
+      endpoint_operation: get_order_book
+      triggers: [connect, reconnect, nonce_gap, nonce_regression, stale_stream, parse_error, suspected_message_loss]

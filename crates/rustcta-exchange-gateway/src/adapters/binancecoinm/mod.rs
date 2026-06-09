@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -216,6 +218,8 @@ impl ExchangeClient for BinanceCoinMGatewayAdapter {
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
         capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
+        capabilities.supports_batch_place_order = self.config.private_rest_enabled();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_quote_market_order = false;
         capabilities.supports_amend_order = self.config.private_rest_enabled();
         capabilities.supports_order_list = false;
@@ -289,6 +293,20 @@ impl ExchangeClient for BinanceCoinMGatewayAdapter {
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
         self.cancel_order_impl(request).await
+    }
+
+    async fn batch_place_orders(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.batch_place_orders_impl(request).await
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn amend_order(

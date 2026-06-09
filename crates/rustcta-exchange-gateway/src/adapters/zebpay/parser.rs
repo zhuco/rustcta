@@ -1,10 +1,12 @@
 use chrono::{DateTime, TimeZone, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope, TenantId,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, Fill,
+    FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion,
 };
 use serde_json::Value;
 
@@ -201,6 +203,105 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_order_state(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let order = order_object(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ZebPay order response missing order object",
+            value,
+        )
+    })?;
+    parse_order_object(exchange_id, symbol_hint, order)
+}
+
+pub fn parse_open_orders(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let rows = rows_payload(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ZebPay open orders response missing orders array",
+            value,
+        )
+    })?;
+    rows.iter()
+        .map(|row| parse_order_object(exchange_id, symbol_hint, row))
+        .collect()
+}
+
+pub fn parse_recent_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "zebpay get_recent_fills requires canonical_symbol".to_string(),
+            })?;
+    let rows = rows_payload(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ZebPay recent fills response missing fills array",
+            value,
+        )
+    })?;
+    rows.iter()
+        .map(|row| {
+            let price = number_from_fields(row, &["price", "rate", "execution_price"]).ok_or_else(
+                || parse_error(exchange_id.clone(), "ZebPay fill missing price", row),
+            )?;
+            let quantity = number_from_fields(
+                row,
+                &["quantity", "size", "amount", "volume", "executedQuantity"],
+            )
+            .ok_or_else(|| parse_error(exchange_id.clone(), "ZebPay fill missing quantity", row))?;
+            Ok(Fill {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: MarketType::Spot,
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: first_string(row, &["order_id", "orderId", "orderid"]),
+                client_order_id: first_string(row, &["client_order_id", "clientOrderId"]),
+                fill_id: first_string(row, &["id", "trade_id", "tradeId", "fill_id", "fillId"]),
+                side: parse_side(first_string(row, &["side", "type", "order_side"]).as_deref())?,
+                position_side: PositionSide::None,
+                status: FillStatus::Confirmed,
+                liquidity_role: parse_liquidity(
+                    first_string(row, &["liquidity", "role"]).as_deref(),
+                ),
+                price,
+                quantity,
+                quote_quantity: number_from_fields(
+                    row,
+                    &["total", "quote_quantity", "quoteQuantity", "value"],
+                )
+                .or_else(|| Some(price * quantity)),
+                fee_asset: first_string(row, &["fee_currency", "feeCurrency", "feeAsset"]),
+                fee_amount: number_from_fields(row, &["fee", "fees", "commission"]),
+                fee_rate: None,
+                realized_pnl: None,
+                filled_at: first_timestamp(row, &["timestamp", "time", "created_at", "createdAt"])
+                    .unwrap_or_else(Utc::now),
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
 pub fn normalize_zebpay_symbol(symbol: &str) -> ExchangeApiResult<String> {
     let trimmed = symbol.trim();
     if trimmed.is_empty() {
@@ -293,6 +394,165 @@ fn value_array<'a>(value: &'a Value, fields: &[&str]) -> Option<&'a Vec<Value>> 
         .iter()
         .filter_map(|field| value.get(*field))
         .find_map(Value::as_array)
+}
+
+fn rows_payload(value: &Value) -> Option<&Vec<Value>> {
+    value_array(
+        value.get("data").unwrap_or(value),
+        &[
+            "orders", "order", "fills", "trades", "result", "records", "items",
+        ],
+    )
+}
+
+fn order_object(value: &Value) -> Option<&Value> {
+    let data = value.get("data").unwrap_or(value);
+    if data.is_object() {
+        return Some(data);
+    }
+    rows_payload(data)?.first()
+}
+
+fn parse_order_object(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    order: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let symbol = order_symbol_scope(exchange_id, symbol_hint, order)?;
+    let quantity = string_from_fields(
+        order,
+        &["quantity", "size", "amount", "volume", "original_quantity"],
+    )
+    .unwrap_or_else(|| "0".to_string());
+    let filled_quantity = string_from_fields(
+        order,
+        &[
+            "filled_quantity",
+            "filledQuantity",
+            "executed_quantity",
+            "executedQuantity",
+            "filled",
+        ],
+    )
+    .or_else(|| {
+        let quantity_value = number_from_value(&Value::String(quantity.clone()))?;
+        let remaining =
+            number_from_fields(order, &["remaining", "pending_quantity", "pendingQuantity"])?;
+        Some((quantity_value - remaining).max(0.0).to_string())
+    })
+    .unwrap_or_else(|| "0".to_string());
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Spot,
+        canonical_symbol: symbol.canonical_symbol.clone(),
+        exchange_symbol: symbol.exchange_symbol,
+        client_order_id: first_string(order, &["client_order_id", "clientOrderId"]),
+        exchange_order_id: first_string(order, &["id", "order_id", "orderId", "orderid"]),
+        side: parse_side(first_string(order, &["side", "type", "order_side"]).as_deref())?,
+        position_side: Some(PositionSide::None),
+        order_type: parse_order_type(
+            first_string(order, &["order_type", "orderType", "type_name"]).as_deref(),
+        ),
+        time_in_force: Some(TimeInForce::GTC),
+        status: parse_order_status(
+            first_string(order, &["status", "state"]).as_deref(),
+            &filled_quantity,
+        ),
+        quantity,
+        price: string_from_fields(order, &["price", "rate", "limit_price", "limitPrice"]),
+        filled_quantity,
+        average_fill_price: string_from_fields(
+            order,
+            &["average_price", "averagePrice", "avg_price", "avgPrice"],
+        ),
+        reduce_only: false,
+        post_only: false,
+        created_at: first_timestamp(order, &["created_at", "createdAt", "timestamp", "time"]),
+        updated_at: first_timestamp(order, &["updated_at", "updatedAt"]).unwrap_or_else(Utc::now),
+    })
+}
+
+fn order_symbol_scope(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    order: &Value,
+) -> ExchangeApiResult<SymbolScope> {
+    if let Some(symbol) = symbol_hint {
+        return Ok(symbol.clone());
+    }
+    let pair =
+        first_string(order, &["trade_pair", "tradePair", "pair", "symbol"]).ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "ZebPay private response missing trade pair",
+                order,
+            )
+        })?;
+    let normalized_symbol = normalize_zebpay_symbol(&pair)?;
+    let (base, quote) = split_pair_symbol(&normalized_symbol)
+        .ok_or_else(|| parse_error(exchange_id.clone(), "ZebPay pair missing assets", order))?;
+    Ok(SymbolScope {
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Spot,
+        canonical_symbol: Some(CanonicalSymbol::new(base, quote).map_err(validation_error)?),
+        exchange_symbol: ExchangeSymbol::new(
+            exchange_id.clone(),
+            MarketType::Spot,
+            normalized_symbol,
+        )
+        .map_err(validation_error)?,
+    })
+}
+
+fn parse_side(value: Option<&str>) -> ExchangeApiResult<OrderSide> {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "buy" | "bid" => Ok(OrderSide::Buy),
+        "sell" | "ask" => Ok(OrderSide::Sell),
+        other => Err(ExchangeApiError::InvalidRequest {
+            message: format!("ZebPay unsupported order side {other}"),
+        }),
+    }
+}
+
+fn parse_order_status(value: Option<&str>, filled_quantity: &str) -> OrderStatus {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "new" => OrderStatus::New,
+        "open" | "active" | "pending" => {
+            if filled_quantity != "0" {
+                OrderStatus::PartiallyFilled
+            } else {
+                OrderStatus::Open
+            }
+        }
+        "partial" | "partially_filled" | "partiallyfilled" => OrderStatus::PartiallyFilled,
+        "filled" | "executed" | "completed" | "closed" => OrderStatus::Filled,
+        "cancelled" | "canceled" => OrderStatus::Cancelled,
+        "rejected" => OrderStatus::Rejected,
+        "expired" => OrderStatus::Expired,
+        _ => OrderStatus::Unknown,
+    }
+}
+
+fn parse_order_type(value: Option<&str>) -> OrderType {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "market" => OrderType::Market,
+        _ => OrderType::Limit,
+    }
+}
+
+fn parse_liquidity(value: Option<&str>) -> LiquidityRole {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "maker" | "m" => LiquidityRole::Maker,
+        "taker" | "t" => LiquidityRole::Taker,
+        _ => LiquidityRole::Unknown,
+    }
+}
+
+fn number_from_fields(value: &Value, fields: &[&str]) -> Option<f64> {
+    fields
+        .iter()
+        .find_map(|field| value.get(*field).and_then(number_from_value))
 }
 
 fn split_pair_symbol(symbol: &str) -> Option<(String, String)> {

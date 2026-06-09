@@ -32,6 +32,29 @@ websocket:
   public:
     support: native
     channels: [depth_subscribe, trades_subscribe, ticker_subscribe, candles_subscribe]
+    order_book:
+      channel: depth_subscribe
+      products: [spot, linear_perp]
+      subscription:
+        method: depth_subscribe
+        params: [market, 100, "0", true]
+      depth: 100
+      interval_ms: 100
+      snapshot_keepalive_ms: 10000
+      sequence:
+        snapshot_field: update_id
+        delta_field: update_id
+        continuity: next update_id must be previous update_id + 1; reconnect and rebuild on gaps or regressions
+      checksum: none
+      update_semantics: absolute quantity at changed price levels; quantity 0 removes the level
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
+        endpoint: /api/v4/public/orderbook/{market}
+        triggers: [connect, reconnect, update_id_gap, stale_snapshot_keepalive]
+      fixtures:
+        parser_delta: tests/fixtures/exchanges/whitebit/ws/public_depth_update.json
+        subscribe_payload: crates/rustcta-exchange-gateway/src/adapters/whitebit/public_tests.rs
     heartbeat: { required: true, direction: client_ping, interval_ms: 50000, timeout_ms: 15000 }
     resync: rest_order_book_snapshot_after_reconnect
   private:
@@ -288,3 +311,20 @@ endpoints:
     atomicity: unknown
     testnet: false
     official_doc: WhiteBIT private WebSocket token endpoint.
+streams:
+  - operation: subscribe_public_stream
+    scope: public
+    channel: depth_subscribe
+    product: spot
+    market_types: [spot, linear_perp]
+    support: native
+    request_spec_required: true
+    subscription_method: depth_subscribe
+    params: [market, 100, "0", true]
+    interval_ms: 100
+    depth: 100
+    snapshot_keepalive_ms: 10000
+    sequence_fields: [update_id]
+    checksum: none
+    resync: get_order_book
+    fixture: tests/fixtures/exchanges/whitebit/ws/public_depth_update.json

@@ -121,6 +121,30 @@ websocket:
   public:
     support: native
     separate_by_product: true
+    spot_orderbook:
+      url: wss://ws.kraken.com/v2
+      channel: book
+      subscription: json_subscribe
+      depths: [10, 25, 100, 500, 1000]
+      fixed_interval_ms: null
+      message_types: [snapshot, update]
+      sequence_fields: []
+      checksum:
+        algorithm: crc32
+        levels: 10
+        field: checksum
+        scope: top10_asks_then_bids
+      resync: rest_order_book_snapshot
+    futures_orderbook:
+      url: wss://futures.kraken.com/ws/v1
+      feed: book
+      subscription: json_subscribe
+      fixed_interval_ms: null
+      depth: exchange_default
+      message_types: [book_snapshot, book]
+      sequence_fields: [seq]
+      checksum: none
+      resync: rest_order_book_snapshot
     heartbeat:
       request: '{"method":"ping"}'
       accepts: ['{"method":"pong"}', '{"channel":"heartbeat"}', '{"event":"heartbeat"}']
@@ -409,6 +433,10 @@ streams:
     transport: websocket
     url: wss://ws.kraken.com/v2
     auth: none
+    channel: book
+    depths: [10, 25, 100, 500, 1000]
+    checksum: crc32_top10
+    sequence: none
     resync:
       endpoint_operation: get_order_book_spot
   public_perpetual:
@@ -417,6 +445,9 @@ streams:
     transport: websocket
     url: wss://futures.kraken.com/ws/v1
     auth: none
+    feed: book
+    message_types: [book_snapshot, book]
+    sequence: seq
     resync:
       endpoint_operation: get_order_book_perpetual
   private_spot:

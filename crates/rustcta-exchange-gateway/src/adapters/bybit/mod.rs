@@ -203,12 +203,16 @@ impl ExchangeClient for BybitGatewayAdapter {
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
         capabilities.supports_positions = private;
+        capabilities.supports_fees = private;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
         capabilities.supports_query_order = private;
         capabilities.supports_open_orders = private;
         capabilities.supports_recent_fills = private;
         capabilities.supports_cancel_all_orders = private;
+        capabilities.supports_amend_order = private;
+        capabilities.supports_batch_place_order = private;
+        capabilities.supports_batch_cancel_order = private;
         capabilities.supports_client_order_id = true;
         capabilities.supports_reduce_only = true;
         capabilities.supports_post_only = true;
@@ -283,9 +287,9 @@ impl ExchangeClient for BybitGatewayAdapter {
 
     async fn amend_order(
         &self,
-        _request: AmendOrderRequest,
+        request: AmendOrderRequest,
     ) -> ExchangeApiResult<AmendOrderResponse> {
-        self.unsupported_private(self.profile_operation("bybit.amend_order", "bybiteu.amend_order"))
+        self.amend_order_impl(request).await
     }
 
     async fn place_order_list(
@@ -299,20 +303,16 @@ impl ExchangeClient for BybitGatewayAdapter {
 
     async fn batch_place_orders(
         &self,
-        _request: BatchPlaceOrdersRequest,
+        request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        self.unsupported_private(
-            self.profile_operation("bybit.batch_place_orders", "bybiteu.batch_place_orders"),
-        )
+        self.batch_place_orders_impl(request).await
     }
 
     async fn batch_cancel_orders(
         &self,
-        _request: BatchCancelOrdersRequest,
+        request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.unsupported_private(
-            self.profile_operation("bybit.batch_cancel_orders", "bybiteu.batch_cancel_orders"),
-        )
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn cancel_all_orders(

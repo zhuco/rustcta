@@ -14,6 +14,8 @@ Status: Task 11 perpetual-only adapter for Aster DEX Futures V3. The adapter exp
 - Symbols: Aster futures symbols are normalized without separators, for example `BTCUSDT`.
 - Signing: EIP-712 `AsterSignTransaction`, version `1`, chain id `1666`, zero verifying contract, `Message(string msg)`.
 
+Spot 边界写入 `spot_product status: project_unimplemented`：当前只接 Futures V3 host 和 perpetual REST/WS。补 Spot 前需要 spot REST/WS host、exchangeInfo/depth/ticker/trades、signed account/order/open-order/fill endpoints、listen-key/private stream 和 parser fixtures。
+
 ## Endpoint Mapping
 
 Machine-readable mapping:
@@ -64,3 +66,9 @@ cargo test -p rustcta-exchange-gateway aster_position_parser --lib --message-for
 ```
 
 Do not run live private trading without a separate dry-run preflight and permission audit.
+
+## P2 Product Line Boundary (2026-06-09)
+
+`spot_product` is an official-source project boundary, not an exchange-unsupported row. Aster has a separate Spot API surface, while this adapter is scoped to Aster Futures V3 USDT perpetual REST/WS.
+
+Do not promote Spot runtime from the Futures V3 profile. Promotion requires spot REST/WS host audit, exchangeInfo/depth/ticker/trades public specs, signed account private specs, spot order lifecycle/open-order/fill private specs, listen-key/private stream handling, and product-scope reconciliation guards.

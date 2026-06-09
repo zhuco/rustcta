@@ -1,0 +1,40 @@
+{
+  "exchange": "binance",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/fapi/v1/batchOrders",
+  "auth": "signed",
+  "query": {
+    "batchOrders": {
+      "match": "non_empty"
+    },
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "recvWindow": {
+      "match": "exact",
+      "value": "5000"
+    },
+    "signature": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "X-MBX-APIKEY": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": [
+    "test-secret"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "exchange": "zebpay",
+  "operation": "cancel_all_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "",
+  "auth": "",
+  "credential_scope": "trade",
+  "headers_shape": [
+    "client_id",
+    "timestamp",
+    "RequestId",
+    "Authorization"
+  ],
+  "body_or_query_shape": {},
+  "source_boundary": "ZebPay spot private core trading is fixture-backed offline; runtime stays disabled pending bearer-token onboarding, region/profile guard, parsers, reconciliation, and live dry-run controls.",
+  "expected_error_until_promoted": "zebpay.cancel_all_orders_request_spec_only"
+}

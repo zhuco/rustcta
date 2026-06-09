@@ -28,10 +28,38 @@ websocket:
   public:
     support: payload_helper
     channels: [orderbook, trades, ticker]
+    order_book:
+      channel: orderbook
+      fixed_update_interval_ms: null
+      interval_note: official API v4 WebSocket materials reviewed here do not publish a fixed millisecond cadence
+      depth:
+        parameter: null
+        documented_limit: null
+        rest_fallback_limit: 1000
+        note: official WebSocket depth selector was not verified; REST /api/v4/{symbol}/orderbook supports limit max 1000
+      sequence:
+        fields: []
+        continuity: unsupported_unverified
+        risk: no official WebSocket orderbook sequence field was verified in this batch
+      checksum:
+        supported: false
+        field: null
+        risk: no official WebSocket orderbook checksum field was verified in this batch
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: order_book
+        path: /api/v4/{symbol}/orderbook
     heartbeat: { mode: connection, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
+  - operation: get_fees
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/mercado/request_specs/get_fees_asset.json
+    reason: "Mercado Bitcoin API v4 asset fees endpoint is mapped as an offline request-spec boundary, but shared get_fees runtime remains project-unimplemented pending bearer read-only guard, asset/symbol mapping, and maker/taker parser wiring."
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -76,6 +104,9 @@ endpoints:
     atomicity: non_atomic
     testnet: false
     support: spec_only
+    reason: "Mercado Bitcoin private core trading is fixture-backed offline; runtime stays disabled pending bearer account-id scope guard, order parser, reconciliation, and live dry-run controls."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/mercado/request_specs/place_order_limit_brl.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/mercado/order_ack.json }
   - operation: cancel_order
     product: spot
     market_types: [spot]
@@ -91,6 +122,26 @@ endpoints:
     atomicity: non_atomic
     testnet: false
     support: spec_only
+    reason: "Mercado Bitcoin cancel is fixture-backed offline; runtime stays disabled pending bearer account-id scope guard, cancel/readback parser, reconciliation, and live dry-run controls."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/mercado/request_specs/cancel_order.json }
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /accounts/{accountId}/{symbol}/orders/{orderId}
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: mercado_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Mercado Bitcoin order readback is guarded by private REST enablement, bearer token, account id, Spot symbol, and exchange_order_id; client_order_id lookup remains unsupported until externalId query semantics are verified."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/mercado/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/mercado/order_ack.json }
   - operation: balances
     product: spot
     market_types: [spot]
@@ -106,6 +157,29 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: spec_only
+    reason: "Mercado Bitcoin account balance readback is fixture-backed, but shared get_balances runtime remains disabled pending bearer read-only guard, account-id scope policy, balance parser, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/mercado/request_specs/get_balances.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/mercado/balances_success.json }
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /{asset}/fees
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: mercado_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "Mercado Bitcoin API v4 asset fees request shape is fixture-backed, but shared get_fees runtime remains disabled pending bearer read-only guard, asset/product mapping, and maker/taker parser."
+    official_doc: https://api.mercadobitcoin.net/
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/mercado/request_specs/get_fees_asset.json
   - operation: open_orders
     product: spot
     market_types: [spot]
@@ -120,7 +194,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    reason: "Mercado Bitcoin open-order readback is guarded by private REST enablement, bearer token, account id, optional Spot symbol local filter, and implemented order parser; pagination remains explicitly unsupported until official cursor semantics are pinned."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/mercado/request_specs/get_open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/mercado/open_orders_success.json }
   - operation: recent_fills
     product: spot
     market_types: [spot]
@@ -135,4 +212,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    reason: "Mercado Bitcoin symbol-scoped fill history readback is guarded by private REST enablement, bearer token, account id, context account, local limit truncation, and implemented trade parser; cursor/time/from_trade filters stay unsupported until query semantics are pinned."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/mercado/request_specs/get_recent_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/mercado/fills_success.json }

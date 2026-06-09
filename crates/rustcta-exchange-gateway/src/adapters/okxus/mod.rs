@@ -23,14 +23,16 @@ impl OkxusGatewayConfig {
         super::okx::OkxGatewayConfig {
             exchange_id: "okxus".to_string(),
             rest_base_url: self.rest_base_url,
+            public_ws_url: self.public_ws_url,
             request_timeout_ms: self.request_timeout_ms,
             enabled: self.enabled,
-            api_key: None,
-            api_secret: None,
-            passphrase: None,
-            enabled_private_rest: false,
+            api_key: self.api_key,
+            api_secret: self.api_secret,
+            passphrase: self.passphrase,
+            enabled_private_rest: self.enabled_private_rest,
+            enabled_public_streams: true,
             status_message:
-                "okxus OKX US spot public REST profile; private trading unsupported pending US credential/product audit"
+                "okxus OKX US Spot profile; private REST reuses OKX runtime when US credentials and explicit enable flag are configured"
                     .to_string(),
             unsupported_market_type_operation: "okxus.non_spot_market_type",
         }

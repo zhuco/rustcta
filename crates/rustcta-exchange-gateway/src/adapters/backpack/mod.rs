@@ -177,7 +177,7 @@ impl ExchangeClient for BackpackGatewayAdapter {
         ];
         capabilities.max_order_book_depth = Some(1000);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(1000));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(1000));
         capabilities.max_recent_fill_limit = Some(1000);
         capabilities
     }

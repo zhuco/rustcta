@@ -1,0 +1,16 @@
+{
+  "operation": "bitbank.query_order",
+  "method": "GET",
+  "path": "/v1/user/spot/order",
+  "query": [
+    [
+      "order_id",
+      "123456"
+    ],
+    [
+      "pair",
+      "btc_jpy"
+    ]
+  ],
+  "body": null
+}

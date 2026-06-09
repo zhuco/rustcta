@@ -1,0 +1,37 @@
+{
+  "exchange": "btcturk",
+  "operation": "get_fees",
+  "status": "offline_source_boundary",
+  "source_type": "public_fee_table",
+  "source_url": "https://global-blog.btcturk.com/btcturk-global/btcturk-global-fee-structure/",
+  "last_reviewed": "2026-06-09",
+  "product": "spot",
+  "quote_volume_currency": "USDT",
+  "effective_fee_kind": "maker_taker_by_30d_volume",
+  "runtime_boundary": "config_table_source_only",
+  "trade_enabled": false,
+  "default_or_override_strategy": {
+    "public_tier_table_allowed_for_backtest_only": true,
+    "production_requires_region_profile_and_explicit_tier_config": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "requires_private_api": false,
+  "refresh_policy_required": true,
+  "tiers": [
+    {
+      "level": 1,
+      "min_30d_volume": "0",
+      "max_30d_volume": "100000",
+      "maker_fee_decimal": "0.0010",
+      "taker_fee_decimal": "0.0012"
+    },
+    {
+      "level": 8,
+      "min_30d_volume": "100000000",
+      "max_30d_volume": null,
+      "maker_fee_decimal": "0.0001",
+      "taker_fee_decimal": "0.0004"
+    }
+  ],
+  "notes": "Boundary fixture records the public table shape and representative edge tiers; shared get_fees still needs a config-loader/runtime source before promotion."
+}

@@ -1,0 +1,20 @@
+{
+  "operation": "get_balances",
+  "exchange": "cod3x",
+  "status": "project_unimplemented",
+  "support": "spec_only",
+  "account_model": "downstream_venue_account_or_wallet",
+  "source_boundary": {
+    "cod3x_native_api": false,
+    "downstream_profiles": ["hyperliquid", "gmx_v2", "lighter"],
+    "requires_account_selection": true,
+    "requires_read_only_scope": true
+  },
+  "expected_runtime_error": "cod3x.balances_unverified",
+  "remaining_runtime_work": [
+    "routed venue or wallet account selection",
+    "read-only credential or wallet scope guard",
+    "asset precision and collateral/equity parser",
+    "downstream venue or chain/indexer reconciliation"
+  ]
+}

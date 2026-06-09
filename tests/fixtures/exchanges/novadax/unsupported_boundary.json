@@ -1,7 +1,7 @@
 {
   "adapter": "novadax",
   "products": ["spot"],
-  "private_write_mode": "offline_request_spec_only",
+  "private_write_mode": "credential_gated_runtime_cancel_all_offline",
   "private_streams": "unsupported",
   "fiat_operations": "unsupported",
   "withdrawals": "unsupported",

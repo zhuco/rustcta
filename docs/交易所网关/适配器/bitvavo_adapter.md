@@ -18,7 +18,7 @@ in this verification batch.
 
 ## Public WebSocket Order Book
 
-Official `book` subscription pushes order book changes and uses `nonce` as the ordered book version. Local book management should initialize from REST/WS `getBook` with a chosen depth, then require each `book` event nonce to be exactly previous nonce + 1; otherwise resubscribe and rebuild. The reviewed official docs do not publish a fixed millisecond interval or checksum.
+Official `book` subscription pushes order book changes and uses `nonce` as the ordered book version. Local book management should initialize from REST/WS `getBook` with a chosen depth, then require each `book` event nonce to be exactly previous nonce + 1; otherwise resubscribe and rebuild. The reviewed official docs do not publish a fixed millisecond interval, checksum, or fixed live delta depth; `depth: unspecified` for the WS `book` channel.
 
 ## Capability Matrix
 

@@ -69,6 +69,16 @@ impl NovadaxGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn private_credentials(&self, operation: &'static str) -> ExchangeApiResult<(String, String)> {
+        if !self.config.private_rest_available() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        Ok((
+            self.config.api_key.clone().unwrap_or_default(),
+            self.config.api_secret.clone().unwrap_or_default(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -99,7 +109,8 @@ impl ExchangeClient for NovadaxGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        let private_rest = self.config.private_rest_available();
+        capabilities.supports_private_rest = private_rest;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -110,13 +121,13 @@ impl ExchangeClient for NovadaxGatewayAdapter {
         capabilities.supports_balances = false;
         capabilities.supports_positions = false;
         capabilities.supports_fees = false;
-        capabilities.supports_place_order = false;
-        capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
-        capabilities.supports_batch_place_order = false;
-        capabilities.supports_batch_cancel_order = false;
+        capabilities.supports_place_order = private_rest;
+        capabilities.supports_cancel_order = private_rest;
+        capabilities.supports_query_order = private_rest;
+        capabilities.supports_open_orders = private_rest;
+        capabilities.supports_recent_fills = private_rest;
+        capabilities.supports_batch_place_order = private_rest;
+        capabilities.supports_batch_cancel_order = private_rest;
         capabilities.supports_cancel_all_orders = false;
         capabilities.supports_quote_market_order = false;
         capabilities.supports_amend_order = false;
@@ -179,9 +190,7 @@ impl ExchangeClient for NovadaxGatewayAdapter {
         &self,
         request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("novadax.place_order_offline_request_spec_only")
+        self.place_order_impl(request).await
     }
 
     async fn place_quote_market_order(
@@ -197,9 +206,7 @@ impl ExchangeClient for NovadaxGatewayAdapter {
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("novadax.cancel_order_offline_request_spec_only")
+        self.cancel_order_impl(request).await
     }
 
     async fn amend_order(
@@ -224,20 +231,14 @@ impl ExchangeClient for NovadaxGatewayAdapter {
         &self,
         request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        for order in &request.orders {
-            self.ensure_exchange(&order.symbol.exchange)?;
-            self.ensure_supported_market_type(order.symbol.market_type)?;
-        }
-        self.unsupported("novadax.batch_place_orders_offline_request_spec_only")
+        self.batch_place_orders_impl(request).await
     }
 
     async fn batch_cancel_orders(
         &self,
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("novadax.batch_cancel_orders_offline_request_spec_only")
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn cancel_all_orders(
@@ -252,25 +253,21 @@ impl ExchangeClient for NovadaxGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("novadax.query_order_private_read_not_promoted")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("novadax.open_orders_private_read_not_promoted")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("novadax.recent_fills_private_read_not_promoted")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

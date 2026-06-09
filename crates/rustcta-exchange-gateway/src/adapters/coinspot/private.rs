@@ -5,9 +5,10 @@ use rustcta_exchange_api::{
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    OpenOrdersRequest, OpenOrdersResponse, OrderListRequest, OrderListResponse, OrderState,
+    PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 
@@ -248,6 +249,15 @@ impl CoinspotGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         Err(ExchangeApiError::Unsupported {
             operation: "coinspot.edit_order_side_specific",
+        })
+    }
+
+    pub(super) fn unsupported_order_list(
+        &self,
+        _request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "coinspot.order_list",
         })
     }
 

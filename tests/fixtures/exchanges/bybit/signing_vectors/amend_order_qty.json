@@ -1,0 +1,12 @@
+{
+  "exchange": "bybit",
+  "name": "amend_order_qty",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/v5/order/amend",
+  "payload": "1700000000000test-key5000{\"category\":\"linear\",\"orderId\":\"2001\",\"orderLinkId\":\"cli-amend\",\"qty\":\"0.02\",\"symbol\":\"BTCUSDT\"}",
+  "expected_signature": "1bf502d07a224a154b91caaab9b3b11af2c761dcdeaefd25ebeca7888e13a620",
+  "payload_format": "raw_payload"
+}

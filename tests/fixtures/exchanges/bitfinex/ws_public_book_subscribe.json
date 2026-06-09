@@ -1,0 +1,8 @@
+{
+  "event": "subscribe",
+  "channel": "book",
+  "symbol": "tBTCUSD",
+  "prec": "P0",
+  "freq": "F0",
+  "len": 100
+}

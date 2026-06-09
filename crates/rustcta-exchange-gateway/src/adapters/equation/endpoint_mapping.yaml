@@ -32,8 +32,36 @@ batch:
   place_orders: unsupported_unverified
   cancel_orders: unsupported_unverified
 websocket:
-  public: unsupported_unverified
-  private: unsupported_unverified
+  public:
+    support: unsupported
+    reason: "Audit-only Equation EVM protocol profile has no stable exchange-gateway public order book WebSocket contract."
+    order_book:
+      support: unsupported
+      reason: no_stable_official_orderbook_ws
+  private:
+    support: unsupported
+    reason: "No stable private account/order stream runtime is promoted for this audit-only EVM profile."
+unsupported:
+  - operation: spot_product
+    reason: Equation V3 profile is a perpetual protocol adapter; spot products are not supported by this profile.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：audit-only EVM protocol profile，无稳定 gateway fee runtime。"
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/equation/request_specs/get_balances_account_source.json
+    reason: "Equation EVM wallet/indexer account and collateral state can be modeled as readback, but this audit-only profile has not implemented shared get_balances runtime."
+  - operation: get_positions
+    reason: "交易所不支持当前仓位接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 private account/position runtime。"
+  - operation: place_order
+    reason: "交易所不支持当前交易/私有接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 place_order runtime。"
+  - operation: cancel_order
+    reason: "交易所不支持当前交易/私有接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 cancel_order runtime。"
+  - operation: query_order
+    reason: "交易所不支持当前交易/私有接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 query_order runtime。"
+  - operation: get_open_orders
+    reason: "交易所不支持当前交易/私有接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 get_open_orders runtime。"
+  - operation: get_recent_fills
+    reason: "交易所不支持当前交易/私有接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 get_recent_fills runtime。"
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -65,21 +93,6 @@ endpoints:
     support: unsupported_unverified
     reason: "No stable order-book or quote snapshot REST contract was verified."
     market_types: [perpetual]
-  - operation: get_fees
-    product: perpetual
-    transport: rest
-    method: GET
-    path: /unsupported/equation/risk
-    auth: unsupported
-    rate_limit_bucket: equation_unverified
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported_unverified
-    reason: "Risk/funding/liquidation fields are protocol-audit subjects, not a promoted runtime parser."
-    market_types: [perpetual]
   - operation: get_positions
     product: perpetual
     transport: rest
@@ -93,22 +106,25 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: unsupported_unverified
-    reason: "Account/position reads require verified wallet/indexer semantics before runtime support."
+    reason: "交易所不支持当前仓位接口 runtime：Equation 当前 adapter 是 audit-only EVM protocol profile，不启用稳定 private account/position runtime。"
     market_types: [perpetual]
   - operation: get_balances
     product: perpetual
     transport: rest
-    method: GET
-    path: /unsupported/equation/balances
-    auth: unsupported
+    method: SOURCE_READ
+    path: indexer://equation/arbitrum/wallet-collateral
+    auth: none
     rate_limit_bucket: equation_unverified
-    weight: 0
-    request_spec_required: false
+    weight: 1
+    request_spec_required: true
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported_unverified
-    reason: "Collateral/account state source is unverified."
+    support: spec_only
+    reason: "EVM wallet/indexer collateral source boundary only; shared get_balances runtime remains project-unimplemented pending contract/indexer source guard, parser, reorg handling, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/equation/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/equation/request_specs/get_balances_account_source.json }
+    notes: "No live Equation API, indexer, RPC, or wallet-signing call is executed by this audit-only adapter."
     market_types: [perpetual]
   - operation: get_open_orders
     product: perpetual
@@ -158,7 +174,7 @@ endpoints:
   - operation: place_order
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/equation/place-order
     auth: unsupported
     rate_limit_bucket: equation_unverified
@@ -173,7 +189,7 @@ endpoints:
   - operation: cancel_order
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/equation/cancel-order
     auth: unsupported
     rate_limit_bucket: equation_unverified
@@ -185,10 +201,40 @@ endpoints:
     support: unsupported_unverified
     reason: "Cancel signing and execution semantics are not verified."
     market_types: [perpetual]
+  - operation: amend_order
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/equation/amend-order
+    auth: unsupported
+    rate_limit_bucket: equation_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "Amend signing and execution semantics are not verified."
+    market_types: [perpetual]
+  - operation: place_order_list
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/equation/order-list
+    auth: unsupported
+    rate_limit_bucket: equation_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "OCO/OTO/order-list semantics are not verified."
+    market_types: [perpetual]
   - operation: batch_place_orders
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/equation/batch-place
     auth: unsupported
     rate_limit_bucket: equation_unverified
@@ -203,7 +249,7 @@ endpoints:
   - operation: batch_cancel_orders
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/equation/batch-cancel
     auth: unsupported
     rate_limit_bucket: equation_unverified

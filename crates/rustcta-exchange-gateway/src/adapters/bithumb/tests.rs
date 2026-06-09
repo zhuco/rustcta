@@ -13,11 +13,13 @@ use serde_json::{json, Value};
 
 use super::parser::{normalize_bithumb_symbol, parse_orderbook_snapshot, parse_symbol_rules};
 use super::private::{bithumb_cancel_order_query, bithumb_place_order_body};
-use super::private_parser::{parse_balances, parse_fills_from_orders, parse_order, parse_orders};
+use super::private_parser::{
+    parse_balances, parse_fee_snapshot, parse_fills_from_orders, parse_order, parse_orders,
+};
 use super::signing::{bithumb_jwt, bithumb_query_hash};
 use super::streams::{
-    bithumb_ping_payload, bithumb_private_subscribe_payload, bithumb_public_subscribe_payload,
-    bithumb_reconnect_policy_ms,
+    bithumb_ping_payload, bithumb_private_subscribe_payload, bithumb_public_order_book_ws_policy,
+    bithumb_public_subscribe_payload, bithumb_reconnect_policy_ms,
 };
 use super::transport::{public_request_shape, signed_body_shape, signed_get_shape};
 use super::{BithumbGatewayAdapter, BithumbGatewayConfig};
@@ -121,6 +123,10 @@ fn private_parsers_should_handle_balances_orders_and_fills() {
     .expect("fills");
     assert_eq!(fills[0].fill_id.as_deref(), Some("trade-001"));
     assert_eq!(fills[0].quantity, 0.001);
+
+    let fees = parse_fee_snapshot(&spot_symbol(), &fixture("orders_chance.json")).expect("fees");
+    assert_eq!(fees.maker_rate, "0.0004");
+    assert_eq!(fees.taker_rate, "0.0005");
 }
 
 #[test]
@@ -220,6 +226,17 @@ fn websocket_fixtures_should_match_subscription_helpers() {
         fixture("ws/public_orderbook_subscribe.json")
     );
 
+    let public_snapshot = PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("public-ws-snapshot"),
+        symbol: spot_symbol(),
+        kind: PublicStreamKind::OrderBookSnapshot,
+    };
+    assert_eq!(
+        bithumb_public_subscribe_payload(&public_snapshot).expect("snapshot payload"),
+        fixture("ws/public_orderbook_snapshot_subscribe.json")
+    );
+
     let private = PrivateStreamSubscription {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: context("private-ws"),
@@ -234,6 +251,34 @@ fn websocket_fixtures_should_match_subscription_helpers() {
     );
     assert_eq!(bithumb_ping_payload(), json!({ "type": "ping" }));
     assert_eq!(bithumb_reconnect_policy_ms(), (30_000, 45_000, 60_000));
+}
+
+#[test]
+fn public_orderbook_ws_policy_should_cover_snapshot_realtime_and_resync_rules() {
+    let policy = bithumb_public_order_book_ws_policy();
+    assert_eq!(policy.url, "wss://ws-api.bithumb.com/websocket/v1");
+    assert_eq!(policy.channel, "orderbook");
+    assert_eq!(policy.snapshot_switch, "is_only_snapshot");
+    assert_eq!(policy.realtime_switch, "is_only_realtime");
+    assert_eq!(policy.default_level, 0);
+    assert!(policy.level_semantics.contains("price aggregation"));
+    assert_eq!(policy.fixed_update_interval_ms, None);
+    assert_eq!(policy.sequence_field, None);
+    assert_eq!(policy.checksum, None);
+    assert_eq!(policy.rest_snapshot_endpoint, "/v1/orderbook");
+    assert!(policy
+        .resync_strategy
+        .contains("no orderbook sequence/checksum"));
+
+    let realtime = parse_orderbook_snapshot(
+        &exchange_id(),
+        spot_symbol(),
+        &fixture("ws/orderbook_realtime.json"),
+    )
+    .expect("realtime orderbook");
+    assert_eq!(realtime.bids[0].price, 69_995_000.0);
+    assert_eq!(realtime.asks[0].quantity, 0.31);
+    assert!(realtime.exchange_timestamp.is_some());
 }
 
 #[tokio::test]
@@ -285,6 +330,12 @@ fn endpoint_mapping_should_declare_bithumb_task12_surface() {
         "private_limit_per_second: 140",
         "path: /v1/market/all",
         "path: /v1/orderbook",
+        "channel: orderbook",
+        "is_only_snapshot",
+        "is_only_realtime",
+        "fixed_update_interval_ms:",
+        "unsupported_no_official_sequence_or_checksum",
+        "rest_snapshot_after_reconnect_or_stale_stream",
         "path: /v2/orders",
         "path: /v2/order",
         "private_stream_requires_jwt_credentials",

@@ -23,6 +23,19 @@ perpetual markets.
 
 Official Exchange WS `book.{instrument_name}.{depth}` supports explicit depth 10 or 50. For arbitrage, use delta mode `SNAPSHOT_AND_UPDATE` with `book_update_frequency=10` or `100` ms; snapshot-only mode is 500ms and the old depth-less `book.{instrument_name}` form is deprecated. Book updates carry `u` and `pu`; if `pu` does not match the previous `u`, resubscribe to receive a fresh snapshot before trusting local book state.
 
+Structured adapter coverage:
+
+| Field | Crypto.com public WS order-book detail |
+| --- | --- |
+| Channel | `book.{instrument_name}.{depth}` |
+| Mode | `SNAPSHOT_AND_UPDATE` delta stream |
+| Depth | `10` or `50`; adapter default `50` |
+| Frequency | `book_update_frequency` `10` or `100` ms; adapter default `10` |
+| Sequence | `u` update ID and `pu` previous update ID |
+| Gap handling | apply only when `pu == previous u`; rebuild on `pu` gap, regression, reconnect, stale stream, or parse error |
+| Checksum | no documented checksum |
+| Rebuild | REST `public/get-book`, then fresh `SNAPSHOT_AND_UPDATE` subscription |
+
 ## Endpoint Mapping
 
 | Standard capability | Crypto.com Exchange v1 endpoint or channel |

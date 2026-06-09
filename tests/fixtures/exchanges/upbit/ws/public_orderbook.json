@@ -5,11 +5,11 @@
   {
     "type": "orderbook",
     "codes": [
-      "KRW-BTC"
+      "KRW-BTC.30"
     ],
     "is_only_realtime": true
   },
   {
-    "format": "SIMPLE"
+    "format": "DEFAULT"
   }
 ]

@@ -1,0 +1,26 @@
+{
+  "success": true,
+  "data": {
+    "results": [
+      {
+        "success": true,
+        "tx_type": "create_order",
+        "market_index": 0,
+        "order_index": "lighter-order-2001",
+        "client_order_index": "lighter-batch-client-1",
+        "is_ask": false,
+        "order_type": "limit",
+        "time_in_force": "GTC",
+        "status": "accepted",
+        "base_amount": "1.00",
+        "price": "2064.50"
+      },
+      {
+        "success": false,
+        "tx_type": "create_order",
+        "client_order_index": "lighter-batch-client-2",
+        "error": "insufficient balance"
+      }
+    ]
+  }
+}

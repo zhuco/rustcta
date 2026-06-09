@@ -26,7 +26,7 @@ impl Default for BtcboxGatewayConfig {
 
 impl BtcboxGatewayConfig {
     pub fn private_rest_enabled(&self) -> bool {
-        false
+        self.has_private_credentials()
     }
 
     pub fn has_private_credentials(&self) -> bool {

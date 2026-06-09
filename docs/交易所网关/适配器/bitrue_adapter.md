@@ -84,11 +84,16 @@ Secrets are only used inside the transport signing path and are not written into
 
 Official Spot depth subscription uses `market_${symbol}_simple_depth_step0` on
 `wss://ws.bitrue.com/market/ws`; payloads are gzip-compressed and the server
-sends ping every 15 seconds. The reviewed official Spot docs do not publish a
-fixed orderbook push interval, fixed depth level count, sequence, or checksum.
-Mapping should add the exact channel, gzip handling, ping 15s, no fixed
+sends a periodic ping heartbeat. The reviewed official Spot docs do not publish
+a fixed orderbook push interval, fixed depth level count, sequence, or checksum.
+Mapping should add the exact channel, gzip handling, ping heartbeat, no fixed
 ms/depth/checksum, and REST depth snapshot fallback. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
+Structured boundary: `market_${symbol}_simple_depth_step0` is recorded as the
+Spot public order-book channel with gzip payloads, server ping heartbeat, no
+fixed ms, depth: unspecified, no documented sequence/checksum, and REST
+`/api/v1/depth` snapshot fallback.
 
 ## Fixtures
 

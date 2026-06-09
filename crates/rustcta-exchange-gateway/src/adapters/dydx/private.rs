@@ -10,6 +10,10 @@ use rustcta_exchange_api::{
 };
 
 use super::parser::{parse_fills, parse_orders, parse_positions, parse_subaccount_balance};
+use super::signing::{
+    node_write_project_unimplemented, BATCH_CANCEL_PROJECT_UNIMPLEMENTED,
+    BATCH_PLACE_PROJECT_UNIMPLEMENTED, NODE_WRITE_PROJECT_UNIMPLEMENTED,
+};
 use super::DydxGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
@@ -85,45 +89,45 @@ impl DydxGatewayAdapter {
         &self,
         _request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "dydx.node_order_signing_requires_wallet_tx_authenticator",
-        })
+        Err(node_write_project_unimplemented(
+            NODE_WRITE_PROJECT_UNIMPLEMENTED,
+        ))
     }
 
     pub(super) async fn cancel_order_private_rest(
         &self,
         _request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "dydx.node_cancel_signing_requires_wallet_tx_authenticator",
-        })
+        Err(node_write_project_unimplemented(
+            NODE_WRITE_PROJECT_UNIMPLEMENTED,
+        ))
     }
 
     pub(super) async fn batch_place_orders_private_rest(
         &self,
         _request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "dydx.batch_place_requires_node_tx_signing",
-        })
+        Err(node_write_project_unimplemented(
+            BATCH_PLACE_PROJECT_UNIMPLEMENTED,
+        ))
     }
 
     pub(super) async fn batch_cancel_orders_private_rest(
         &self,
         _request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "dydx.batch_cancel_requires_node_tx_signing",
-        })
+        Err(node_write_project_unimplemented(
+            BATCH_CANCEL_PROJECT_UNIMPLEMENTED,
+        ))
     }
 
     pub(super) async fn cancel_all_orders_private_rest(
         &self,
         _request: CancelAllOrdersRequest,
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "dydx.cancel_all_requires_node_tx_signing_policy",
-        })
+        Err(node_write_project_unimplemented(
+            NODE_WRITE_PROJECT_UNIMPLEMENTED,
+        ))
     }
 
     pub(super) async fn query_order_private_rest(

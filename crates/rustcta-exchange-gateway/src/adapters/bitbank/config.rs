@@ -1,5 +1,5 @@
 const DEFAULT_PUBLIC_REST_BASE_URL: &str = "https://public.bitbank.cc";
-const DEFAULT_PRIVATE_REST_BASE_URL: &str = "https://api.bitbank.cc/v1";
+const DEFAULT_PRIVATE_REST_BASE_URL: &str = "https://api.bitbank.cc";
 const DEFAULT_PUBLIC_WS_URL: &str = "wss://stream.bitbank.cc/socket.io/?EIO=3&transport=websocket";
 const DEFAULT_PRIVATE_WS_URL: &str = "wss://stream.bitbank.cc/socket.io/?EIO=3&transport=websocket";
 const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 10_000;

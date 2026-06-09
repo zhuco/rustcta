@@ -1,6 +1,7 @@
 {
-  "secret": "bitbank-secret",
+  "api_key": "bitbank-key",
+  "api_secret": "bitbank-secret",
   "nonce": "1743054548123",
-  "payload": "/v1/user/spot/order?order_id=123456&pair=btc_jpy",
+  "path": "/v1/user/spot/order?order_id=123456&pair=btc_jpy",
   "expected_signature": "fca00519459d1360b55f6fc714449edc8286ec0acd802ef2b34a7a9d08c6adca"
 }

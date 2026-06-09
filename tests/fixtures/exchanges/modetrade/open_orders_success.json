@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "data": {
+    "rows": [
+      {
+        "order_id": "mt-open-1",
+        "client_order_id": "mt-open-client-1",
+        "symbol": "PERP_BTC_USDC",
+        "side": "SELL",
+        "order_type": "LIMIT",
+        "status": "NEW",
+        "order_price": "66000",
+        "order_quantity": "0.0200",
+        "total_executed_quantity": "0",
+        "created_time": 1700000010000,
+        "updated_time": 1700000015000
+      }
+    ]
+  }
+}

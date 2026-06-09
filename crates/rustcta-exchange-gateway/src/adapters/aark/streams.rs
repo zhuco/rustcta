@@ -13,6 +13,67 @@ const AARK_WS_PING_INTERVAL_MS: i64 = 30_000;
 const AARK_WS_PONG_TIMEOUT_MS: i64 = 45_000;
 const AARK_WS_STALE_MESSAGE_MS: i64 = 60_000;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AarkOrderBookWsPolicy {
+    pub url: &'static str,
+    pub path_template: &'static str,
+    pub topic_template: &'static str,
+    pub interval_ms: u64,
+    pub sequence_fields: &'static [&'static str],
+    pub checksum: Option<&'static str>,
+    pub resync: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AarkPrevTsContinuity {
+    First,
+    Continuous,
+    Gap { previous_ts: u64, prev_ts: u64 },
+}
+
+impl AarkPrevTsContinuity {
+    pub fn requires_resync(self) -> bool {
+        matches!(self, AarkPrevTsContinuity::Gap { .. })
+    }
+}
+
+pub fn aark_orderbook_ws_policy() -> AarkOrderBookWsPolicy {
+    AarkOrderBookWsPolicy {
+        url: "wss://ws-evm.orderly.org/ws/stream",
+        path_template: "/{account_id}",
+        topic_template: "{symbol}@orderbookupdate",
+        interval_ms: 200,
+        sequence_fields: &["ts", "prevTs"],
+        checksum: None,
+        resync: "request a fresh orderbook snapshot and resubscribe after prevTs gap, reconnect, stale stream, parse error, or suspected loss",
+    }
+}
+
+pub fn aark_check_prev_ts_continuity(
+    previous_ts: Option<u64>,
+    prev_ts: Option<u64>,
+) -> AarkPrevTsContinuity {
+    let (Some(previous_ts), Some(prev_ts)) = (previous_ts, prev_ts) else {
+        return AarkPrevTsContinuity::First;
+    };
+    if previous_ts == prev_ts {
+        AarkPrevTsContinuity::Continuous
+    } else {
+        AarkPrevTsContinuity::Gap {
+            previous_ts,
+            prev_ts,
+        }
+    }
+}
+
+pub fn aark_orderbook_update_timestamps(value: &Value) -> (Option<u64>, Option<u64>) {
+    let data = value.get("data").unwrap_or(value);
+    (
+        data.get("ts").and_then(value_as_u64),
+        data.get("prevTs").and_then(value_as_u64),
+    )
+}
+
 impl AarkGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -89,6 +150,14 @@ pub fn aark_reconnect_policy_ms() -> (i64, i64, i64) {
         AARK_WS_PONG_TIMEOUT_MS,
         AARK_WS_STALE_MESSAGE_MS,
     )
+}
+
+fn value_as_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64(),
+        Value::String(text) => text.parse().ok(),
+        _ => None,
+    }
 }
 
 pub fn aark_public_topic(subscription: &PublicStreamSubscription) -> String {

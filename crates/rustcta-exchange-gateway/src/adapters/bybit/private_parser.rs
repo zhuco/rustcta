@@ -1,7 +1,7 @@
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AccountId, ExchangeApiError, ExchangeApiResult, OrderState, SymbolScope, TenantId,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, ExchangeApiError, ExchangeApiResult, FeeRateSnapshot, OrderState, SymbolScope,
+    TenantId, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AssetBalance, CanonicalSymbol, ExchangeBalance, ExchangeId, ExchangePosition, ExchangeSymbol,
@@ -256,6 +256,48 @@ pub fn parse_fills(
         })
     })
     .collect()
+}
+
+pub fn parse_fee_snapshots(
+    exchange_id: &ExchangeId,
+    symbols: &[SymbolScope],
+    value: &Value,
+) -> ExchangeApiResult<Vec<FeeRateSnapshot>> {
+    let rows = result_list(
+        exchange_id,
+        value,
+        "Bybit fee-rate response missing result.list",
+    )?;
+    let mut fees = Vec::new();
+    for symbol in symbols {
+        let normalized_symbol = normalize_bybit_symbol(&symbol.exchange_symbol.symbol)?;
+        let row = rows
+            .iter()
+            .find(|row| {
+                row.get("symbol")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_symbol))
+            })
+            .or_else(|| rows.first())
+            .ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "Bybit fee-rate response is empty",
+                    value,
+                )
+            })?;
+        fees.push(FeeRateSnapshot {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            symbol: symbol.clone(),
+            maker_rate: string_or_number(row.get("makerFeeRate"))
+                .unwrap_or_else(|| "0".to_string()),
+            taker_rate: string_or_number(row.get("takerFeeRate"))
+                .unwrap_or_else(|| "0".to_string()),
+            source: Some("bybit.v5.account_fee_rate".to_string()),
+            updated_at: Utc::now(),
+        });
+    }
+    Ok(fees)
 }
 
 fn result_list<'a>(

@@ -125,8 +125,8 @@ balance, and position stream event normalization remains unsupported.
 默认 300ms throttle；`bbo:<symbol>` 是 L1 best bid/ask 变更推送；
 `depth-snapshot` 最多 500 档，另有 `depth-snapshot-top100`；`seqnum`
 必须逐条 +1，断档后需要重新订阅并请求 snapshot。当前项目已具备
-payload/parser 证据，但还需要把 interval、depth、snapshot/resync 规则结构化进
-`endpoint_mapping.yaml`。
+payload/parser 证据；`endpoint_mapping.yaml` 已用 `websocket.public.support`
+结构化记录 interval、depth、snapshot/resync 和 unsupported checksum 边界。
 
 Heartbeat policy is JSON ping/pong, 15 second ping interval, 30 second pong
 timeout, and 30 second stale-message timeout. Auth renewal is reconnect and

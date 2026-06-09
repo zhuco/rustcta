@@ -68,6 +68,9 @@ mod tests {
             "place_order_post.json" => include_str!(
                 "../../../../../tests/fixtures/exchanges/bitbank/signing_vectors/place_order_post.json"
             ),
+            "private_get_order.json" => include_str!(
+                "../../../../../tests/fixtures/exchanges/bitbank/signing_vectors/private_get_order.json"
+            ),
             _ => panic!("unknown bitbank signing fixture {name}"),
         };
         serde_json::from_str(text).expect("bitbank signing fixture")
@@ -75,18 +78,20 @@ mod tests {
 
     #[test]
     fn bitbank_get_signature_should_match_fixture() {
-        let vector = signing_fixture("assets_get.json");
-        let request = sign_get_request(
-            vector["api_key"].as_str().unwrap(),
-            vector["api_secret"].as_str().unwrap(),
-            vector["nonce"].as_str().unwrap(),
-            vector["path"].as_str().unwrap(),
-        )
-        .expect("request");
-        assert_eq!(
-            request.access_signature,
-            vector["expected_signature"].as_str().unwrap()
-        );
+        for name in ["assets_get.json", "private_get_order.json"] {
+            let vector = signing_fixture(name);
+            let request = sign_get_request(
+                vector["api_key"].as_str().unwrap(),
+                vector["api_secret"].as_str().unwrap(),
+                vector["nonce"].as_str().unwrap(),
+                vector["path"].as_str().unwrap(),
+            )
+            .expect("request");
+            assert_eq!(
+                request.access_signature,
+                vector["expected_signature"].as_str().unwrap()
+            );
+        }
     }
 
     #[test]

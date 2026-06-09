@@ -1,0 +1,31 @@
+{
+  "exchange": "btcturk",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/users/balances",
+  "auth": "hmac",
+  "headers": {
+    "X-PCK": {
+      "match": "non_empty"
+    },
+    "X-Stamp": {
+      "match": "non_empty"
+    },
+    "X-Signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "runtime_boundary": {
+    "status": "offline",
+    "reason": "Signed balance endpoint is documented, but parser, read-only runtime promotion, and REST reconciliation are not implemented.",
+    "adapter_error": "btcturk.balances_offline_request_spec_only"
+  },
+  "body": null
+}

@@ -1,13 +1,53 @@
 {
   "exchange": "hollaex",
   "task": "A-24",
-  "status": "public_rest_with_offline_private_specs",
-  "runtime_private_rest": false,
+  "status": "public_rest_with_guarded_private_readbacks",
+  "runtime_private_rest": "read_only_guarded",
   "runtime_websocket": false,
   "white_label_profile_generation": false,
   "contains_real_credentials": false,
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "unsupported",
+      "runtime_error": "hollaex.amend_order_unsupported",
+      "mapping_operation": "amend_order",
+      "source_boundary": "official api.hollaex.com demo/API profile has no verified in-place amend or cancel-replace endpoint mapped into the shared gateway model"
+    },
+    "place_order_list": {
+      "status": "unsupported",
+      "runtime_error": "hollaex.order_list_unsupported",
+      "mapping_operation": "place_order_list",
+      "order_list_kinds": [
+        "oco",
+        "oto"
+      ],
+      "source_boundary": "no verified OCO/OTO/order-list endpoint is mapped for the official demo/API profile"
+    },
+    "batch_place_orders": {
+      "status": "unsupported",
+      "runtime_error": "hollaex.batch_place_orders_unsupported",
+      "mapping_operation": "batch_place_orders",
+      "source_boundary": "no verified native batch place endpoint is mapped for the official demo/API profile"
+    },
+    "batch_cancel_orders": {
+      "status": "unsupported",
+      "runtime_error": "hollaex.batch_cancel_orders_unsupported",
+      "mapping_operation": "batch_cancel_orders",
+      "source_boundary": "no verified native cancel-by-list or batch cancel endpoint is mapped for the official demo/API profile"
+    },
+    "cancel_all_orders": {
+      "status": "offline_request_spec_only",
+      "runtime_error": "hollaex.cancel_all_orders_request_spec_only",
+      "request_spec_fixture": "tests/fixtures/exchanges/hollaex/request_specs/cancel_all_orders.json",
+      "source_boundary": "DELETE /v2/order/all is pinned as an audit/core-trading request spec only and must not be exposed as live runtime"
+    }
+  },
   "unsupported": [
-    "private_rest_runtime",
+    "private_rest_writes",
+    "amend_order",
+    "place_order_list_oco_oto",
+    "batch_place_orders",
+    "batch_cancel_orders",
     "public_ws_runtime",
     "private_ws_runtime",
     "admin_api",

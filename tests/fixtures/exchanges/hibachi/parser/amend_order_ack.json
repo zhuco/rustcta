@@ -1,0 +1,17 @@
+{
+  "order": {
+    "orderId": 579183763093760001,
+    "clientOrderId": "hibachi-amend-boundary-1",
+    "symbol": "BTC/USDT-P",
+    "side": "BID",
+    "orderType": {
+      "type": "LIMIT"
+    },
+    "totalQuantity": "1",
+    "availableQuantity": "1",
+    "price": "11",
+    "status": "OPEN",
+    "creationTime": 1714701600000,
+    "finishTime": 1714701601000
+  }
+}

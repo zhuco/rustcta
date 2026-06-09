@@ -1,5 +1,9 @@
 use chrono::Utc;
-use rustcta_exchange_api::{ExchangeApiError, ExchangeClient, EXCHANGE_API_SCHEMA_VERSION};
+use rustcta_exchange_api::{
+    AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
+    ExchangeApiError, ExchangeClient, OrderListConditionalLeg, OrderListLegType, OrderListRequest,
+    PlaceOrderRequest, EXCHANGE_API_SCHEMA_VERSION,
+};
 use rustcta_types::{ExchangeId, MarketType};
 use serde_json::{json, Map};
 
@@ -10,6 +14,20 @@ use super::{GeminiGatewayAdapter, GeminiGatewayConfig};
 
 fn gemini_exchange() -> ExchangeId {
     ExchangeId::new("gemini").expect("exchange")
+}
+
+fn gemini_symbol() -> rustcta_exchange_api::SymbolScope {
+    rustcta_exchange_api::SymbolScope {
+        exchange: gemini_exchange(),
+        market_type: MarketType::Spot,
+        canonical_symbol: None,
+        exchange_symbol: rustcta_types::ExchangeSymbol::new(
+            gemini_exchange(),
+            MarketType::Spot,
+            "btcusd",
+        )
+        .expect("symbol"),
+    }
 }
 
 #[test]
@@ -60,21 +78,10 @@ fn gemini_parser_should_normalize_symbol_details_and_book() {
 
 #[test]
 fn gemini_order_payload_should_map_limit_order_options() {
-    let symbol = rustcta_exchange_api::SymbolScope {
-        exchange: gemini_exchange(),
-        market_type: MarketType::Spot,
-        canonical_symbol: None,
-        exchange_symbol: rustcta_types::ExchangeSymbol::new(
-            gemini_exchange(),
-            MarketType::Spot,
-            "btcusd",
-        )
-        .expect("symbol"),
-    };
-    let payload = gemini_order_payload(&rustcta_exchange_api::PlaceOrderRequest {
+    let payload = gemini_order_payload(&PlaceOrderRequest {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: rustcta_exchange_api::RequestContext::new(Utc::now()),
-        symbol,
+        symbol: gemini_symbol(),
         client_order_id: Some("client-1".to_string()),
         side: rustcta_types::OrderSide::Buy,
         position_side: None,
@@ -109,26 +116,43 @@ fn gemini_unsupported_boundary_should_reject_market_surfaces() {
     assert!(!capabilities.supports_fees);
     assert!(!capabilities.supports_batch_place_order);
     assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
     assert!(!capabilities.supports_quote_market_order);
+    assert!(!capabilities
+        .capabilities_v2
+        .batch_place_orders
+        .support
+        .is_supported());
+    assert!(!capabilities
+        .capabilities_v2
+        .batch_cancel_orders
+        .support
+        .is_supported());
     assert!(!capabilities
         .supports_order_types
         .contains(&rustcta_types::OrderType::Market));
+    assert_eq!(
+        boundary["advanced_order_boundaries"]["amend_order"]["runtime_error"],
+        "gemini.amend_order_unsupported"
+    );
+    assert_eq!(
+        boundary["advanced_order_boundaries"]["place_order_list"]["runtime_error"],
+        "gemini.order_list_unsupported"
+    );
+    assert_eq!(
+        boundary["advanced_order_boundaries"]["batch_place_orders"]["runtime_error"],
+        "gemini.batch_place_orders_composed_not_exposed"
+    );
+    assert_eq!(
+        boundary["advanced_order_boundaries"]["batch_cancel_orders"]["runtime_error"],
+        "gemini.batch_cancel_orders_composed_not_exposed"
+    );
 
-    let symbol = rustcta_exchange_api::SymbolScope {
-        exchange: gemini_exchange(),
-        market_type: MarketType::Spot,
-        canonical_symbol: None,
-        exchange_symbol: rustcta_types::ExchangeSymbol::new(
-            gemini_exchange(),
-            MarketType::Spot,
-            "btcusd",
-        )
-        .expect("symbol"),
-    };
-    let error = gemini_order_payload(&rustcta_exchange_api::PlaceOrderRequest {
+    let error = gemini_order_payload(&PlaceOrderRequest {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: rustcta_exchange_api::RequestContext::new(Utc::now()),
-        symbol,
+        symbol: gemini_symbol(),
         client_order_id: None,
         side: rustcta_types::OrderSide::Buy,
         position_side: None,
@@ -145,6 +169,117 @@ fn gemini_unsupported_boundary_should_reject_market_surfaces() {
         error,
         ExchangeApiError::Unsupported {
             operation: "gemini.market_order_unsupported"
+        }
+    ));
+}
+
+#[tokio::test]
+async fn gemini_advanced_order_surfaces_should_remain_explicitly_unsupported() {
+    let adapter = GeminiGatewayAdapter::new(GeminiGatewayConfig::default()).expect("adapter");
+    let context = rustcta_exchange_api::RequestContext::new(Utc::now());
+    let symbol = gemini_symbol();
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context.clone(),
+            symbol: symbol.clone(),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("order-1".to_string()),
+            new_client_order_id: None,
+            new_quantity: "0.2".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "gemini.amend_order_unsupported"
+        }
+    ));
+
+    let list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context.clone(),
+            symbol: symbol.clone(),
+            list_client_order_id: Some("oco-1".to_string()),
+            side: rustcta_types::OrderSide::Sell,
+            quantity: "0.1".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some("120".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("90".to_string()),
+                stop_price: Some("95".to_string()),
+                time_in_force: None,
+                client_order_id: Some("oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        list_error,
+        ExchangeApiError::Unsupported {
+            operation: "gemini.order_list_unsupported"
+        }
+    ));
+
+    let place_order = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context.clone(),
+        symbol: symbol.clone(),
+        client_order_id: Some("batch-place-1".to_string()),
+        side: rustcta_types::OrderSide::Buy,
+        position_side: None,
+        order_type: rustcta_types::OrderType::Limit,
+        time_in_force: None,
+        quantity: "0.1".to_string(),
+        price: Some("100".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context.clone(),
+            exchange: gemini_exchange(),
+            orders: vec![place_order],
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "gemini.batch_place_orders_composed_not_exposed"
+        }
+    ));
+
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context.clone(),
+            exchange: gemini_exchange(),
+            cancels: vec![CancelOrderRequest {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context,
+                symbol,
+                client_order_id: None,
+                exchange_order_id: Some("order-1".to_string()),
+            }],
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "gemini.batch_cancel_orders_composed_not_exposed"
         }
     ));
 }

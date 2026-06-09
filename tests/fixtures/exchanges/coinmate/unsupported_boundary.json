@@ -2,11 +2,28 @@
   "exchange": "coinmate",
   "products": ["spot"],
   "private_write_mode": "offline_request_spec_only",
-  "private_read_mode": "offline_request_spec_only",
+  "private_read_mode": "guarded_runtime_for_order_readbacks",
   "public_rest_mode": "enabled",
   "public_ws_mode": "payload_and_parser_fixture",
   "private_ws_mode": "payload_and_parser_fixture_with_rest_fallback",
   "funding_operations": "unsupported",
+  "runtime_private_readbacks": [
+    "query_order",
+    "get_open_orders",
+    "get_recent_fills"
+  ],
+  "offline_private_readbacks": [
+    "get_balances",
+    "get_fees"
+  ],
+  "advanced_order_boundaries": {
+    "amend_order": "offline_request_spec_parser_only",
+    "amend_order_runtime_guard": "coinmate.replace_order_offline_requires_side_price_nonce_and_reconciliation_guard",
+    "batch_place_orders": "unsupported",
+    "batch_cancel_orders": "unsupported",
+    "place_order_list": "unsupported",
+    "cancel_all_orders": "offline_cancel_all_only"
+  },
   "unsupported_operations": [
     "perpetuals",
     "futures",

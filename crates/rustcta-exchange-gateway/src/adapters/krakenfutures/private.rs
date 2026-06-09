@@ -15,8 +15,8 @@ use serde_json::{json, Value};
 
 use super::parser::normalize_futures_symbol;
 use super::private_parser::{
-    ack_order_state, cancelled_order_state, parse_balances, parse_fee_snapshots, parse_order_list,
-    parse_order_state, parse_positions, parse_recent_fills,
+    ack_order_state, cancelled_order_state, parse_balances, parse_order_list, parse_order_state,
+    parse_positions, parse_recent_fills,
 };
 use super::KrakenFuturesGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -328,11 +328,8 @@ impl KrakenFuturesGatewayAdapter {
             self.ensure_exchange(&symbol.exchange)?;
             self.ensure_market_type(symbol.market_type)?;
         }
-        let value = serde_json::json!({});
-        Ok(FeesResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
-            fees: parse_fee_snapshots(&self.exchange_id, &request.symbols, &value),
+        Err(ExchangeApiError::Unsupported {
+            operation: "krakenfutures.fees_source_boundary_only",
         })
     }
 

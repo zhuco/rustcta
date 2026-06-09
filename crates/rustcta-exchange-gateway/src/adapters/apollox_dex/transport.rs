@@ -52,6 +52,43 @@ impl ApolloxDexRest {
         parse_response(&self.exchange_id, response).await
     }
 
+    pub async fn send_signed_post(
+        &self,
+        path: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(self.url(path, params))
+            .header("X-MBX-APIKEY", api_key)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(&self.exchange_id, response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        path: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .get(self.url(path, params))
+            .header("X-MBX-APIKEY", api_key)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(&self.exchange_id, response).await
+    }
+
     pub fn exchange_info_path() -> &'static str {
         "/fapi/v1/exchangeInfo"
     }
@@ -66,6 +103,10 @@ impl ApolloxDexRest {
 
     pub fn open_orders_path() -> &'static str {
         "/fapi/v1/openOrders"
+    }
+
+    pub fn user_trades_path() -> &'static str {
+        "/fapi/v1/userTrades"
     }
 
     fn url(&self, path: &str, params: &HashMap<String, String>) -> String {

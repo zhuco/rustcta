@@ -6,10 +6,13 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::signing;
+
 #[derive(Clone)]
 pub struct ZaifRest {
     exchange_id: ExchangeId,
     public_rest_base_url: String,
+    private_rest_base_url: String,
     http: reqwest::Client,
 }
 
@@ -17,6 +20,7 @@ impl ZaifRest {
     pub fn new(
         exchange_id: ExchangeId,
         public_rest_base_url: String,
+        private_rest_base_url: String,
         request_timeout_ms: u64,
     ) -> ExchangeApiResult<Self> {
         let http = reqwest::Client::builder()
@@ -29,6 +33,7 @@ impl ZaifRest {
         Ok(Self {
             exchange_id,
             public_rest_base_url,
+            private_rest_base_url,
             http,
         })
     }
@@ -49,6 +54,28 @@ impl ZaifRest {
                 })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_signed_tapi(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        body: &str,
+    ) -> ExchangeApiResult<Value> {
+        let signed = signing::sign_form_request(api_key, api_secret, body)?;
+        let response = self
+            .http
+            .post(self.private_rest_base_url.trim_end_matches('/'))
+            .header("Key", signed.key)
+            .header("Sign", signed.sign)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(signed.body)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 async fn parse_response(
@@ -62,7 +89,14 @@ async fn parse_response(
         .map_err(|error| ExchangeApiError::Transport {
             message: error.to_string(),
         })?;
-    if status.is_success() && !value.get("error").is_some_and(|error| !error.is_null()) {
+    if status.is_success()
+        && !value.get("error").is_some_and(|error| !error.is_null())
+        && value
+            .get("success")
+            .and_then(Value::as_i64)
+            .map(|success| success == 1)
+            .unwrap_or(true)
+    {
         return Ok(value);
     }
     let mut error = ExchangeError::new(

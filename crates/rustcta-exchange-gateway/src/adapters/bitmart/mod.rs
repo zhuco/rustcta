@@ -204,7 +204,7 @@ impl ExchangeClient for BitmartGatewayAdapter {
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
         capabilities.supports_positions = private;
-        capabilities.supports_fees = true;
+        capabilities.supports_fees = false;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
         capabilities.supports_query_order = private;

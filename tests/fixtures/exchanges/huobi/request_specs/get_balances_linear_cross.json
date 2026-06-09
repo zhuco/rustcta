@@ -1,0 +1,47 @@
+{
+  "exchange": "huobi",
+  "profile_of": "htx",
+  "operation": "get_balances",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/linear-swap-api/v1/swap_cross_account_info",
+  "auth": "signed",
+  "signing": {
+    "mode": "hmac_sha256_base64_query_v2",
+    "canonical_payload": "POST\napi.hbdm.com\n/linear-swap-api/v1/swap_cross_account_info\nAccessKeyId=mock-access-key&SignatureMethod=HmacSHA256&SignatureVersion=2&Timestamp=2026-06-09T00%3A00%3A00"
+  },
+  "query": {
+    "AccessKeyId": { "match": "non_empty" },
+    "SignatureMethod": { "match": "exact", "value": "HmacSHA256" },
+    "SignatureVersion": { "match": "exact", "value": "2" },
+    "Timestamp": { "match": "non_empty" },
+    "Signature": { "match": "non_empty" }
+  },
+  "body_contains": {},
+  "strict_query": false,
+  "strict_headers": false,
+  "strict_body": false,
+  "forbid_values_containing": [
+    "real",
+    "secret",
+    "private"
+  ],
+  "response_sample": {
+    "status": "ok",
+    "data": [
+      {
+        "margin_asset": "USDT",
+        "margin_balance": "1000.5",
+        "withdraw_available": "900.25",
+        "margin_frozen": "100.25"
+      }
+    ]
+  },
+  "source_boundary": {
+    "rest": "/linear-swap-api/v1/swap_cross_account_info",
+    "private_stream": "accounts_cross.*",
+    "runtime_status": "guarded_runtime"
+  },
+  "runtime_boundary": "Huobi legacy profile reuses the HTX signed linear swap account-info parser when HUOBI private REST credentials and enable flag are configured."
+}

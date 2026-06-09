@@ -1,0 +1,10 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "batch_place_orders",
+  "algorithm": "HMAC-SHA256",
+  "api_key": "test-key",
+  "api_secret": "test-secret",
+  "canonical_query": "batchOrders=%5B%7B%22symbol%22%3A%22BTCUSDT%22%2C%22side%22%3A%22BUY%22%2C%22type%22%3A%22LIMIT%22%2C%22timeInForce%22%3A%22GTC%22%2C%22quantity%22%3A%220.01%22%2C%22price%22%3A%2265000.5%22%2C%22reduceOnly%22%3A%22false%22%2C%22newClientOrderId%22%3A%22cli-apollox-batch-1%22%7D%5D&recvWindow=5000&timestamp=1700000000000",
+  "signature": "cd3dadaab6a9753df2868a7e55b5cef7659ff2b5ab02a2fa8c0354e853953e3e",
+  "notes": "Sanitized local vector; no production API key or account data."
+}

@@ -1,0 +1,35 @@
+{
+  "exchange": "hibachi",
+  "operation": "positions",
+  "product": "perpetual",
+  "status": "source_boundary_only",
+  "sources": [
+    {
+      "kind": "private_rest_account_risk_readback",
+      "method": "GET",
+      "path": "/trade/account/info",
+      "auth": "api_key",
+      "query": {
+        "accountId": { "match": "exact", "value": "42" }
+      },
+      "headers": {
+        "Authorization": { "match": "non_empty" }
+      }
+    },
+    {
+      "kind": "private_account_ws_reconciliation",
+      "url": "wss://api.hibachi.xyz/ws/account?accountId={accountId}",
+      "auth": "api_key",
+      "support": "payload_source_only"
+    }
+  ],
+  "position_semantics": {
+    "margin_mode": "cross_margin_with_subaccount_usage",
+    "risk_fields": ["equity", "margin", "maintenance_margin", "liquidation"],
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
+  "request_spec_required": true,
+  "trade_enabled": false,
+  "forbid_header_values_containing": ["real", "secret"]
+}

@@ -1,0 +1,42 @@
+{
+  "exchange": "grvt",
+  "operation": "get_fees",
+  "status": "offline_source_boundary",
+  "source_type": "public_fee_tier_table",
+  "source_url": "https://help.grvt.io/en/articles/9614699-how-does-grvt-s-fee-model-work",
+  "last_reviewed": "2026-06-09",
+  "products": ["perpetual", "option"],
+  "active_after": "2026-03-23T04:00:00Z",
+  "quote_volume_currency": "USD",
+  "effective_fee_kind": "maker_taker_by_30d_trading_volume",
+  "runtime_boundary": "config_table_source_only",
+  "trade_enabled": false,
+  "default_or_override_strategy": {
+    "public_tier_table_allowed_for_backtest_only": true,
+    "production_requires_account_effective_tier_or_explicit_override": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "account_effective_tier_requires_private_readback": true,
+  "tier_update_time_utc": "08:00",
+  "tiers": [
+    {
+      "level": 1,
+      "min_30d_volume_usd": "0",
+      "maker_fee_percent": "-0.0001",
+      "taker_fee_percent": "0.045"
+    },
+    {
+      "level": 5,
+      "min_30d_volume_usd": "50000000",
+      "maker_fee_percent": "-0.0015",
+      "taker_fee_percent": "0.034"
+    },
+    {
+      "level": 9,
+      "min_30d_volume_usd": "1000000000",
+      "maker_fee_percent": "-0.003",
+      "taker_fee_percent": "0.024"
+    }
+  ],
+  "notes": "Boundary fixture records the active public tier table shape and representative tiers; account-effective fee requires session/account scope audit before runtime promotion."
+}

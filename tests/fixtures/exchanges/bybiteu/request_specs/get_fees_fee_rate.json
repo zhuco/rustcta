@@ -1,0 +1,35 @@
+{
+  "exchange": "bybiteu",
+  "operation": "get_fees",
+  "product": "spot_or_derivatives",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v5/account/fee-rate",
+  "auth": "signed",
+  "credential_scope": "read_only",
+  "query": {
+    "category": "linear",
+    "symbol": "BTCUSDT"
+  },
+  "headers": {
+    "X-BAPI-API-KEY": {
+      "match": "non_empty"
+    },
+    "X-BAPI-SIGN": {
+      "match": "non_empty"
+    },
+    "X-BAPI-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "X-BAPI-RECV-WINDOW": {
+      "match": "non_empty"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "regional_host": "https://api.bybit.eu",
+  "official_source": "Bybit V5 Get Fee Rate returns makerFeeRate and takerFeeRate by category/symbol.",
+  "runtime_boundary": "guarded_runtime; shared get_fees reuses Bybit V5 fee-rate when BYBITEU/BYBIT_EU credentials and explicit private REST enable flag are configured."
+}

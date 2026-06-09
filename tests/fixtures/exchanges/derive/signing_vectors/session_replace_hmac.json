@@ -1,0 +1,11 @@
+{
+  "exchange": "derive",
+  "algorithm": "session_key_canonical_payload_fixture_hmac_sha256",
+  "method": "private/replace",
+  "subaccount_id": "fixture-subaccount",
+  "timestamp_ms": "1700000000000",
+  "params_json": "{\"subaccount_id\":\"fixture-subaccount\",\"order_id\":\"fixture-order-id\",\"instrument_name\":\"BTC-PERP\",\"direction\":\"buy\",\"order_type\":\"limit\",\"amount\":\"0.01\",\"limit_price\":\"65100\",\"label\":\"fixture-client-order-id-replace\"}",
+  "canonical_payload": "derive.session:method=private/replace:subaccount_id=fixture-subaccount:timestamp=1700000000000:params={\"subaccount_id\":\"fixture-subaccount\",\"order_id\":\"fixture-order-id\",\"instrument_name\":\"BTC-PERP\",\"direction\":\"buy\",\"order_type\":\"limit\",\"amount\":\"0.01\",\"limit_price\":\"65100\",\"label\":\"fixture-client-order-id-replace\"}",
+  "fixture_signature": "2f2efd9b9babfabe7c2e4befa58ab232f045a384818e86df1205b38c45d1e18e",
+  "notes": "Signature uses literal fixture-session-material in unit tests; it is not a real Derive session secret."
+}

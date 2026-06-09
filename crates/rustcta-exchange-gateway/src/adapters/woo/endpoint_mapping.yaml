@@ -33,19 +33,116 @@ batch:
 websocket:
   public:
     support: native
+    url: wss://wss.woox.io/v3/public
+    subscribe:
+      method: SUBSCRIBE
+      params: [topic]
+    channels:
+      bbo:
+        stream: bbo@{symbol}
+        products: [spot, perpetual]
+        interval_ms: 10
+        depth: 1
+        sequence: [seq, sequence]
+        checksum: none
+        update_semantics: best_bid_offer_snapshot
+      orderbook_update:
+        stream: orderbookupdate@{symbol}@100
+        products: [spot, perpetual]
+        interval_ms: 200
+        depth: 100
+        sequence: [seq, sequence]
+        checksum: none
+        update_semantics: absolute_quantity_level_delta
+      orderbook_snapshot:
+        stream: orderbook@{symbol}@100
+        products: [spot, perpetual]
+        interval_ms: 1000
+        depth: 100
+        sequence: [seq, sequence]
+        checksum: none
+        update_semantics: full_depth_snapshot
+    orderbook:
+      rest_snapshot:
+        endpoint_operation: order_book
+        path: /v3/public/orderbook
+        max_depth: 100
+        sequence_field: [seq, sequence]
+      replay:
+        continuity_rule: WOO public order book messages expose seq/sequence when present; require monotonic non-decreasing sequence per topic and resync on observed regression or parse gap.
+        gap_policy: reconnect_resubscribe_and_fetch_rest_snapshot
+      checksum: none
+      risk: no documented checksum; use REST snapshot on connect/reconnect, sequence regression, stale stream, or suspected missed delta
+    fixtures:
+      subscribe_payload: crates/rustcta-exchange-gateway/src/adapters/woo/stream_tests.rs
+      parser_bbo: tests/fixtures/exchanges/woo/ws/public_bbo.json
+      parser_orderbook_update: tests/fixtures/exchanges/woo/ws/public_orderbookupdate.json
+      parser_orderbook_snapshot: tests/fixtures/exchanges/woo/ws/public_orderbook_100.json
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
-    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book, triggers: [connect, reconnect, sequence_regression, stale_stream, parse_gap] }
   private:
     support: native
     auth: listen_key
     auth_renewal: { mode: listen_key_renewal, interval_ms: 3300000, endpoint_operation: listen_key }
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
     resync: { mode: rest_recent_fills, endpoint_operation: recent_fills }
+streams:
+  - operation: public_orderbook_bbo
+    transport: websocket
+    product: spot
+    market_types: [spot, perpetual]
+    channel: bbo@{symbol}
+    auth: none
+    support: native
+    interval_ms: 10
+    depth: 1
+    sequence: [seq, sequence]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/stream_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/woo/ws/public_bbo.json }
+    resync:
+      endpoint_operation: order_book
+      mode: rest_snapshot
+  - operation: public_orderbook_delta
+    transport: websocket
+    product: spot
+    market_types: [spot, perpetual]
+    channel: orderbookupdate@{symbol}@100
+    auth: none
+    support: native
+    interval_ms: 200
+    depth: 100
+    sequence: [seq, sequence]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/stream_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/woo/ws/public_orderbookupdate.json }
+    resync:
+      endpoint_operation: order_book
+      mode: rest_snapshot_then_resume
+      replay: require monotonic non-decreasing seq/sequence when present; reconnect and refresh REST snapshot on regression or suspected gap
+  - operation: public_orderbook_snapshot
+    transport: websocket
+    product: spot
+    market_types: [spot, perpetual]
+    channel: orderbook@{symbol}@100
+    auth: none
+    support: native
+    interval_ms: 1000
+    depth: 100
+    sequence: [seq, sequence]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/stream_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/woo/ws/public_orderbook_100.json }
+    resync:
+      endpoint_operation: order_book
+      mode: rest_snapshot
+unsupported: []
 endpoints:
   - { operation: symbol_rules, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /v3/public/instruments, auth: none, rate_limit_bucket: woo_public, weight: 1, request_spec_required: false, native_batch: false, atomicity: not_applicable, testnet: false, support: native, response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/public_tests.rs, fixture: tests/fixtures/exchanges/woo/instruments.json } }
   - { operation: order_book, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /v3/public/orderbook, auth: none, rate_limit_bucket: woo_public, weight: 1, request_spec_required: false, native_batch: false, atomicity: not_applicable, testnet: false, support: native, response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/public_tests.rs, fixture: tests/fixtures/exchanges/woo/orderbook.json } }
   - { operation: balances, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /v3/asset/balances, auth: signed, credential_scopes: [read_only], rate_limit_bucket: woo_private_read, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs, fixture: tests/fixtures/exchanges/woo/request_specs/get_balances.json }, response_parser: { status: implemented, fixture: tests/fixtures/exchanges/woo/balance.json } }
   - { operation: get_positions, product: perpetual, market_types: [perpetual], transport: rest, method: GET, path: /v3/futures/positions, auth: signed, credential_scopes: [read_only], rate_limit_bucket: woo_private_read, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs }, response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs, fixture: tests/fixtures/exchanges/woo/positions.json } }
+  - { operation: get_fees, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /v3/trade/tradingFee, auth: signed, credential_scopes: [read_only], rate_limit_bucket: woo_private_read, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, reason: "WOO X tradingFee is implemented as credential-gated signed private REST runtime with maker/taker parser.", official_doc: https://docs.woox.io/products/woo-x, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs, fixture: tests/fixtures/exchanges/woo/request_specs/get_fees_trading_fee.json }, response_parser: { status: implemented, fixture: tests/fixtures/exchanges/woo/fees.json } }
   - { operation: place_order, product: spot, market_types: [spot, perpetual], transport: rest, method: POST, path: /v3/trade/order, auth: signed, credential_scopes: [trade], rate_limit_bucket: woo_trade, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs, fixture: tests/fixtures/exchanges/woo/request_specs/place_order.json }, response_parser: { status: implemented, fixture: tests/fixtures/exchanges/woo/order.json } }
   - { operation: cancel_order, product: spot, market_types: [spot, perpetual], transport: rest, method: DELETE, path: /v3/trade/order, auth: signed, credential_scopes: [trade], rate_limit_bucket: woo_trade, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs, fixture: tests/fixtures/exchanges/woo/request_specs/cancel_order.json } }
   - { operation: batch_place_orders, product: spot, market_types: [spot, perpetual], transport: rest, method: POST, path: /v3/trade/order, auth: signed, credential_scopes: [trade], rate_limit_bucket: woo_trade, weight: 1, request_spec_required: true, native_batch: false, atomicity: non_atomic, testnet: false, support: composed, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/woo/private_tests.rs, fixture: tests/fixtures/exchanges/woo/request_specs/batch_place_orders.json }, notes: Composed sequential single-order placement; max_items=20. }

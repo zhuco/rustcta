@@ -88,6 +88,8 @@ pub struct CrossExchangeArbitrageConfig {
     pub logging: StrategyLogRotationConfig,
     #[serde(default)]
     pub volatility_universe: VolatilityUniverseConfig,
+    #[serde(default = "default_max_consecutive_losses")]
+    pub max_consecutive_losses: u32,
     #[serde(default)]
     pub dry_run: bool,
 }
@@ -105,6 +107,7 @@ impl Default for CrossExchangeArbitrageConfig {
             dual_taker: DualTakerArbitrageConfig::default(),
             logging: StrategyLogRotationConfig::default(),
             volatility_universe: VolatilityUniverseConfig::default(),
+            max_consecutive_losses: default_max_consecutive_losses(),
             dry_run: true,
         }
     }
@@ -178,6 +181,11 @@ impl CrossExchangeArbitrageConfig {
         } else if config.min_profit_bps > 0.0 {
             config.dual_taker.min_open_spread_pct = config.min_profit_bps / 10_000.0;
         }
+        if let Some(value) = f64_at(value, &["thresholds", "min_open_maker_taker_net_edge"])
+            .or_else(|| f64_at(value, &["dual_taker", "min_open_net_profit_pct"]))
+        {
+            config.dual_taker.min_open_net_profit_pct = value;
+        }
         if let Some(value) = f64_at(value, &["thresholds", "max_open_raw_spread"]) {
             config.dual_taker.max_open_spread_pct = value;
         }
@@ -219,14 +227,30 @@ impl CrossExchangeArbitrageConfig {
         if let Some(value) = u32_at(value, &["risk", "max_consecutive_single_leg_fills"]) {
             config.dual_taker.max_consecutive_single_leg_fills = value.max(1);
         }
+        if let Some(value) = u32_at(value, &["risk", "max_consecutive_losses"])
+            .or_else(|| u32_at(value, &["risk", "max_consecutive_losing_trades"]))
+            .or_else(|| u32_at(value, &["max_consecutive_losses"]))
+        {
+            config.max_consecutive_losses = value.max(1);
+        }
         if let Some(value) = usize_at(value, &["sizing", "max_positions_per_exchange"]) {
             config.dual_taker.max_positions_per_exchange = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["risk", "max_open_bundles"])
+            .or_else(|| usize_at(value, &["dual_taker", "max_open_bundles"]))
+        {
+            config.dual_taker.max_open_bundles = value.max(1);
         }
         if let Some(value) = i64_at(value, &["risk", "symbol_cooldown_after_close_secs"]) {
             config.dual_taker.symbol_cooldown_secs = value.max(0);
         }
         if let Some(value) = i64_at(value, &["risk", "max_hold_seconds"]) {
             config.dual_taker.max_hold_secs = value.max(1);
+        }
+        if let Some(value) = bool_at(value, &["dual_taker", "close_on_max_hold_requires_profit"])
+            .or_else(|| bool_at(value, &["risk", "close_on_max_hold_requires_profit"]))
+        {
+            config.dual_taker.close_on_max_hold_requires_profit = value;
         }
         if let Some(value) = u64_at(value, &["logging", "max_file_bytes"]) {
             config.logging.max_file_bytes = value;
@@ -387,11 +411,13 @@ pub struct CrossExchangeArbitrageSnapshotPayload {
     pub excluded_bases: Vec<String>,
     pub target_notional_usdt: String,
     pub min_open_spread_pct: String,
+    pub min_open_net_profit_pct: String,
     pub max_open_spread_pct: String,
     pub close_min_net_profit_pct: String,
     pub orderbook_stale_ms: u64,
     pub high_volatility_universe_enabled: bool,
     pub high_volatility_refresh_secs: u64,
+    pub max_consecutive_losses: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -437,11 +463,13 @@ impl CrossExchangeArbitrageRuntime {
             excluded_bases: self.config.excluded_bases.clone(),
             target_notional_usdt: trim_float(self.config.dual_taker.target_notional_usdt),
             min_open_spread_pct: trim_float(self.config.dual_taker.min_open_spread_pct),
+            min_open_net_profit_pct: trim_float(self.config.dual_taker.min_open_net_profit_pct),
             max_open_spread_pct: trim_float(self.config.dual_taker.max_open_spread_pct),
             close_min_net_profit_pct: trim_float(self.config.dual_taker.close_min_net_profit_pct),
             orderbook_stale_ms: self.config.dual_taker.orderbook_stale_ms,
             high_volatility_universe_enabled: self.config.volatility_universe.enabled,
             high_volatility_refresh_secs: self.config.volatility_universe.refresh_secs,
+            max_consecutive_losses: self.config.max_consecutive_losses,
         }
     }
 }
@@ -790,6 +818,10 @@ fn default_min_profit_bps() -> f64 {
     50.0
 }
 
+fn default_max_consecutive_losses() -> u32 {
+    5
+}
+
 fn default_max_position_notional_quote() -> String {
     "5.5".to_string()
 }
@@ -963,12 +995,14 @@ pub fn config_schema() -> StrategyConfigSchema {
                     "type": "array",
                     "items": { "type": "string", "minLength": 1 }
                 },
+                "max_consecutive_losses": { "type": "integer", "minimum": 1, "default": 5 },
                 "dual_taker": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
                         "target_notional_usdt": { "type": "number", "minimum": 0.0 },
                         "min_open_spread_pct": { "type": "number", "minimum": 0.0 },
+                        "min_open_net_profit_pct": { "type": "number", "minimum": 0.0 },
                         "max_open_spread_pct": { "type": "number", "minimum": 0.0 },
                         "taker_slippage_pct": { "type": "number", "minimum": 0.0 },
                         "close_min_net_profit_pct": { "type": "number", "minimum": 0.0 },
@@ -978,10 +1012,12 @@ pub fn config_schema() -> StrategyConfigSchema {
                         "min_orderbook_levels": { "type": "integer", "minimum": 1 },
                         "single_leg_timeout_ms": { "type": "integer", "minimum": 1 },
                         "max_consecutive_single_leg_fills": { "type": "integer", "minimum": 1 },
+                        "max_open_bundles": { "type": "integer", "minimum": 1 },
                         "max_positions_per_exchange": { "type": "integer", "minimum": 1 },
                         "max_active_bundles_per_symbol": { "type": "integer", "minimum": 1 },
                         "symbol_cooldown_secs": { "type": "integer", "minimum": 0 },
-                        "max_hold_secs": { "type": "integer", "minimum": 1 }
+                        "max_hold_secs": { "type": "integer", "minimum": 1 },
+                        "close_on_max_hold_requires_profit": { "type": "boolean" }
                     }
                 },
                 "logging": {
@@ -1041,11 +1077,13 @@ fn common_snapshot_schema() -> Value {
             },
             "target_notional_usdt": { "type": "string" },
             "min_open_spread_pct": { "type": "string" },
+            "min_open_net_profit_pct": { "type": "string" },
             "max_open_spread_pct": { "type": "string" },
             "close_min_net_profit_pct": { "type": "string" },
             "orderbook_stale_ms": { "type": "integer", "minimum": 1 },
             "high_volatility_universe_enabled": { "type": "boolean" },
-            "high_volatility_refresh_secs": { "type": "integer", "minimum": 1 }
+            "high_volatility_refresh_secs": { "type": "integer", "minimum": 1 },
+            "max_consecutive_losses": { "type": "integer", "minimum": 1 }
         }
     })
 }
@@ -1131,6 +1169,41 @@ mod tests {
             }));
             assert_eq!(config.market_type, expected);
         }
+    }
+
+    #[test]
+    fn config_should_parse_min_open_maker_taker_net_edge() {
+        let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+            "thresholds": {
+                "min_open_raw_spread": 0.004,
+                "min_open_maker_taker_net_edge": 0.0045
+            }
+        }));
+
+        assert_eq!(config.dual_taker.min_open_spread_pct, 0.004);
+        assert_eq!(config.dual_taker.min_open_net_profit_pct, 0.0045);
+    }
+
+    #[test]
+    fn config_should_parse_close_on_max_hold_requires_profit() {
+        let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+            "dual_taker": {
+                "close_on_max_hold_requires_profit": true
+            }
+        }));
+
+        assert!(config.dual_taker.close_on_max_hold_requires_profit);
+    }
+
+    #[test]
+    fn config_should_parse_max_open_bundles() {
+        let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+            "risk": {
+                "max_open_bundles": 3
+            }
+        }));
+
+        assert_eq!(config.dual_taker.max_open_bundles, 3);
     }
 
     #[async_trait]

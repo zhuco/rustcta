@@ -1,0 +1,19 @@
+{
+  "exchange": "bsx",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "BSX public products and account/trading docs",
+      "evidence": "BSX product material indicates spot and perpetual exchange surfaces, while this adapter only wires Base perpetual products and order books."
+    }
+  ],
+  "runtime_isolation": "Do not expose BSX spot through the perpetual profile until spot market metadata, order book, balances and order lifecycle are mapped with product-scope guards.",
+  "remaining_work": [
+    "pin spot products and spot order-book endpoint specs",
+    "add spot account, balance, open-order and fill readback fixtures",
+    "audit BSX account headers, signing/session handling and spot order lifecycle reconciliation"
+  ]
+}

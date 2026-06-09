@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "data": {
+    "orders": [
+      {
+        "success": true,
+        "order_id": 123456790,
+        "client_order_id": "modetrade-batch-1",
+        "symbol": "PERP_BTC_USDC",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "order_price": "64000",
+        "order_quantity": "0.01",
+        "total_executed_quantity": "0",
+        "average_executed_price": null,
+        "status": "NEW",
+        "reduce_only": false,
+        "created_time": 1700000000000,
+        "updated_time": 1700000000000
+      },
+      {
+        "success": false,
+        "client_order_id": "modetrade-batch-2",
+        "symbol": "PERP_BTC_USDC",
+        "message": "insufficient margin"
+      }
+    ]
+  }
+}

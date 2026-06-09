@@ -1,8 +1,11 @@
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeClient, OrderBookRequest, PlaceOrderRequest, PublicStreamKind,
-    PublicStreamSubscription, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
+    ExchangeApiError, ExchangeClient, OpenOrdersRequest, OrderBookRequest, OrderListConditionalLeg,
+    OrderListLegType, OrderListRequest, PlaceOrderRequest, PublicStreamKind,
+    PublicStreamSubscription, QueryOrderRequest, RecentFillsRequest, SymbolRulesRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderType, TimeInForce};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, TimeInForce};
 use serde_json::{json, Value};
 
 use super::parser::{
@@ -12,7 +15,10 @@ use super::parser::{
 use super::private::{
     create_order_request_spec_fixture, foxbit_order_path, foxbit_place_order_body,
 };
-use super::private_parser::{parse_balance_assets, parse_fill_ids, parse_open_order_ids};
+use super::private_parser::{
+    parse_balance_assets, parse_fill_ids, parse_open_order_ids, parse_open_orders,
+    parse_order_state, parse_recent_fills,
+};
 use super::signing::{
     foxbit_hmac_sha256_hex, foxbit_private_ws_login_prehash, foxbit_rest_prehash,
     foxbit_signed_headers,
@@ -213,6 +219,28 @@ fn foxbit_private_request_specs_and_parsers_should_stay_secret_free() {
         parse_fill_ids(&foxbit_fixture("fills.json")).expect("fills"),
         vec!["trade-foxbit-1"]
     );
+    let order = parse_order_state(&exchange_id(), Some(&symbol_scope("BTC/BRL")), &order_ack)
+        .expect("order state");
+    assert_eq!(order.exchange_order_id.as_deref(), Some("order-foxbit-1"));
+    assert_eq!(order.status, OrderStatus::Open);
+    let open_orders = parse_open_orders(
+        &exchange_id(),
+        Some(&symbol_scope("BTC/BRL")),
+        &foxbit_fixture("open_orders.json"),
+    )
+    .expect("open orders");
+    assert_eq!(open_orders.len(), 1);
+    let fills = parse_recent_fills(
+        &exchange_id(),
+        context("fills").tenant_id.expect("tenant"),
+        context("fills").account_id.expect("account"),
+        &symbol_scope("BTC/BRL"),
+        &foxbit_fixture("fills.json"),
+    )
+    .expect("recent fills");
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].fill_id.as_deref(), Some("trade-foxbit-1"));
+    assert_eq!(fills[0].quantity, 0.01);
 }
 
 #[test]
@@ -368,7 +396,7 @@ fn foxbit_websocket_helpers_should_build_public_private_specs() {
 }
 
 #[tokio::test]
-async fn foxbit_live_private_surfaces_should_remain_explicitly_unsupported() {
+async fn foxbit_private_readbacks_should_fail_closed_without_guard() {
     let adapter = FoxbitGatewayAdapter::default_public().expect("adapter");
     let capabilities = adapter.capabilities();
     assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
@@ -376,8 +404,35 @@ async fn foxbit_live_private_surfaces_should_remain_explicitly_unsupported() {
     assert!(capabilities.supports_symbol_rules);
     assert!(capabilities.supports_order_book_snapshot);
     assert!(!capabilities.supports_private_rest);
+    assert!(!capabilities.supports_query_order);
+    assert!(!capabilities.supports_open_orders);
+    assert!(!capabilities.supports_recent_fills);
     assert!(!capabilities.supports_place_order);
     assert!(!FoxbitGatewayConfig::default().private_rest_available());
+
+    let error = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query-disabled"),
+            symbol: symbol_scope("BTC/BRL"),
+            client_order_id: None,
+            exchange_order_id: Some("order-foxbit-1".to_string()),
+        })
+        .await
+        .expect_err("query disabled");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "foxbit.query_order"
+        }
+    ));
+}
+
+#[tokio::test]
+async fn foxbit_writes_should_remain_explicitly_unsupported() {
+    let adapter = FoxbitGatewayAdapter::default_public().expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_place_order);
 
     let request = PlaceOrderRequest {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -406,4 +461,252 @@ async fn foxbit_live_private_surfaces_should_remain_explicitly_unsupported() {
     assert_eq!(boundary["otc_invest_api"], "unsupported");
     assert_eq!(boundary["private_write_mode"], "offline_request_spec_only");
     assert_eq!(json!(true), boundary["rest_reconciliation_fallback"]);
+}
+
+#[tokio::test]
+async fn foxbit_private_readbacks_should_use_signed_rest_when_enabled() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        foxbit_fixture("order_ack.json"),
+        foxbit_fixture("open_orders.json"),
+        foxbit_fixture("fills.json"),
+    ])
+    .await;
+    let adapter = FoxbitGatewayAdapter::new(FoxbitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("fixture-key".to_string()),
+        api_secret: Some("fixture-secret".to_string()),
+        receive_window_ms: Some(15_000),
+        enabled_private_rest: true,
+        ..FoxbitGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_private_rest);
+    assert!(capabilities.supports_query_order);
+    assert!(capabilities.supports_open_orders);
+    assert!(capabilities.supports_recent_fills);
+    assert!(!capabilities.supports_place_order);
+    assert!(!capabilities.supports_cancel_order);
+
+    let query = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query"),
+            symbol: symbol_scope("BTC/BRL"),
+            client_order_id: None,
+            exchange_order_id: Some("order-foxbit-1".to_string()),
+        })
+        .await
+        .expect("query order");
+    assert_eq!(
+        query.order.and_then(|order| order.exchange_order_id),
+        Some("order-foxbit-1".to_string())
+    );
+
+    let open = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("open"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope("BTC/BRL")),
+            page: None,
+        })
+        .await
+        .expect("open orders");
+    assert_eq!(open.orders.len(), 1);
+
+    let fills = adapter
+        .get_recent_fills(RecentFillsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fills"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope("BTC/BRL")),
+            client_order_id: None,
+            exchange_order_id: None,
+            from_trade_id: None,
+            start_time: None,
+            end_time: None,
+            limit: Some(25),
+            page: None,
+        })
+        .await
+        .expect("recent fills");
+    assert_eq!(fills.fills.len(), 1);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(requests[0].path, "/orders/order-foxbit-1");
+    assert!(requests[0].body.is_empty());
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-fb-access-key")
+            .map(String::as_str),
+        Some("fixture-key")
+    );
+    assert!(requests[0].headers.contains_key("x-fb-access-timestamp"));
+    assert!(requests[0].headers.contains_key("x-fb-access-signature"));
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-fb-receive-window")
+            .map(String::as_str),
+        Some("15000")
+    );
+    assert_eq!(requests[1].method, "GET");
+    assert_eq!(requests[1].path, "/orders");
+    assert_eq!(
+        requests[1].query.get("market_symbol").map(String::as_str),
+        Some("btcbrl")
+    );
+    assert_eq!(
+        requests[1].query.get("state").map(String::as_str),
+        Some("ACTIVE")
+    );
+    assert_eq!(requests[2].method, "GET");
+    assert_eq!(requests[2].path, "/trades");
+    assert_eq!(
+        requests[2].query.get("market_symbol").map(String::as_str),
+        Some("btcbrl")
+    );
+    assert_eq!(
+        requests[2].query.get("limit").map(String::as_str),
+        Some("25")
+    );
+}
+
+#[tokio::test]
+async fn foxbit_advanced_order_surfaces_should_remain_explicitly_unsupported() {
+    let adapter = FoxbitGatewayAdapter::default_public().expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+
+    let boundary = foxbit_fixture("unsupported_boundary.json");
+    let advanced = &boundary["advanced_order_boundaries"];
+    assert_eq!(
+        advanced["amend_order"]["runtime_error"],
+        "foxbit.amend_order_unsupported"
+    );
+    assert_eq!(
+        advanced["place_order_list"]["runtime_error"],
+        "foxbit.order_list_unsupported"
+    );
+    assert_eq!(
+        advanced["batch_place_orders"]["runtime_error"],
+        "foxbit.batch_place_orders_unsupported"
+    );
+    assert_eq!(
+        advanced["batch_cancel_orders"]["runtime_error"],
+        "foxbit.batch_cancel_orders_unsupported"
+    );
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol_scope("BTC/BRL"),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("order-1".to_string()),
+            new_client_order_id: None,
+            new_quantity: "0.2".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "foxbit.amend_order_unsupported"
+        }
+    ));
+
+    let list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("oco"),
+            symbol: symbol_scope("BTC/BRL"),
+            list_client_order_id: Some("oco-1".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.1".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some("390000".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("320000".to_string()),
+                stop_price: Some("330000".to_string()),
+                time_in_force: None,
+                client_order_id: Some("oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        list_error,
+        ExchangeApiError::Unsupported {
+            operation: "foxbit.order_list_unsupported"
+        }
+    ));
+
+    let place = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("batch-place-order"),
+        symbol: symbol_scope("BTC/BRL"),
+        client_order_id: Some("batch-place-1".to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: None,
+        quantity: "0.01".to_string(),
+        price: Some("350000".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![place],
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "foxbit.batch_place_orders_unsupported"
+        }
+    ));
+
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![CancelOrderRequest {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context: context("cancel"),
+                symbol: symbol_scope("BTC/BRL"),
+                client_order_id: None,
+                exchange_order_id: Some("order-1".to_string()),
+            }],
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "foxbit.batch_cancel_orders_unsupported"
+        }
+    ));
 }

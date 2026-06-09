@@ -102,7 +102,10 @@ pub fn parse_orderbook_snapshot(
         exchange_symbol: Some(symbol.exchange_symbol),
         bids,
         asks,
-        sequence: result.get("u").and_then(Value::as_u64),
+        sequence: result
+            .get("seq")
+            .or_else(|| result.get("u"))
+            .and_then(Value::as_u64),
         exchange_timestamp: result
             .get("ts")
             .and_then(value_as_i64)

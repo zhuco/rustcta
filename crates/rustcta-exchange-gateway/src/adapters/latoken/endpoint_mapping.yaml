@@ -1,12 +1,12 @@
 schema_version: 1
 exchange: latoken
 adapter: LatokenGatewayAdapter
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: draft
   source: docs/latoken_adapter.md
   last_reviewed: "2026-06-08"
-  notes: A-25 scan-only spot adapter. Public REST is implemented for active pairs and order books; private REST is request-spec-only and disabled.
+  notes: A-25 scan-only spot adapter. Public REST is implemented for active pairs and order books; public STOMP book subscription is implemented for /v1/book/{base}/{quote}; private REST is request-spec-only and disabled.
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -32,13 +32,31 @@ reconciliation:
   readbacks: [get_open_orders, get_recent_fills]
   notes: Private runtime is disabled; after promotion use /v2/auth/order/active and /v2/auth/trade for REST reconciliation.
 batch:
-  place: { support: unsupported, reason: latoken.batch_place_orders_request_spec_only }
-  cancel: { support: unsupported, reason: latoken.batch_cancel_orders_request_spec_only }
+  place: { support: spec_only, reason: latoken.batch_place_orders_request_spec_only }
+  cancel: { support: spec_only, reason: latoken.batch_cancel_orders_request_spec_only }
 websocket:
   public:
-    support: unsupported
-    reason: latoken.public_streams_stomp_spec_only
+    support: native
     url: wss://api.latoken.com/stomp
+    transport: stomp
+    order_book:
+      channel: /v1/book/{base}/{quote}
+      destination: /v1/book/{base}/{quote}
+      subscribe_frame: "SUBSCRIBE\nid:{subscription_id}\ndestination:/v1/book/{base}/{quote}\n\n\\0"
+      interval_ms: null
+      depth: null
+      depth_boundary: "depth: unspecified; official docs do not publish a fixed depth or depth selector"
+      sequence:
+        field: nonce
+        continuity: next nonce should equal previous nonce + 1 per symbol
+        gap_detection: reconnect_on_gap_or_regression
+      checksum:
+        supported: false
+        mode: none_documented
+      resync:
+        mode: reconnect_and_rest_snapshot
+        rest_endpoint_operation: get_order_book
+        triggers: [connect, reconnect, nonce_gap, nonce_regression, missing_nonce, stale_stream]
     subscribe_payload: tests/fixtures/exchanges/latoken/ws/public_orderbook_frame.json
     heartbeat:
       mode: nonce_gap_reconnect
@@ -48,6 +66,46 @@ websocket:
     reason: latoken.private_streams_user_id_auth_unverified
     auth: X-LA-APIKEY + X-LA-SIGNATURE over X-LA-SIGDATA timestamp
     auth_fixture: tests/fixtures/exchanges/latoken/signing_vectors/ws_auth_hmac_sha256.json
+unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    source_boundary_fixture: tests/fixtures/exchanges/latoken/request_specs/product_line_source_boundary.json
+    boundary: project_unimplemented_product_line
+    official_gap: futures_endpoint_spec_clues
+    runtime_isolation: "Current LATOKEN adapter only enables Spot public REST/STOMP and spot private request specs; futures clues need endpoint-spec verification before any runtime routing."
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications, settlement asset mapping]
+      public_market_data: [futures/perpetual order book, futures/perpetual trades, futures/perpetual ticker]
+      private_account: [margin balances, positions, risk limits, leverage settings]
+      private_order_lifecycle: [place order, cancel order, query/open orders, fills]
+    required_auth_and_scope: [futures auth scheme, read-only permission scope, trade permission scope, product-scoped dry-run guard]
+    reason: "Official LATOKEN futures-related surfaces require endpoint-spec verification and are not wired by the current spot adapter."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    source_boundary_fixture: tests/fixtures/exchanges/latoken/request_specs/product_line_source_boundary.json
+    boundary: project_unimplemented_product_line
+    official_gap: futures_endpoint_spec_clues
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications, funding or settlement schedule]
+      public_market_data: [futures/perpetual order book, futures/perpetual trades, futures/perpetual ticker]
+      private_account: [margin balances, positions, risk limits, leverage settings]
+      private_order_lifecycle: [place order, cancel order, query/open orders, fills]
+    required_auth_and_scope: [futures auth scheme, read-only permission scope, trade permission scope, product-scoped dry-run guard]
+    reason: "LATOKEN futures product clues exist outside the stable REST v2 spot API coverage; keep as project-unimplemented until official endpoint specs are pinned."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    reason: "Official LATOKEN /v2/auth/order/placeBulk exists, but shared batch_place_orders runtime remains project-unimplemented/request-spec-only pending signed private sender promotion, REST reconciliation, and live-dry-run guard."
+    request_spec_fixture: tests/fixtures/exchanges/latoken/request_specs/batch_place_orders.json
+    signing_fixture: tests/fixtures/exchanges/latoken/signing_vectors/rest_batch_place_hmac_sha256.json
+    response_parser: { status: fixture_only, parser: parse_batch_place_orders_ack, fixture: tests/fixtures/exchanges/latoken/parser/batch_place_orders_ack.json }
+  - operation: batch_cancel_orders
+    status: request_spec_only
+    reason: "Official LATOKEN /v2/auth/order/cancelBulk exists and is pinned as an offline request-spec/parser boundary; shared batch_cancel_orders runtime remains disabled pending signed private sender promotion, REST reconciliation, and live-dry-run guard."
+    request_spec_fixture: tests/fixtures/exchanges/latoken/request_specs/batch_cancel_orders.json
+    signing_fixture: tests/fixtures/exchanges/latoken/signing_vectors/rest_batch_cancel_hmac_sha256.json
+    response_parser: { status: fixture_only, parser: parse_batch_cancel_orders_ack, fixture: tests/fixtures/exchanges/latoken/parser/batch_cancel_orders_ack.json }
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -79,6 +137,28 @@ endpoints:
     testnet: false
     support: native
     official_doc: https://api.latoken.com/doc/v2/
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/auth/trade/fee/{currency}/{quote}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/latoken/request_specs/get_fees.json
+      signing_fixture: tests/fixtures/exchanges/latoken/signing_vectors/rest_get_fees_hmac_sha256.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/latoken/parser/fees_ack.json }
+    reason: latoken.get_fees_guarded_private_rest_runtime
+    notes: Pair-specific signed read-only runtime maps maker/taker fee fields into FeeRateSnapshot; public /v2/trade/fee/{currency}/{quote} is a non-account fallback only.
   - operation: get_order_book
     product: spot
     market_types: [spot]
@@ -108,10 +188,14 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: latoken.balances_request_spec_only
+    support: native
+    reason: "Credential-gated read-only account balance runtime is implemented via signed LATOKEN private REST; funds movement remains outside gateway scope."
     request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/latoken/tests.rs::latoken_private_request_specs_should_be_sanitized_and_request_spec_only
       fixture: tests/fixtures/exchanges/latoken/request_specs/get_balances.json
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/latoken/tests.rs::latoken_batch_private_parsers_should_parse_partial_fixtures, fixture: tests/fixtures/exchanges/latoken/parser/balances_ack.json }
+    notes: "Default profile still fail-closes without enabled_private_rest plus API key/secret; runtime signs zeros=false and filters requested assets locally."
     official_doc: https://api.latoken.com/doc/v2/
   - operation: place_order
     product: spot
@@ -127,8 +211,9 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: latoken.place_order_request_spec_only
+    support: native
+    reason: latoken.place_order_runtime_enabled
+    notes: "P2 core runtime: signed HMAC POST /v2/auth/order/place is guarded by enabled_private_rest plus API key/secret; mock REST tests cover headers/body and parser fallback. No live success is assumed."
     request_spec:
       fixture: tests/fixtures/exchanges/latoken/request_specs/place_order_limit_buy.json
     official_doc: https://api.latoken.com/doc/v2/
@@ -146,8 +231,9 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: latoken.cancel_order_request_spec_only
+    support: native
+    reason: latoken.cancel_order_runtime_enabled
+    notes: "P2 core runtime: signed HMAC POST /v2/auth/order/cancel is guarded by enabled_private_rest plus API key/secret; mock REST tests cover headers/body and cancel parser. No live success is assumed."
     request_spec:
       fixture: tests/fixtures/exchanges/latoken/request_specs/cancel_order.json
     official_doc: https://api.latoken.com/doc/v2/
@@ -165,11 +251,112 @@ endpoints:
     native_batch: false
     atomicity: unknown
     testnet: false
-    support: unsupported
-    reason: latoken.cancel_all_orders_request_spec_only
+    support: native
+    reason: latoken.cancel_all_orders_runtime_enabled
+    notes: "P2 core runtime: signed HMAC POST /v2/auth/order/cancelAll is guarded by enabled_private_rest plus API key/secret; shared runtime requires a symbol for parser-backed cancelled order states."
     request_spec:
       fixture: tests/fixtures/exchanges/latoken/request_specs/cancel_all_orders.json
     official_doc: https://api.latoken.com/doc/v2/
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/auth/order/getOrder/{id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: latoken.query_order_runtime_enabled
+    notes: "P2 core runtime: signed HMAC GET /v2/auth/order/getOrder/{id} is guarded by enabled_private_rest plus API key/secret and feeds REST reconciliation."
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/query_order.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v2/auth/order/placeBulk
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: unknown
+    testnet: false
+    support: native
+    reason: latoken.batch_place_orders_runtime_enabled
+    notes: "Official placeBulk supports 1-50 bulk order submissions with per-item success/failure status; gateway runtime is credential-gated by enabled_private_rest plus API key/secret and is covered by mock signed REST/parser tests. No live success is asserted."
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/batch_place_orders.json
+      signing_fixture: tests/fixtures/exchanges/latoken/signing_vectors/rest_batch_place_hmac_sha256.json
+    response_parser:
+      parser: parse_batch_place_orders_ack
+      fixture: tests/fixtures/exchanges/latoken/parser/batch_place_orders_ack.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v2/auth/order/cancelBulk
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: native
+    reason: latoken.batch_cancel_orders_runtime_enabled
+    notes: "Official cancelBulk accepts 1-50 order cancel requests and reports per-order status; gateway runtime is credential-gated by enabled_private_rest plus API key/secret and is covered by mock signed REST/parser tests. No live success is asserted."
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/batch_cancel_orders.json
+      signing_fixture: tests/fixtures/exchanges/latoken/signing_vectors/rest_batch_cancel_hmac_sha256.json
+    response_parser:
+      parser: parse_batch_cancel_orders_ack
+      fixture: tests/fixtures/exchanges/latoken/parser/batch_cancel_orders_ack.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/latoken/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: latoken.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/latoken/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: latoken.order_list_unsupported
   - operation: get_open_orders
     product: spot
     market_types: [spot]
@@ -184,8 +371,9 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: latoken.open_orders_request_spec_only
+    support: native
+    reason: latoken.get_open_orders_runtime_enabled
+    notes: "P2 core runtime: signed HMAC GET /v2/auth/order/active is guarded by enabled_private_rest plus API key/secret and parses open orders for reconciliation."
     request_spec:
       fixture: tests/fixtures/exchanges/latoken/request_specs/get_open_orders.json
     official_doc: https://api.latoken.com/doc/v2/
@@ -203,8 +391,42 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: latoken.recent_fills_request_spec_only
+    support: native
+    reason: latoken.get_recent_fills_runtime_enabled
+    notes: "P2 core runtime: signed HMAC GET /v2/auth/trade is guarded by enabled_private_rest plus API key/secret and parses recent fills for reconciliation."
     request_spec:
       fixture: tests/fixtures/exchanges/latoken/request_specs/get_recent_fills.json
     official_doc: https://api.latoken.com/doc/v2/
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    market_types: [spot]
+    transport: websocket
+    protocol: stomp
+    url: wss://api.latoken.com/stomp
+    channel: /v1/book/{base}/{quote}
+    subscribe:
+      frame: "SUBSCRIBE\nid:{subscription_id}\ndestination:/v1/book/{base}/{quote}\n\n\\0"
+      helper: latoken_public_book_subscribe_frame
+      destination_helper: public_book_destination
+    unsubscribe:
+      frame: "UNSUBSCRIBE\nid:{subscription_id}\n\n\\0"
+      helper: stomp_unsubscribe_frame
+    auth: none
+    support: native
+    message:
+      parser: parse_public_book_message
+      fixture: tests/fixtures/exchanges/latoken/ws/public_orderbook_frame.json
+      payload_field: payload
+      bids_field: [payload.bid, payload.bids]
+      asks_field: [payload.ask, payload.asks]
+    interval_ms: null
+    depth: null
+    depth_boundary: "depth: unspecified; official docs do not publish a fixed depth or depth selector"
+    sequence_fields: [nonce]
+    checksum: none_documented
+    update_semantics: full_or_absolute_book_payload; official docs do not publish fixed cadence or depth.
+    resync:
+      mode: reconnect_and_rest_snapshot
+      endpoint_operation: get_order_book
+      triggers: [connect, reconnect, nonce_gap, nonce_regression, missing_nonce, stale_stream]

@@ -1,0 +1,19 @@
+{
+  "exchange": "deribit",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["futures", "option", "perpetual"],
+  "official_product_lines": ["spot", "futures", "option", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Deribit instruments with kind=spot",
+      "evidence": "Spot instruments are distinguishable by kind=spot, but this adapter currently maps futures, options and perpetual order lifecycle."
+    }
+  ],
+  "runtime_isolation": "Do not expose kind=spot instruments through derivative parsers until spot book/ticker and private order/account flows are pinned.",
+  "remaining_work": [
+    "pin public/get_instruments kind=spot and spot book/ticker parser fixtures",
+    "add private spot buy/sell, open-orders and user-trades request specs",
+    "audit account balance scope and spot order reconciliation"
+  ]
+}

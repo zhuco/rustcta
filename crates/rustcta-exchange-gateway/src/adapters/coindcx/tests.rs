@@ -539,6 +539,106 @@ fn websocket_sessions_should_emit_socketio_join_and_heartbeat_payloads() {
 }
 
 #[test]
+fn public_orderbook_ws_policy_should_document_depth_update_boundaries() {
+    let policy = super::streams::coindcx_public_orderbook_ws_policy();
+    let policy_json = policy.as_json();
+
+    assert_eq!(policy.transport, "socket_io");
+    assert_eq!(policy.subscribe_event, "join");
+    assert_eq!(policy.update_event, "depth-update");
+    assert_eq!(
+        policy.official_spot_example_channel,
+        "B-BTC_USDT@orderbook@20"
+    );
+    assert_eq!(policy.official_spot_example_depth, 20);
+    assert_eq!(policy.project_depth, 50);
+    assert!(policy.fixed_interval_ms.is_none());
+    assert!(policy.sequence_fields.is_empty());
+    assert!(policy.checksum.is_none());
+    assert_eq!(policy.rest_snapshot_operation, "get_order_book");
+    assert!(policy
+        .resync_strategy
+        .contains("fetch REST snapshot and resubscribe"));
+    assert_eq!(
+        policy_json["depth"]["project_spot_channel_template"],
+        "{symbol}@orderbook@50"
+    );
+    assert_eq!(
+        policy_json["depth"]["project_futures_channel_template"],
+        "{instrument}@orderbook@50-futures"
+    );
+
+    let official_spot_join =
+        super::streams::coindcx_public_orderbook_join_payload(MarketType::Spot, "B-BTC_USDT", 20)
+            .expect("official spot join");
+    assert_eq!(
+        official_spot_join,
+        fixture("ws/public_orderbook_spot_join_20.json")
+    );
+
+    let project_spot_join =
+        super::streams::coindcx_public_orderbook_join_payload(MarketType::Spot, "BTCUSDT", 50)
+            .expect("project spot join");
+    assert_eq!(
+        project_spot_join,
+        fixture("ws/public_orderbook_spot_join_50.json")
+    );
+
+    let project_futures_join =
+        super::streams::coindcx_public_orderbook_join_payload(MarketType::Perpetual, "BTCUSDT", 50)
+            .expect("project futures join");
+    assert_eq!(
+        project_futures_join,
+        fixture("ws/public_orderbook_futures_join_50.json")
+    );
+
+    let unsupported =
+        super::streams::coindcx_public_orderbook_join_payload(MarketType::Perpetual, "BTCUSDT", 20)
+            .expect_err("futures order book depth is project-bounded to 50");
+    assert!(matches!(
+        unsupported,
+        ExchangeApiError::Unsupported {
+            operation: "coindcx.public_futures_orderbook_depth"
+        }
+    ));
+}
+
+#[test]
+fn public_websocket_should_parse_socketio_depth_update_without_sequence_or_checksum() {
+    let adapter = private_adapter();
+    let mut session = adapter
+        .public_ws_session(PublicStreamSubscription {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("public-depth-update"),
+            symbol: spot_symbol(),
+            kind: PublicStreamKind::OrderBookDelta,
+        })
+        .expect("public session");
+    let frame = fixture("ws/public_depth_update_socketio.json");
+
+    let events = session
+        .handle_text_message(frame["frame"].as_str().expect("socketio frame"))
+        .expect("depth update");
+    let stream_events = events
+        .iter()
+        .find_map(|event| match event {
+            super::streams::CoinDcxWsSessionEvent::Stream(events) => Some(events),
+            _ => None,
+        })
+        .expect("stream events");
+
+    assert!(stream_events.iter().any(|event| matches!(
+        event,
+        ExchangeStreamEvent::OrderBookSnapshot(book)
+            if book.order_book.bids[0].price == 64_000.0
+                && book.order_book.asks[0].price == 64_100.0
+                && book.order_book.sequence.is_none()
+    )));
+    assert!(frame["sequence"].is_null());
+    assert!(frame["checksum"].is_null());
+}
+
+#[test]
 fn public_websocket_sessions_should_cover_trade_ticker_and_candle_channels() {
     let adapter = private_adapter();
     let cases = [

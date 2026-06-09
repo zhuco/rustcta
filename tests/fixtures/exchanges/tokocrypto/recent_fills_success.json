@@ -1,0 +1,22 @@
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "list": [
+      {
+        "id": 9001,
+        "orderId": 12345,
+        "clientOrderId": "client-1",
+        "symbol": "BTC_USDT",
+        "price": "65000.00",
+        "qty": "0.00400000",
+        "quoteQty": "260.00000000",
+        "commission": "0.13000000",
+        "commissionAsset": "USDT",
+        "side": "BUY",
+        "isMaker": false,
+        "time": 1710000001000
+      }
+    ]
+  }
+}

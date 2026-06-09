@@ -1,0 +1,52 @@
+{
+  "exchange": "oxfun",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "boundary": "private_account_equity_source_only",
+  "runtime_enabled": false,
+  "source": {
+    "surfaces": [
+      "OX.FUN private account endpoint",
+      "funding/account equity materials",
+      "private WebSocket account state"
+    ],
+    "requires": [
+      "account_id_or_user_id",
+      "read_only_api_key_scope",
+      "signed private account request"
+    ],
+    "account_id_shape": "OX account id fixture",
+    "does_not_use": [
+      "real_access_key",
+      "real_secret_key",
+      "withdrawal_scope"
+    ]
+  },
+  "request_shape_sample": {
+    "method": "GET",
+    "path": "/v3/account",
+    "query": {
+      "asset": "USDT"
+    },
+    "auth": "hmac_read_only_fixture"
+  },
+  "decoded_sample": {
+    "account_id": "oxfun-account-id-fixture",
+    "asset": "USDT",
+    "wallet_balance": "500.000000",
+    "available_balance": "420.000000",
+    "account_equity": "515.250000"
+  },
+  "runtime_gap": [
+    "read-only auth smoke",
+    "account/equity parser",
+    "private WS reconciliation",
+    "funding and margin field normalization"
+  ],
+  "fixture_policy": {
+    "contains_api_key": false,
+    "contains_api_secret": false,
+    "contains_real_account_id": false,
+    "live_call_allowed": false
+  }
+}

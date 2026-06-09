@@ -1,0 +1,15 @@
+[
+  {
+    "id": "ot-order-open-1",
+    "client_id": "client-open-1",
+    "instrument_code": "BTC_EUR",
+    "side": "SELL",
+    "type": "LIMIT",
+    "time_in_force": "GOOD_TILL_CROSSING",
+    "amount": "0.02000000",
+    "price": "66000.00",
+    "filled_amount": "0.00000000",
+    "status": "OPEN",
+    "time": "2026-06-09T02:00:00Z"
+  }
+]

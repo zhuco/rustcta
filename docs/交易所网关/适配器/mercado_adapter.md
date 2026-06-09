@@ -25,7 +25,7 @@ Task 16 adds a conservative Mercado Bitcoin gateway adapter for Brazil and Latin
 
 官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Mercado Bitcoin API v4 官方页说明有 WebSocket API，项目已有 `orderbook` payload helper；本批公开资料只稳定核到 REST `/api/v4/{symbol}/orderbook`，`limit` max 1000。
 
-本批未核到 WebSocket 固定推流毫秒、depth、sequence 或 checksum。当前只能写成 payload/helper 级结构化缺口，实盘前必须取得 WebSocket API 页并用 REST orderbook 做 snapshot fallback。
+本批未核到 WebSocket 固定推流毫秒，官方未给固定 ms；也未核到固定档位/depth、sequence 或 checksum。当前只能写成 payload/helper 级结构化缺口，实盘前必须取得 WebSocket API 页并用 REST `/api/v4/{symbol}/orderbook?limit=1000` 做 snapshot fallback。
 
 ## Verification
 
@@ -37,3 +37,7 @@ cargo fmt --check --package rustcta-exchange-gateway
 cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway mercado --lib --message-format short
 ```
+
+## Fee Boundary
+
+费率来源在 Mercado Bitcoin API v4 资料中存在；当前已补 `GET /api/v4/{asset}/fees` 的 `request_specs/get_fees_asset.json` 离线 request-spec 边界。shared `get_fees` runtime 仍属项目未实现/未启用；补齐前需完成 bearer read-only guard、asset/symbol mapping 和 maker/taker parser wiring。

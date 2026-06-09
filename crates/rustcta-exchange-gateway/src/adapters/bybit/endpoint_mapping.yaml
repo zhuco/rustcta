@@ -1,11 +1,11 @@
 schema_version: 1
 exchange: bybit
 adapter: rustcta_exchange_gateway::adapters::bybit
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
-  status: draft
+  status: validated
   source: Bybit V5 REST/WS docs plus legacy private_perp migration notes
-  last_reviewed: "2026-06-08"
+  last_reviewed: "2026-06-09"
 market_types: [spot, perpetual, futures]
 products: [spot, perpetual, futures]
 rest:
@@ -14,6 +14,8 @@ rest:
 base_urls:
   public_ws_linear: wss://stream.bybit.com/v5/public/linear
   public_ws_spot: wss://stream.bybit.com/v5/public/spot
+  public_ws_inverse: wss://stream.bybit.com/v5/public/inverse
+  public_ws_option: wss://stream.bybit.com/v5/public/option
   private_ws: wss://stream.bybit.com/v5/private
 auth:
   private_rest: X-BAPI-SIGN = HMAC_SHA256(timestamp + api_key + recv_window + query_or_json_body)
@@ -29,9 +31,11 @@ reconciliation:
 batch:
   place_orders:
     support: unsupported
+    status: project_unimplemented
     reason: create-batch not yet wired in this adapter
   cancel_orders:
     support: unsupported
+    status: project_unimplemented
     reason: cancel-batch not yet wired in this adapter
   cancel_all_orders:
     support: native
@@ -39,8 +43,42 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: spec_only
-    channels: [orderbook.50, publicTrade, tickers, kline.1]
+    support: native
+    channels: [orderbook.1, orderbook.50, orderbook.200, orderbook.1000, publicTrade, tickers, kline.1]
+    subscription: json_subscribe
+    order_book:
+      channel: orderbook.{depth}.{symbol}
+      depths: [1, 50, 200, 1000]
+      interval_ms: [10, 20, 100, 200]
+      message_types: [snapshot, delta]
+      sequence_fields: [u, seq]
+      timestamp_fields: [ts, cts]
+      resync: rest_order_book_snapshot
+    orderbook:
+      channel_template: orderbook.{depth}.{symbol}
+      products:
+        spot:
+          url: wss://stream.bybit.com/v5/public/spot
+          depths: [1, 50, 200, 1000]
+          interval_ms: { 1: 10, 50: 20, 200: 100, 1000: 200 }
+        linear:
+          url: wss://stream.bybit.com/v5/public/linear
+          depths: [1, 50, 200, 1000]
+          interval_ms: { 1: 10, 50: 20, 200: 100, 1000: 200 }
+        inverse:
+          url: wss://stream.bybit.com/v5/public/inverse
+          depths: [1, 50, 200, 1000]
+          interval_ms: { 1: 10, 50: 20, 200: 100, 1000: 200 }
+        option:
+          url: wss://stream.bybit.com/v5/public/option
+          depths: [25, 100]
+          interval_ms: { 25: 20, 100: 100 }
+      message_types: [snapshot, delta]
+      level1_message_types: [snapshot]
+      sequence_fields: [u, seq]
+      timestamp_fields: [ts, cts]
+      zero_size_delta: delete_price_level
+      parser: parse_bybit_public_stream_events
     heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 60000 }
     resync: rest_order_book_snapshot
   private:
@@ -139,6 +177,74 @@ endpoints:
     rate_limit_bucket: private_trade
     weight: 1
     request_spec_required: true
+  - operation: batch_place_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/order/create-batch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bybit/request_specs/batch_place_orders.json
+    native_batch: true
+    atomicity: partial
+    support: native
+    response_parser:
+      status: implemented
+    notes: "Runtime builds signed V5 create-batch requests and returns partial-failure batch reports from retExtInfo.list."
+  - operation: batch_cancel_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/order/cancel-batch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bybit/request_specs/batch_cancel_orders.json
+    native_batch: true
+    atomicity: partial
+    support: native
+    response_parser:
+      status: implemented
+    notes: "Runtime builds signed V5 cancel-batch requests and returns partial-failure batch reports from retExtInfo.list."
+  - operation: amend_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/order/amend
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bybit/request_specs/amend_order.json
+    native_batch: false
+    atomicity: non_atomic
+    support: native
+    response_parser:
+      status: implemented
+    notes: "Runtime builds signed V5 amend requests for shared API quantity changes; shared API has no price field, and Bybit client-order-id replacement is rejected before send."
+  - operation: place_order_list
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/bybit/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bybit.order_list_unsupported_in_shared_model
   - operation: query_order
     product: perpetual
     transport: rest
@@ -169,6 +275,22 @@ endpoints:
     rate_limit_bucket: private_account
     weight: 1
     request_spec_required: true
+  - operation: get_fees
+    product: mixed
+    transport: rest
+    method: GET
+    path: /v5/account/fee-rate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bybit/request_specs/get_fees.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bybit/fee_rate.json
+    notes: "Runtime currently maps Spot/Perpetual/Futures symbols through category=spot/linear; inverse/option remain documented V5 categories until shared market-type routing is expanded."
   - operation: set_leverage
     product: perpetual
     transport: rest

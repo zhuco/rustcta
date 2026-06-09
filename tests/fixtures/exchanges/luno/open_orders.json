@@ -1,0 +1,17 @@
+{
+  "orders": [
+    {
+      "order_id": "BXMC2CJ7HNB88U4",
+      "creation_timestamp": 1700000000000,
+      "type": "BID",
+      "state": "ACTIVE",
+      "limit_price": "1200000.00",
+      "limit_volume": "0.01000000",
+      "base": "0.00000000",
+      "counter": "0.00",
+      "fee_base": "0.00000000",
+      "fee_counter": "0.00",
+      "pair": "XBTZAR"
+    }
+  ]
+}

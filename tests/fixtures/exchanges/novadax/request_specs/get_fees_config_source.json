@@ -1,0 +1,28 @@
+{
+  "exchange": "novadax",
+  "operation": "novadax.get_fees",
+  "boundary_type": "config_fee_table_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "official_fees_limits_vip_table",
+    "rates_embedded": false,
+    "refresh_required": true,
+    "account_effective_fee_requires": [
+      "vip_level_mapping",
+      "symbol_or_market_scope",
+      "fee_table_version"
+    ]
+  },
+  "default_or_override_strategy": {
+    "public_vip_table_allowed_for_backtest_only": true,
+    "production_requires_vip_level_config_or_account_effective_readback": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "novadax.fees_private_read_not_promoted",
+  "remaining_work": [
+    "fee_table_config_source",
+    "vip_level_mapping",
+    "shared_get_fees_response_mapping"
+  ]
+}

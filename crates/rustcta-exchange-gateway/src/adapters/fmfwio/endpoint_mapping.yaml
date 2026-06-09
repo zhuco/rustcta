@@ -5,7 +5,7 @@ metadata:
   status: validated
   source: https://api.fmfw.io/
   last_reviewed: "2026-06-08"
-  notes: "A-20 FMFW.io HitBTC-family profile. Runtime is G1 public spot REST; private REST and WS are offline request-spec/parser boundaries only until a canonical HitBTC-family adapter exists."
+  notes: "A-20 FMFW.io HitBTC-family profile. Runtime is G1 public spot REST plus guarded advanced private REST for replace/order-list; other private REST and WS remain offline request-spec/parser boundaries."
 market_types: [spot]
 products: [spot]
 rest:
@@ -16,6 +16,7 @@ base_urls:
   wallet_ws: wss://api.fmfw.io/api/3/ws/wallet
 auth:
   rest_hs256: "Authorization: HS256 base64(api_key:hmac_sha256(method+path+query+body+timestamp+window):timestamp:window)"
+  rest_basic: "Official v3 examples also allow HTTP Basic apiKey:secretKey for private read endpoints; gateway fixtures use HS256 to keep FMFW.io aligned with the HitBTC-family signer."
   ws_hs256: "login params with type=HS256, api_key, timestamp, optional window and HMAC-SHA256(timestamp+window)"
 rate_limits:
   buckets:
@@ -55,8 +56,45 @@ websocket:
     timeout_ms: 10000
   public_subscribe:
     method: subscribe
-    channel: orderbook/D5/1000ms
+    channel: orderbook/D5/100ms
+    channels:
+      - orderbook/D5/100ms
+      - orderbook/D10/100ms
+      - orderbook/D20/100ms
+      - orderbook/D5/500ms
+      - orderbook/D10/500ms
+      - orderbook/D20/500ms
+      - orderbook/D5/1000ms
+      - orderbook/D10/1000ms
+      - orderbook/D20/1000ms
+      - orderbook/top/100ms
+      - orderbook/top/500ms
+      - orderbook/top/1000ms
+      - orderbook/full
     fixture: tests/fixtures/exchanges/fmfwio/ws/orderbook_partial.json
+  public_channels:
+    - orderbook/D5/100ms
+    - orderbook/D10/100ms
+    - orderbook/D20/100ms
+    - orderbook/top/100ms
+    - orderbook/full
+  order_book:
+    channels:
+      partial_depth_5: { channel: orderbook/D5/100ms, interval_ms: 100, depth_per_side: 5 }
+      partial_depth_10: { channel: orderbook/D10/100ms, interval_ms: 100, depth_per_side: 10 }
+      partial_depth_20: { channel: orderbook/D20/100ms, interval_ms: 100, depth_per_side: 20 }
+      top_bbo: { channel: orderbook/top/100ms, interval_ms: 100, depth_per_side: 1 }
+      full_book: { channel: orderbook/full, interval_ms: real_time, depth_per_side: full }
+    interval_options_ms: [100, 500, 1000]
+    sequence:
+      fields: [s]
+      continuity: monotonic_sequence_per_symbol
+      gap_policy: rest_snapshot_resync
+    checksum: none
+    resync:
+      mode: rest_snapshot_rebuild
+      endpoint_operation: get_order_book
+      path: /public/orderbook/{symbol}
   private_auth:
     method: login
     auth: hmac
@@ -65,17 +103,58 @@ unsupported:
   - operation: hitbtc_family_canonical_profile
     reason: "A-20 keeps FMFW.io as a conservative HitBTC-family profile and does not refactor shared HitBTC-family core code owned by parallel tasks."
   - operation: private_rest_runtime
-    reason: "Private REST is request-spec/signing-vector only for this task."
+    reason: "Private REST runtime is enabled for guarded Spot core trading, balance readback, fee readback, and advanced replace/order-list behind explicit FMFWIO_PRIVATE_REST_ENABLED credentials; private WS remains an offline boundary."
   - operation: public_ws_runtime
     reason: "Public WS payloads and parser fixtures are present, but no production supervisor is wired."
   - operation: private_ws_runtime
     reason: "Private WS auth payload is present, but no long-running private stream is enabled."
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual, margin]
+    boundary: project_unimplemented_product_line
+    official_gap: fmfwio_margin_futures_perpetual_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/fmfwio/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current FMFW.io adapter remains a Spot HitBTC-family profile plus offline specs; futures/margin/perpetual must use explicit product scope guards and cannot reuse spot private runtime implicitly."
+    required_endpoints:
+      market_metadata: [margin/futures/perpetual instruments, contract specifications, settlement and precision rules]
+      public_market_data: [margin/futures/perpetual order book, margin/futures/perpetual ticker, margin/futures/perpetual trades]
+      private_account: [margin/futures/perpetual balances, positions, risk or leverage limits]
+      private_order_lifecycle: [margin/futures/perpetual place order, margin/futures/perpetual cancel order, margin/futures/perpetual query/open orders, margin/futures/perpetual fills]
+    unsafe_to_promote_without: [futures/margin metadata separated from spot symbols, position/margin/risk parser fixtures, derivatives private order request specs, post-write query/open/fills reconciliation]
+    reason: "Official FMFW.io Futures/Perpetual surfaces are documented but not wired by this spot HitBTC-family profile."
+  - operation: margin_product
+    status: project_unimplemented
+    product_lines: [margin]
+    boundary: project_unimplemented_product_line
+    official_gap: fmfwio_margin_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/fmfwio/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      private_account: [margin balances, positions, risk or leverage limits]
+      private_order_lifecycle: [margin place/cancel/query/open orders, margin fills]
+    reason: "FMFW.io/HitBTC-family margin account/order semantics are not wired in this spot profile."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: fmfwio_futures_perpetual_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/fmfwio/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications, settlement and precision rules]
+      private_account: [futures/perpetual balances, positions, risk or leverage limits]
+      private_order_lifecycle: [futures/perpetual place/cancel/query/open orders, futures/perpetual fills]
+    reason: "FMFW.io futures/perpetual endpoints are documented, but contract metadata, position/risk and trading runtime remain project-unimplemented."
   - operation: margin_trading
     reason: "Margin account/order semantics are outside the spot-only runtime."
   - operation: futures_trading
     reason: "FMFW.io futures endpoints are documented but not enabled by A-20."
   - operation: wallet_withdraw_transfer
     reason: "Funds movement is outside gateway trading runtime."
+  - operation: batch_place_orders
+    reason: "No shared native batch place runtime is mapped for the FMFW.io profile."
+  - operation: batch_cancel_orders
+    status: unsupported
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/batch_cancel_orders.json
+    reason: "FMFW.io v3 exposes DELETE /spot/order cancel-all/filter-by-symbol semantics and the request-spec fixture is pinned, but this is not a lossless shared batch_cancel_orders cancel-list operation; using it would over-cancel matching open orders."
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -105,6 +184,66 @@ endpoints:
     testnet: false
     support: native
     official_doc: https://api.fmfw.io/#order-books
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /spot/fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: fmfwio_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Official FMFW.io personal Spot trading commission endpoint is enabled as guarded HS256 private REST runtime behind FMFWIO_PRIVATE_REST_ENABLED plus API key/secret."
+    official_doc: https://api.fmfw.io/#get-all-trading-commissions
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/get_fees_spot.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/fmfwio/parser/spot_fees.json }
+    notes: "Runtime maps symbol plus make_rate/take_rate decimals into maker/taker fee snapshots; source requires read-only account permission and remains Spot-scoped."
+  - operation: get_fees
+    product: futures
+    market_types: [futures]
+    transport: rest
+    method: GET
+    path: /futures/fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: fmfwio_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "Official FMFW.io Futures trading commission endpoint is mapped as an offline request-spec boundary; this Spot profile keeps contract runtime project-unimplemented."
+    official_doc: https://api.fmfw.io/#get-all-trading-commissions-2
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/get_fees_futures.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/fmfwio/parser/futures_fees.json }
+    notes: "Parser should map contract symbol plus make_rate/take_rate decimals into maker/taker fee snapshots only when the FMFW.io futures product scope is explicitly enabled."
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /spot/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: fmfwio_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Credential-gated read-only Spot balance runtime is implemented via HitBTC-family HS256 private REST; funds movement and wallet transfers remain outside gateway scope."
+    official_doc: https://api.fmfw.io/#get-spot-balances
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/fmfwio/private_tests.rs::fmfwio_request_specs_should_match_offline_private_builders, fixture: tests/fixtures/exchanges/fmfwio/request_specs/get_balances.json }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/fmfwio/private_tests.rs::fmfwio_private_parser_should_parse_order_list_fixture, fixture: tests/fixtures/exchanges/fmfwio/parser/spot_balances.json }
+    notes: "Default profile still fail-closes without FMFWIO_PRIVATE_REST_ENABLED plus API key/secret; runtime uses read-only account scope and filters requested assets locally."
   - operation: place_order
     product: spot
     transport: rest
@@ -118,8 +257,8 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime write path remains Unsupported."
+    support: native
+    reason: "P2 core runtime: signed HS256 Spot order create is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover request body/header shape and parser readback. No live success is assumed."
     official_doc: https://api.fmfw.io/#create-new-spot-order
     request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/place_order.json
   - operation: cancel_order
@@ -135,10 +274,27 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime cancel path remains Unsupported."
+    support: native
+    reason: "P2 core runtime: signed HS256 Spot cancel by client_order_id is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover DELETE path/header and cancel parser. No live success is assumed."
     official_doc: https://api.fmfw.io/#cancel-spot-order
     request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/order/{client_order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "P2 core runtime: signed HS256 single-order readback is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret and feeds query/reconciliation parser tests."
+    official_doc: https://api.fmfw.io/#get-spot-order
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/query_order.json
   - operation: get_open_orders
     product: spot
     transport: rest
@@ -152,9 +308,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: "Private readback endpoint mapped for reconciliation but not enabled at runtime."
+    support: native
+    reason: "P2 core runtime: signed HS256 open-order readback is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret and supports REST reconciliation."
     official_doc: https://api.fmfw.io/#get-all-active-spot-orders
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/get_open_orders.json
   - operation: get_recent_fills
     product: spot
     transport: rest
@@ -168,20 +325,109 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: "Private trade history endpoint mapped for reconciliation but not enabled at runtime."
+    support: native
+    reason: "P2 core runtime: signed HS256 trade-history readback is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret and parses recent fills for reconciliation."
     official_doc: https://api.fmfw.io/#spot-trades-history
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/get_recent_fills.json
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: PATCH
+    path: /spot/order/{client_order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: native
+    reason: "P4 advanced order runtime: signed HS256 PATCH replace is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover request body/header shape and parser fixture. No live success is assumed."
+    official_doc: https://api.fmfw.io/#replace-spot-order
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/amend_order_replace.json
+    response_parser: { status: fixture_only, parser: parse_spot_order_ack, fixture: tests/fixtures/exchanges/fmfwio/parser/spot_order_ack.json }
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /spot/order/list
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: native
+    reason: "P4 advanced order runtime: signed HS256 order-list POST is guarded by FMFWIO_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover request body/header shape and parser fixture. No live success is assumed."
+    official_doc: https://api.fmfw.io/#create-new-spot-order-list
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/place_order_list_otoco.json
+    response_parser: { status: fixture_only, parser: parse_spot_order_list_ack, fixture: tests/fixtures/exchanges/fmfwio/parser/spot_order_list_ack.json }
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/fmfwio/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "No shared native batch place runtime is mapped; ordinary private writes remain offline request-spec only."
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: unsupported
+    reason: "Official cancel-all/filter-by-symbol endpoint is fixture/signing/parser backed for audit, but shared batch_cancel_orders requires a specific cancel list. Promoting this route would over-cancel all matching open orders, so this operation is explicitly unsupported for the shared gateway."
+    official_doc: https://api.fmfw.io/#cancel-all-spot-orders
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/batch_cancel_orders.json
+    response_parser: { status: fixture_only, parser: parse_spot_batch_cancel_ack, fixture: tests/fixtures/exchanges/fmfwio/parser/batch_cancel_orders_ack.json }
 streams:
   - operation: public_orderbook_snapshot
-    channel: orderbook/D5/1000ms
+    channel: orderbook/D5/100ms
+    transport: websocket
+    auth: none
+    channels:
+      - orderbook/D5/100ms
+      - orderbook/D10/100ms
+      - orderbook/D20/100ms
+      - orderbook/top/100ms
+      - orderbook/full
     scope: public
     support: spec_only
     heartbeat: server_ping_30s
+    interval_ms: 100
+    supported_intervals_ms: [100, 500, 1000]
+    depth: [1, 5, 10, 20]
+    sequence: [s]
+    checksum: none
     resync:
       endpoint_operation: get_order_book
+      mode: rest_snapshot_rebuild
     parser_fixture: tests/fixtures/exchanges/fmfwio/ws/orderbook_partial.json
   - operation: private_trading_reports
     channel: spot_subscribe
+    transport: websocket
+    auth: hmac
     scope: private
     support: spec_only
     auth: hs256_login

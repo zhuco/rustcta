@@ -1,0 +1,19 @@
+{
+  "orderId": 987654321,
+  "symbol": "BTCUSDT",
+  "status": "PARTIALLY_FILLED",
+  "clientOrderId": "cli-apollox-query",
+  "price": "65000.5",
+  "avgPrice": "65000.5",
+  "origQty": "0.020",
+  "executedQty": "0.010",
+  "cumQuote": "650.005",
+  "timeInForce": "GTC",
+  "type": "LIMIT",
+  "reduceOnly": false,
+  "side": "BUY",
+  "positionSide": "BOTH",
+  "stopPrice": "0",
+  "time": 1700000000000,
+  "updateTime": 1700000005000
+}

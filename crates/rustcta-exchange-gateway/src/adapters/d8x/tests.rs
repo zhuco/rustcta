@@ -1,6 +1,7 @@
 use rustcta_exchange_api::{
-    BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest, PublicStreamKind,
-    PublicStreamSubscription, RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest, PositionsRequest,
+    PublicStreamKind, PublicStreamSubscription, RequestContext, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderType,
@@ -8,7 +9,7 @@ use rustcta_types::{
 };
 use serde_json::{json, Value};
 
-use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
+use super::parser::{parse_orderbook_snapshot, parse_position_source_boundary, parse_symbol_rules};
 use super::streams::{
     d8x_private_auth_payload, d8x_public_subscribe_payload, d8x_reconnect_policy_ms,
 };
@@ -62,6 +63,9 @@ fn fixture(name: &str) -> Value {
         "signing_boundary" => include_str!(
             "../../../../../tests/fixtures/exchanges/d8x/signing_vectors/evm_contract_boundary.json"
         ),
+        "positions_source" => include_str!(
+            "../../../../../tests/fixtures/exchanges/d8x/request_specs/get_positions_account_source.json"
+        ),
         "ws_subscribe" => {
             include_str!(
                 "../../../../../tests/fixtures/exchanges/d8x/ws/public_orderbook_subscribe.json"
@@ -86,6 +90,26 @@ fn request_spec(name: &str) -> RequestSpec {
         _ => panic!("unknown request spec {name}"),
     };
     serde_json::from_str(text).expect(name)
+}
+
+#[test]
+fn parser_should_validate_position_source_boundary_fixture() {
+    let audit = parse_position_source_boundary(&exchange_id(), &fixture("positions_source"))
+        .expect("audit");
+
+    assert_eq!(audit.boundary, "wallet_contract_indexer_source_only");
+    assert!(audit
+        .required_sources
+        .iter()
+        .any(|source| source == "wallet_address"));
+    assert!(audit
+        .position_fields
+        .iter()
+        .any(|field| field == "funding_accrual"));
+    assert!(audit
+        .reconciliation_required
+        .iter()
+        .any(|gap| gap == "block number and reorg handling"));
 }
 
 #[test]
@@ -146,6 +170,28 @@ fn capabilities_should_expose_public_market_data_but_no_private_runtime() {
     assert_eq!(boundary["scan_only"], true);
     assert_eq!(boundary["trade_enabled"], false);
     assert_eq!(boundary["private_write_enabled"], false);
+}
+
+#[tokio::test]
+async fn get_positions_should_return_wallet_indexer_source_boundary() {
+    let adapter = D8xGatewayAdapter::new(D8xGatewayConfig::default()).expect("adapter");
+    let error = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![symbol().exchange_symbol],
+        })
+        .await
+        .expect_err("positions boundary");
+
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: private::POSITIONS_UNSUPPORTED
+        }
+    ));
 }
 
 #[tokio::test]

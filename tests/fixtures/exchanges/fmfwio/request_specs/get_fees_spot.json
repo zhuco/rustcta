@@ -1,0 +1,24 @@
+{
+  "exchange": "fmfwio",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/3/spot/fee",
+  "auth": "signed",
+  "credential_scope": "read_only",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "fmfwio/get_fees_spot_hs256",
+  "official_source": "GET /api/3/spot/fee returns personal Spot trading commission rates for all symbols on the FMFW.io profile."
+}

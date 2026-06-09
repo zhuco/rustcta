@@ -1,0 +1,18 @@
+{
+  "trades": [
+    {
+      "trade_id": "lighter-trade-5001",
+      "order_index": "lighter-order-1001",
+      "client_order_id": "lighter-client-1001",
+      "market_id": 0,
+      "side": "BUY",
+      "liquidity_role": "maker",
+      "price": "2064.55",
+      "quantity": "0.50",
+      "quote_quantity": "1032.275",
+      "fee_asset": "USD",
+      "fee_amount": "0",
+      "timestamp": "2026-06-09T03:00:00Z"
+    }
+  ]
+}

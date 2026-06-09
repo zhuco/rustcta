@@ -1,0 +1,18 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "api_key": "latoken_public_test_key",
+  "api_secret": "latoken_private_test_secret",
+  "method": "POST",
+  "path": "/v2/auth/order/placeBulk",
+  "query": [],
+  "body_params": [
+    [
+      "orders",
+      "[{\"baseCurrency\":\"BTC\",\"quoteCurrency\":\"USDT\",\"side\":\"BUY\",\"condition\":\"GTC\",\"type\":\"LIMIT\",\"clientOrderId\":\"latoken_batch_client_order_001\",\"price\":\"64000\",\"quantity\":\"0.01\"},{\"baseCurrency\":\"ETH\",\"quoteCurrency\":\"USDT\",\"side\":\"SELL\",\"condition\":\"GTC\",\"type\":\"LIMIT\",\"clientOrderId\":\"latoken_batch_client_order_002\",\"price\":\"3500\",\"quantity\":\"0.1\"}]"
+    ]
+  ],
+  "canonical_payload": "POST/v2/auth/order/placeBulkorders=[{\"baseCurrency\":\"BTC\",\"quoteCurrency\":\"USDT\",\"side\":\"BUY\",\"condition\":\"GTC\",\"type\":\"LIMIT\",\"clientOrderId\":\"latoken_batch_client_order_001\",\"price\":\"64000\",\"quantity\":\"0.01\"},{\"baseCurrency\":\"ETH\",\"quoteCurrency\":\"USDT\",\"side\":\"SELL\",\"condition\":\"GTC\",\"type\":\"LIMIT\",\"clientOrderId\":\"latoken_batch_client_order_002\",\"price\":\"3500\",\"quantity\":\"0.1\"}]",
+  "expected_signature": "37c58d5660d11732b01cc62557fa32784576444b7fb1efb2ce7b731adde900cb",
+  "sanitized": true,
+  "trade_enabled": false
+}

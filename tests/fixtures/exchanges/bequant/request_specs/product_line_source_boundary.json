@@ -1,0 +1,55 @@
+{
+  "exchange": "bequant",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "margin_product", "futures_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["margin", "futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://api.bequant.io/",
+      "evidence": "Bequant v3 API-family material includes margin/futures account, order, position and trading WebSocket surfaces."
+    }
+  ],
+  "runtime_isolation": "Keep Bequant spot profile separate from margin/futures/perpetual runtime until product-specific metadata, risk and order semantics are mapped.",
+  "unsupported_runtime_reason": "Bequant margin/futures/perpetual surfaces are official, but this adapter has no product-scoped metadata, position/margin/risk parser or margin/futures order lifecycle runtime.",
+  "required_endpoints": {
+    "market_metadata": [
+      "margin/futures/perpetual instruments",
+      "contract specifications",
+      "settlement asset and tick/lot sizing"
+    ],
+    "public_market_data": [
+      "margin/futures/perpetual order book",
+      "margin/futures/perpetual ticker",
+      "margin/futures/perpetual trades"
+    ],
+    "private_account": [
+      "margin balances",
+      "positions",
+      "risk or leverage limits"
+    ],
+    "private_order_lifecycle": [
+      "place margin/futures order",
+      "cancel margin/futures order",
+      "query/open margin/futures orders",
+      "margin/futures fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "product-scoped private REST credentials",
+    "margin/futures trading permission guard",
+    "private stream reconciliation scope if enabled"
+  ],
+  "unsafe_to_promote_without": [
+    "Bequant-specific margin/futures endpoint specs",
+    "contract metadata and symbol mapping",
+    "position/margin/risk parser coverage",
+    "post-write query/open/fills reconciliation"
+  ],
+  "remaining_work": [
+    "pin Bequant-specific margin/futures endpoint specs",
+    "add position and margin parser fixtures",
+    "add product-scope guarded private REST and WebSocket reconciliation"
+  ]
+}

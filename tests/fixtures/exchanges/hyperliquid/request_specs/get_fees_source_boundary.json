@@ -1,0 +1,32 @@
+{
+  "exchange": "hyperliquid",
+  "operation": "hyperliquid.get_fees",
+  "boundary_type": "protocol_fee_schedule_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "official_fee_schedule_and_user_fee_tier",
+    "source_url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees",
+    "last_reviewed": "2026-06-09",
+    "products": ["perpetual", "spot", "hip3_perpetual"],
+    "effective_fee_kind": "maker_taker_by_user_tier",
+    "tier_basis": ["user_volume", "aligned_quote_asset_discount", "referral_or_staking_discount"],
+    "account_effective_fee_requires": [
+      "user_fee_tier_readback",
+      "asset_scope",
+      "discount_stack_guard"
+    ]
+  },
+  "default_or_override_strategy": {
+    "default_schedule_snapshot_allowed_for_backtest_only": true,
+    "production_requires_user_fee_tier_or_explicit_override": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "hyperliquid.fees_user_tier_not_promoted",
+  "remaining_work": [
+    "user_fee_tier_source",
+    "spot_perp_asset_scope_mapping",
+    "discount_guard",
+    "shared_get_fees_response_mapping"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "success": 1,
+  "data": {
+    "orders": [
+      {
+        "order_id": 1,
+        "pair": "btc_jpy",
+        "side": "buy",
+        "type": "limit",
+        "price": "3000000",
+        "start_amount": "0.01",
+        "remaining_amount": "0.01",
+        "executed_amount": "0",
+        "status": "UNFILLED"
+      },
+      {
+        "order_id": 2,
+        "pair": "btc_jpy",
+        "side": "sell",
+        "type": "limit",
+        "price": "3100000",
+        "start_amount": "0.02",
+        "remaining_amount": "0.02",
+        "executed_amount": "0",
+        "status": "UNFILLED"
+      }
+    ]
+  }
+}

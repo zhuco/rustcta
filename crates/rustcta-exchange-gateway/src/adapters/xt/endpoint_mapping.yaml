@@ -40,6 +40,30 @@ websocket:
     remains required
   heartbeat: ping/pong or server ping per adapter stream helpers
   private_auth: listen-key or signed private subscription where supported
+  public:
+    support: native
+    order_book:
+      topics:
+        - spot depth_update depth500 1000ms
+        - futures depth_update depth500 1000ms
+      spot:
+        topic: depth_update
+        fixed_update_interval_ms: 1000
+        snapshot_limit: 500
+        sequence:
+          first_update_id_field: fi
+          last_update_id_field: i
+          contiguous_required: true
+      futures:
+        topic: depth_update
+        fixed_update_interval_ms: 1000
+        snapshot_limit: 500
+        sequence:
+          first_update_id_field: fu
+          last_update_id_field: u
+          contiguous_required: true
+      checksum: unsupported
+      resync: REST order book snapshot, drop stale updates, then enforce fi/i or fu/u continuity
 endpoints:
 - operation: get_symbol_rules
   product: spot

@@ -12,6 +12,8 @@ pub(super) struct SeenRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) headers: HashMap<String, String>,
+    pub(super) body: String,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -29,8 +31,18 @@ pub(super) async fn spawn_rest_server(
                 break;
             };
             let mut buffer = vec![0_u8; 8192];
-            let bytes_read = stream.read(&mut buffer).await.unwrap();
-            let request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            let mut bytes_read = stream.read(&mut buffer).await.unwrap();
+            let mut request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            if let Some(content_length) = content_length(&request_text) {
+                while body_len(&request_text) < content_length {
+                    let read = stream.read(&mut buffer[bytes_read..]).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    bytes_read += read;
+                    request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                }
+            }
             seen_requests
                 .lock()
                 .unwrap()
@@ -53,12 +65,38 @@ pub(super) async fn spawn_rest_server(
     (format!("http://{address}"), seen)
 }
 
+fn content_length(request_text: &str) -> Option<usize> {
+    request_text
+        .lines()
+        .find_map(|line| line.split_once(':'))
+        .filter(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse().ok())
+}
+
+fn body_len(request_text: &str) -> usize {
+    request_text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.len())
+        .unwrap_or(0)
+}
+
 fn parse_seen_request(request_text: &str) -> SeenRequest {
     let request_line = request_text.lines().next().unwrap_or_default();
     let mut request_parts = request_line.split_whitespace();
     let method = request_parts.next().unwrap_or_default().to_string();
     let target = request_parts.next().unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+    let (head, body) = request_text
+        .split_once("\r\n\r\n")
+        .unwrap_or((request_text, ""));
+    let headers = head
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_string(), value.trim().to_string()))
+        })
+        .collect();
     let query = query_text
         .split('&')
         .filter(|pair| !pair.is_empty())
@@ -71,6 +109,8 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         method,
         path: path.to_string(),
         query,
+        headers,
+        body: body.to_string(),
     }
 }
 

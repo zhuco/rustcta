@@ -1,0 +1,19 @@
+{
+  "exchange": "apollox_dex",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "ApolloX spot API family and fapi futures profile",
+      "evidence": "ApolloX spot API family exists separately from the V1 fapi futures/perpetual surface used by this adapter."
+    }
+  ],
+  "runtime_isolation": "Do not reuse fapi perpetual request builders for spot until the spot host, listen-key/private stream and product-scope signing are audited.",
+  "remaining_work": [
+    "pin spot exchangeInfo, depth, ticker and trades specs",
+    "add signed spot account, order, open-order and fill request specs",
+    "wire spot private stream or REST reconciliation with product-scope guards"
+  ]
+}

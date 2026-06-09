@@ -41,7 +41,65 @@ websocket:
   public:
     support: native
     url: wss://ws.luno.com/api/1/stream/{pair}
-    heartbeat: { direction: server_ping, interval_ms: 30000, timeout_ms: 10000 }
+    auth:
+      required: true
+      mode: initial_credential_message
+      payload_fields: [api_key_id, api_key_secret]
+      credential_scopes: [read_only]
+      note: "Although this is the market stream, Luno requires API key credentials before sending market data."
+    channels: [market_stream]
+    order_book:
+      channels: ["orderbook:market_stream", "market_stream"]
+      url_template: wss://ws.luno.com/api/1/stream/{pair}
+      channel: pair_path_market_stream
+      subscribe_payload: none_after_url_connect
+      auth_payload:
+        api_key_id: "{api_key_id}"
+        api_key_secret: "{api_key_secret}"
+      initial_snapshot:
+        type: full_current_order_book
+        fields: [sequence, asks, bids, status, timestamp]
+        level_identity: order_id
+        side_fields:
+          asks: [{ id: order_id, price: price, volume: volume }]
+          bids: [{ id: order_id, price: price, volume: volume }]
+      updates:
+        type: atomic_delta
+        delivery: as_quickly_as_possible
+        fields: [sequence, trade_updates, create_update, delete_update, status_update, timestamp]
+        operations:
+          create_update: add_order_by_id
+          delete_update: remove_order_by_id
+          trade_updates: reduce_maker_order_volume_and_append_trade
+          status_update: update_market_status
+      interval_ms: null
+      interval_source: "Official Streaming API docs say updates are sent as quickly as possible and do not publish a fixed millisecond interval."
+      depth: null
+      depth_boundary: "depth: unspecified; no fixed depth limit is documented for the market stream"
+      depth_source: "Initial snapshot is the current full order book state; no fixed depth limit is documented for the market stream."
+      sequence:
+        field: sequence
+        type: integer_string
+        contiguous: true
+        rule: "Message sequence n applies to local state n-1 and produces state n; multiple updates inside one message are atomic and ordered."
+        gap_detection: strict_previous_plus_one
+        out_of_order_policy: close_and_reconnect_reinitialise_state
+      checksum:
+        supported: false
+        mode: none_documented
+        risk: "No checksum is documented for Luno market stream order-book updates; integrity relies on strict sequence continuity."
+      heartbeat:
+        empty_message_keepalive: true
+        ping_pong_supported: true
+        interval_ms: null
+        timeout_ms: null
+      resync:
+        mode: reconnect_full_stream_state
+        rest_endpoint_operation: get_full_order_book_snapshot
+        rest_endpoint_path: /api/1/orderbook
+        triggers: [connect, reconnect, out_of_order_sequence, sequence_gap, sequence_regression, parse_error, network_error, keepalive_timeout]
+        strategy: "Close the pair stream and reconnect to receive a fresh full order book; REST /api/1/orderbook can provide a fallback full snapshot when rebuilding local state."
+    heartbeat: { direction: bidirectional_keepalive_or_ping_pong, interval_ms: null, timeout_ms: null }
     resync: rest_order_book_snapshot
   private:
     support: spec_only
@@ -49,6 +107,8 @@ websocket:
     auth: basic_auth_payload
     fallback: rest_reconciliation
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile is Spot-only and exposes no standard futures/perpetual/options product line."
   - beneficiaries
   - fiat_withdrawals
   - fiat_deposits
@@ -80,6 +140,19 @@ endpoints:
       - name: pair
     response_parser:
       fixture: tests/fixtures/exchanges/luno/orderbook_top.json
+  - operation: get_full_order_book_snapshot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/orderbook
+    auth: none
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    params:
+      - name: pair
+    notes: "Mapping-only fallback for WebSocket order-book resync; runtime get_order_book currently uses /api/1/orderbook_top."
   - operation: get_balances
     product: spot
     transport: rest
@@ -90,6 +163,12 @@ endpoints:
     rate_limit_bucket: luno_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/get_balances.json
+    response_parser:
+      status: planned
+    notes: Balance endpoint is Basic-auth readback, but parser/read-only runtime promotion and reconciliation are not implemented; runtime returns luno.balances_offline_request_spec_only.
   - operation: get_fees
     product: spot
     transport: rest
@@ -100,6 +179,13 @@ endpoints:
     rate_limit_bucket: luno_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/get_fees_fee_info.json
+    response_parser:
+      status: planned
+      fixture: tests/fixtures/exchanges/luno/fee_info_success.json
+    notes: Luno fee_info is pair-scoped and credentialed; parser/account-effective guard are pending, so runtime returns luno.fees_offline_request_spec_only.
   - operation: place_order
     product: spot
     transport: rest
@@ -128,6 +214,7 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/luno/request_specs/cancel_order.json
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -137,7 +224,13 @@ endpoints:
     rate_limit_bucket: luno_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/query_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/luno/order_success.json
+    notes: Runtime is fail-closed unless LUNO_PRIVATE_REST_ENABLED and Basic-auth credentials are present; exchange_order_id is required.
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -147,7 +240,15 @@ endpoints:
     rate_limit_bucket: luno_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/get_open_orders.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/luno/open_orders.json
+    params:
+      - name: pair
+    notes: Runtime is fail-closed unless LUNO_PRIVATE_REST_ENABLED and Basic-auth credentials are present; symbol is required.
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -157,3 +258,14 @@ endpoints:
     rate_limit_bucket: luno_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/get_recent_fills.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/luno/fills.json
+    params:
+      - name: pair
+      - name: order_id
+        required: false
+      - name: limit
+        required: false
+    notes: Runtime is fail-closed unless LUNO_PRIVATE_REST_ENABLED and Basic-auth credentials are present; symbol and context tenant/account are required for fill attribution.

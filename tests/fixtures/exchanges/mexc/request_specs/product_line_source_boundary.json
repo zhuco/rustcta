@@ -1,0 +1,53 @@
+{
+  "exchange": "mexc",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["spot", "perpetual"],
+  "official_product_lines": ["spot", "perpetual_contract", "delivery_contract"],
+  "official_sources": [
+    {
+      "surface": "MEXC Spot and Contract API surfaces",
+      "evidence": "The current adapter wires Spot and USDT contract/perpetual metadata, depth, balances, positions, fees and order lifecycle."
+    },
+    {
+      "surface": "MEXC contract metadata delivery-state fields",
+      "evidence": "Delivery-state contract semantics are tracked as a separate product boundary because the current parser and runtime normalize contract instruments as perpetual."
+    }
+  ],
+  "runtime_isolation": "Do not promote delivery-state contracts through the current perpetual routing until metadata filters, settlement state, account/position parsers and signed order lifecycle reconciliation are product-specific.",
+  "required_endpoints": {
+    "delivery_market_metadata": [
+      "delivery contract metadata/status filter",
+      "settlement or delivery schedule",
+      "delivery contract size/risk fields"
+    ],
+    "delivery_public_market_data": [
+      "delivery contract depth snapshot",
+      "delivery contract public depth stream"
+    ],
+    "delivery_private_account": [
+      "delivery account assets",
+      "delivery open positions",
+      "delivery risk or settlement readback"
+    ],
+    "delivery_order_lifecycle": [
+      "delivery place order",
+      "delivery cancel order",
+      "delivery query/open orders",
+      "delivery fills"
+    ]
+  },
+  "unsafe_to_promote_without": [
+    "delivery market-type routing separated from perpetual",
+    "delivery metadata/status parser fixtures",
+    "delivery order book and public stream fixtures",
+    "delivery account and position parser coverage",
+    "signed delivery order lifecycle request specs",
+    "settlement/delivery reconciliation"
+  ],
+  "remaining_work": [
+    "split delivery-state contracts from perpetual symbols in metadata",
+    "add delivery account/position/order lifecycle request specs",
+    "add delivery-specific parser fixtures and guarded runtime tests"
+  ]
+}

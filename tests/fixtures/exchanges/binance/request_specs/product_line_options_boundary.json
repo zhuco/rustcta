@@ -1,0 +1,64 @@
+{
+  "exchange": "binance",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operation": "options_product",
+  "official_product_lines": [
+    "options"
+  ],
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "spot_private_rest",
+    "spot_public_ws",
+    "usdm_futures_public_rest",
+    "usdm_futures_private_rest",
+    "usdm_futures_public_ws"
+  ],
+  "delegated_product_lines": {
+    "coin_m_futures": "binancecoinm"
+  },
+  "official_sources": [
+    {
+      "url": "https://developers.binance.com/docs/derivatives/option/general-info",
+      "evidence": "Binance documents Options as a derivatives API family separate from Spot, USD-M Futures, and COIN-M Futures."
+    }
+  ],
+  "runtime_isolation": "Do not route Binance Options instruments, order books, account positions, balances, order writes, order queries, open orders, or fills through the current Spot/USD-M adapter paths. Options require an audited product scope, symbol model, signed REST request specs, parser fixtures, and reconciliation before runtime promotion.",
+  "required_endpoints": {
+    "market_metadata": [
+      "option exchange information",
+      "option instrument specifications",
+      "underlying/expiry/strike metadata"
+    ],
+    "public_market_data": [
+      "option order book",
+      "option ticker or mark price",
+      "option recent trades"
+    ],
+    "private_account": [
+      "option account state",
+      "option balances or collateral",
+      "option positions",
+      "option margin/risk readback"
+    ],
+    "private_order_lifecycle": [
+      "option place order",
+      "option cancel order",
+      "option query order",
+      "option open orders",
+      "option fills/trades"
+    ]
+  },
+  "unsafe_to_promote_without": [
+    "option symbol parser covering expiry, strike, and side",
+    "option order-book parser fixtures",
+    "option account balance/position/risk parser fixtures",
+    "signed option order lifecycle request specs",
+    "credential scope and product eligibility guard",
+    "post-write query/open-order/fill reconciliation",
+    "runtime isolation from Spot and USD-M endpoints"
+  ],
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

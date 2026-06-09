@@ -38,6 +38,35 @@ pub struct BtcMarketsWsSession {
     pub subscribe_payload: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtcMarketsPublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub channel: &'static str,
+    pub subscribe_message_type: &'static str,
+    pub depth: Option<u32>,
+    pub interval_ms: Option<u64>,
+    pub heartbeat_ms: Option<u64>,
+    pub sequence: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub update_semantics: &'static str,
+    pub resync: &'static str,
+}
+
+pub fn btcmarkets_public_order_book_ws_policy() -> BtcMarketsPublicOrderBookWsPolicy {
+    BtcMarketsPublicOrderBookWsPolicy {
+        url: "wss://socket.btcmarkets.net/v2",
+        channel: "orderbook",
+        subscribe_message_type: "subscribe",
+        depth: Some(50),
+        interval_ms: None,
+        heartbeat_ms: Some(5_000),
+        sequence: None,
+        checksum: None,
+        update_semantics: "orderbook messages carry the latest book state with up to 50 bids and 50 asks; official docs do not publish a fixed update interval",
+        resync: "rebuild from REST /v3/markets/{marketId}/orderbook after connect, reconnect, stale stream, parse error, or suspected missed message because no sequence/checksum is documented",
+    }
+}
+
 impl BtcMarketsGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -253,8 +282,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        parse_private_stream_message, parse_public_stream_message, BtcMarketsPrivateStreamMessage,
-        BtcMarketsPublicStreamMessage,
+        btcmarkets_public_order_book_ws_policy, parse_private_stream_message,
+        parse_public_stream_message, BtcMarketsPrivateStreamMessage, BtcMarketsPublicStreamMessage,
     };
 
     fn fixture(name: &str) -> Value {
@@ -281,6 +310,20 @@ mod tests {
             }
             other => panic!("unexpected message {other:?}"),
         }
+    }
+
+    #[test]
+    fn public_orderbook_policy_should_document_latest_state_without_sequence() {
+        let policy = btcmarkets_public_order_book_ws_policy();
+        assert_eq!(policy.url, "wss://socket.btcmarkets.net/v2");
+        assert_eq!(policy.channel, "orderbook");
+        assert_eq!(policy.depth, Some(50));
+        assert_eq!(policy.interval_ms, None);
+        assert_eq!(policy.heartbeat_ms, Some(5_000));
+        assert_eq!(policy.sequence, None);
+        assert_eq!(policy.checksum, None);
+        assert!(policy.update_semantics.contains("latest book state"));
+        assert!(policy.resync.contains("/v3/markets/{marketId}/orderbook"));
     }
 
     #[test]

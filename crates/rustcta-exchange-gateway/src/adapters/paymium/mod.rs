@@ -100,11 +100,12 @@ impl ExchangeClient for PaymiumGatewayAdapter {
     }
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
+        let public_streams_enabled = self.config.enabled_public_streams;
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
-        capabilities.supports_public_streams = false;
+        capabilities.supports_private_rest = true;
+        capabilities.supports_public_streams = public_streams_enabled;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
             rustcta_exchange_api::EXCHANGE_API_SCHEMA_VERSION,
@@ -116,9 +117,9 @@ impl ExchangeClient for PaymiumGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = true;
+        capabilities.supports_open_orders = true;
+        capabilities.supports_recent_fills = true;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -130,31 +131,37 @@ impl ExchangeClient for PaymiumGatewayAdapter {
         capabilities.supports_post_only = false;
         capabilities.supports_time_in_force = vec![TimeInForce::GTC];
         capabilities.supports_order_types = vec![OrderType::Market, OrderType::Limit];
-        capabilities.max_order_book_depth = Some(100);
+        capabilities.max_order_book_depth = None;
         capabilities.max_recent_fill_limit = None;
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+            rustcta_exchange_api::OrderBookCapability::best_effort_delta(None);
         capabilities.refresh_v2_from_legacy_flags();
         capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
-        capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-            "Paymium private REST requires verified API-token scopes and request-spec promotion",
-        );
-        capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
-            "Paymium public stream uses socket.io v1.3; runtime adapter is not enabled in A-33",
-        );
+        capabilities.capabilities_v2.private_rest = CapabilitySupport::native();
+        capabilities.capabilities_v2.public_streams = if public_streams_enabled {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "Paymium public socket.io v1.3 runtime is bounded behind PAYMIUM_PUBLIC_STREAMS_ENABLED",
+            )
+        };
         capabilities.capabilities_v2.private_streams = CapabilitySupport::rest_fallback(
             "Paymium user socket depends on a private channel id from /user",
         );
         capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
-            public: CapabilitySupport::unsupported(
-                "socket.io runtime not enabled for this public REST first adapter",
-            ),
+            public: if public_streams_enabled {
+                CapabilitySupport::native()
+            } else {
+                CapabilitySupport::unsupported(
+                    "socket.io runtime disabled by PAYMIUM_PUBLIC_STREAMS_ENABLED default",
+                )
+            },
             private: CapabilitySupport::rest_fallback(
                 "private socket updates should reconcile through REST after private REST promotion",
             ),
-            supports_subscribe: false,
+            supports_subscribe: public_streams_enabled,
             supports_unsubscribe: false,
-            supports_public_subscribe: false,
+            supports_public_subscribe: public_streams_enabled,
             supports_public_unsubscribe: false,
             supports_private_subscribe: false,
             supports_private_unsubscribe: false,
@@ -178,11 +185,11 @@ impl ExchangeClient for PaymiumGatewayAdapter {
                 orders: true,
             },
             auth: StreamAuthCapability {
-                required: true,
-                credential_scopes: vec![CredentialScope::ReadOnly, CredentialScope::Trade],
+                required: false,
+                credential_scopes: Vec::new(),
                 renewal_ms: None,
                 uses_listen_key: false,
-                requires_relogin_on_reconnect: true,
+                requires_relogin_on_reconnect: false,
             },
             public_private_separate_connections: true,
             ..StreamRuntimeCapability::default()
@@ -209,10 +216,26 @@ impl ExchangeClient for PaymiumGatewayAdapter {
         };
         capabilities.capabilities_v2.cancel_all_orders =
             CapabilitySupport::unsupported("Paymium cancel-all is not documented");
-        capabilities.capabilities_v2.order_history =
-            HistoryCapability::unsupported("private order history is deferred");
-        capabilities.capabilities_v2.fills_history =
-            HistoryCapability::unsupported("private fill history is deferred");
+        capabilities.capabilities_v2.order_history = HistoryCapability {
+            support: CapabilitySupport::native(),
+            supports_since: false,
+            supports_until: false,
+            supports_limit: false,
+            supports_cursor: false,
+            supports_from_id: false,
+            max_limit: None,
+            max_window_ms: None,
+        };
+        capabilities.capabilities_v2.fills_history = HistoryCapability {
+            support: CapabilitySupport::native(),
+            supports_since: false,
+            supports_until: false,
+            supports_limit: true,
+            supports_cursor: false,
+            supports_from_id: false,
+            max_limit: Some(100),
+            max_window_ms: None,
+        };
         capabilities.capabilities_v2.credential_scopes =
             vec![CredentialScope::ReadOnly, CredentialScope::Trade];
         capabilities
@@ -307,21 +330,21 @@ impl ExchangeClient for PaymiumGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.query_order_unsupported(request)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.get_open_orders_unsupported(request)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.get_recent_fills_unsupported(request)
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

@@ -1,0 +1,36 @@
+{
+  "exchange": "bsx",
+  "operation": "get_fees",
+  "boundary_type": "account_fee_source_boundary",
+  "runtime_status": "source_boundary_only",
+  "trade_enabled": false,
+  "product": "perpetual",
+  "market_types": ["perpetual"],
+  "source": {
+    "kind": "account_app_fee_rate",
+    "stable_rest_endpoint_pinned": false,
+    "public_config_endpoint_pinned": false,
+    "official_reference_urls": [
+      "https://api-docs.bsx.exchange/reference/rest-auth",
+      "https://api-docs.bsx.exchange/docs/introduction",
+      "https://app.bsx.exchange/"
+    ],
+    "auth_headers_required": [
+      "BSX-KEY",
+      "BSX-SECRET"
+    ],
+    "observed_account_ui_fields": [
+      "Fee Rate",
+      "Account Overview"
+    ]
+  },
+  "expected_error_until_promoted": "bsx.fees_source_boundary_only",
+  "remaining_work": [
+    "stable_fee_endpoint_or_config_source",
+    "account_scope_permission_audit",
+    "maker_taker_parser",
+    "account_tier_mapping",
+    "shared_fee_rate_snapshot_runtime"
+  ],
+  "notes": "This fixture intentionally records only the source boundary. Do not fabricate a REST fee endpoint until BSX publishes or pins a stable account-effective fee API."
+}

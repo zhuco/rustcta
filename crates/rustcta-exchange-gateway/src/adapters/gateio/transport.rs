@@ -185,22 +185,20 @@ async fn parse_response(
     response: reqwest::Response,
 ) -> ExchangeApiResult<Value> {
     let status = response.status();
-    let value = response
-        .json::<Value>()
+    let body = response
+        .text()
         .await
         .map_err(|error| ExchangeApiError::Transport {
             message: error.to_string(),
         })?;
+    let value = parse_gateio_response_body(status, &body)?;
     if !status.is_success() {
-        let label = value.get("label").and_then(Value::as_str);
-        let message = value
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("Gate.io request failed");
+        let label = gateio_error_label(&value);
+        let message = gateio_error_message(status, label, &value, &body);
         let mut error = ExchangeError::new(
             exchange_id,
-            classify_gateio_error(label, message),
-            message,
+            classify_gateio_error(label, &message),
+            message.clone(),
             Utc::now(),
         );
         error.code = label.map(ToOwned::to_owned);
@@ -210,11 +208,78 @@ async fn parse_response(
     Ok(value)
 }
 
+fn parse_gateio_response_body(status: reqwest::StatusCode, body: &str) -> ExchangeApiResult<Value> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(trimmed).map_err(|error| ExchangeApiError::Transport {
+        message: format!(
+            "failed to decode Gate.io response HTTP {}: {error}; body={}",
+            status.as_u16(),
+            truncate_for_error(trimmed)
+        ),
+    })
+}
+
+fn gateio_error_label(value: &Value) -> Option<&str> {
+    [
+        value.get("label"),
+        value.get("code"),
+        value.get("error"),
+        value.pointer("/error/label"),
+        value.pointer("/error/code"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(Value::as_str)
+    .find(|value| !value.trim().is_empty())
+}
+
+fn gateio_error_message(
+    status: reqwest::StatusCode,
+    label: Option<&str>,
+    value: &Value,
+    body: &str,
+) -> String {
+    let exchange_message = value
+        .get("message")
+        .or_else(|| value.get("msg"))
+        .or_else(|| value.get("detail"))
+        .or_else(|| value.pointer("/error/message"))
+        .or_else(|| value.pointer("/error/msg"))
+        .and_then(Value::as_str)
+        .filter(|message| !message.trim().is_empty());
+    let mut parts = vec![format!("Gate.io request failed: HTTP {}", status.as_u16())];
+    if let Some(label) = label {
+        parts.push(format!("label={label}"));
+    }
+    if let Some(message) = exchange_message {
+        parts.push(format!("message={message}"));
+    }
+    let body = truncate_for_error(body.trim());
+    if !body.is_empty() {
+        parts.push(format!("body={body}"));
+    }
+    parts.join("; ")
+}
+
+fn truncate_for_error(value: &str) -> String {
+    const MAX_CHARS: usize = 512;
+    let mut truncated = value.chars().take(MAX_CHARS).collect::<String>();
+    if value.chars().count() > MAX_CHARS {
+        truncated.push_str("...");
+    }
+    truncated
+}
+
 fn classify_gateio_error(label: Option<&str>, message: &str) -> ExchangeErrorClass {
     let label = label.unwrap_or_default().to_ascii_uppercase();
     let msg = message.to_ascii_lowercase();
     if label.contains("BALANCE") || msg.contains("insufficient") {
         ExchangeErrorClass::InsufficientBalance
+    } else if label.contains("POSITION_NOT_FOUND") || msg.contains("position not found") {
+        ExchangeErrorClass::InsufficientPosition
     } else if label.contains("INVALID_CURRENCY")
         || msg.contains("currency_pair")
         || msg.contains("symbol")
@@ -231,6 +296,44 @@ fn classify_gateio_error(label: Option<&str>, message: &str) -> ExchangeErrorCla
         ExchangeErrorClass::OrderNotFound
     } else {
         ExchangeErrorClass::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn gateio_error_message_should_include_status_label_and_body() {
+        let body = r#"{"label":"USER_NOT_FOUND"}"#;
+        let value = json!({"label": "USER_NOT_FOUND"});
+        let label = gateio_error_label(&value);
+
+        let message = gateio_error_message(reqwest::StatusCode::BAD_REQUEST, label, &value, body);
+
+        assert!(message.contains("HTTP 400"));
+        assert!(message.contains("label=USER_NOT_FOUND"));
+        assert!(message.contains(body));
+    }
+
+    #[test]
+    fn gateio_error_label_should_read_nested_error_code() {
+        let value = json!({"error": {"code": "INVALID_SIGNATURE"}});
+
+        assert_eq!(gateio_error_label(&value), Some("INVALID_SIGNATURE"));
+        assert_eq!(
+            classify_gateio_error(gateio_error_label(&value), ""),
+            ExchangeErrorClass::Authentication
+        );
+    }
+
+    #[test]
+    fn gateio_error_classifier_should_treat_missing_position_as_empty_position() {
+        assert_eq!(
+            classify_gateio_error(Some("POSITION_NOT_FOUND"), ""),
+            ExchangeErrorClass::InsufficientPosition
+        );
     }
 }
 

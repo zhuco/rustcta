@@ -1,0 +1,33 @@
+{
+  "exchange": "binanceus",
+  "operation": "amend_order",
+  "boundary": "cancel_replace_not_keep_priority_amend",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/order/cancelReplace",
+  "auth": "hmac",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "side": { "match": "exact", "value": "BUY" },
+    "type": { "match": "exact", "value": "LIMIT" },
+    "timeInForce": { "match": "exact", "value": "GTC" },
+    "quantity": { "match": "exact", "value": "0.01000000" },
+    "price": { "match": "exact", "value": "25001.00000000" },
+    "cancelOrderId": { "match": "exact", "value": "12345" },
+    "cancelReplaceMode": { "match": "exact", "value": "STOP_ON_FAILURE" },
+    "newClientOrderId": { "match": "exact", "value": "cli-replace-1" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "timestamp": { "match": "exact", "value": "1710000000000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "trade_enabled": false,
+  "shared_semantics": "unsupported",
+  "reason": "Binance.US cancelReplace cancels and submits a new order; it is not a lossless keep-priority amend_order mapping.",
+  "signing_vector": "tests/fixtures/exchanges/binanceus/signing_vectors/cancel_replace_not_amend.json"
+}

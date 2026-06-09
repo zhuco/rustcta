@@ -55,6 +55,28 @@ impl BitteamRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_private_get(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        authorization: &str,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .get(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                build_path(endpoint, params)
+            ))
+            .header(reqwest::header::AUTHORIZATION, authorization)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 async fn parse_response(

@@ -34,13 +34,39 @@ Machine-readable mapping:
 
 ## Public WebSocket Order Book
 
-Official WebSocket v2 is the public real-time feed at `wss://ws.bitstamp.net`. The project already records `order_book_{market}` and `diff_order_book_{market}` payload helpers, but the reviewed official material did not expose a fixed millisecond interval, fixed depth parameter, or stable checksum contract. Treat REST `order_book` snapshots and Bitstamp order-data gap recovery endpoints as the resync path before using this feed for arbitrage.
+Official WebSocket v2 is the public real-time feed at `wss://ws.bitstamp.net`.
+The structured Bitstamp public book policy covers `order_book_{market}` snapshots
+and `diff_order_book_{market}` diff updates. The official material does not
+publish a fixed millisecond push interval, a WebSocket depth selector, public
+sequence continuity, or a checksum field for these channels. Treat the feed as
+best-effort delta, not as a strict low-latency book.
+
+| Field | Bitstamp detail |
+| --- | --- |
+| Subscribe payload | `{"event":"bts:subscribe","data":{"channel":"order_book_btcusd"}}` or `diff_order_book_btcusd`. |
+| Snapshot channel | `order_book_{market_symbol}`. |
+| Diff channel | `diff_order_book_{market_symbol}`. |
+| Interval/depth | Real-time push; no fixed ms or WebSocket depth selector documented. |
+| Sequence/checksum | No public sequence or checksum contract documented for these channels. |
+| REST snapshot | `GET /api/v2/order_book/{market_symbol}/`, default grouped price levels with `group=1`. |
+| Gap recovery | `POST /api/v2/order_data/` with `market`, `since_id`, and `until_id` for public order event recovery. |
+| Resync policy | Rebuild from REST `order_book`, use `order_data` when an event id window is available, and reconnect/rebuild on stale stream, suspected message loss, or unavailable recovery window. |
 
 ## Unsupported Boundaries
 
 - Derivatives, margin positions and contract metadata are 项目未实现 in this spot adapter.
 - Sell quote-sized market orders, native order lists and batch place are `Unsupported`.
 - Private WebSocket positions are `Unsupported` because Bitstamp spot has no shared position model.
+
+2026-06-09 产品线边界收窄：`contract_product` 与
+`derivatives_product` 绑定
+`tests/fixtures/exchanges/bitstamp/request_specs/product_line_source_boundary.json`。
+Bitstamp Derivatives/Contracts 继续写 `项目未实现`，不是 `交易所不支持合约`；
+当前 Spot adapter 的 balances/orders/WS 不复用到 derivatives profile，剩余工作是
+derivatives metadata、positions/margin/funding、signed order lifecycle 和 dry-run guard。
+状态建议：继续保留 `contract_product` / `derivatives_product = 项目未实现`；官方
+Derivatives/Contracts API 线索不能归类为交易所不支持，也不能由 Spot 私有读写或
+Spot WS 直接外推为 derivatives runtime。
 
 ## Validation
 

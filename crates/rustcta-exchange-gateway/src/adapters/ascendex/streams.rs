@@ -11,6 +11,7 @@ use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId, MarketType, S
 use serde_json::{json, Value};
 
 use super::parser::{normalize_symbol, parse_orderbook_snapshot};
+use super::parser::{value_as_i64, value_as_string};
 use super::private_parser::parse_order_state;
 use super::signing::{prehash, sign_prehash};
 use super::AscendexGatewayAdapter;
@@ -21,6 +22,75 @@ const ASCENDEX_WS_PING_INTERVAL_MS: i64 = 15_000;
 const ASCENDEX_WS_PONG_TIMEOUT_MS: i64 = 30_000;
 const ASCENDEX_WS_STALE_MESSAGE_MS: i64 = 30_000;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AscendexPublicOrderBookWsPolicy {
+    pub depth_channel_template: &'static str,
+    pub bbo_channel_template: &'static str,
+    pub depth_interval_ms: u64,
+    pub bbo_interval: &'static str,
+    pub snapshot_action: &'static str,
+    pub snapshot_top100_action: &'static str,
+    pub snapshot_max_levels: u32,
+    pub snapshot_top100_levels: u32,
+    pub sequence_field: &'static str,
+    pub sequence_continuity: &'static str,
+    pub checksum: Option<&'static str>,
+    pub update_semantics: &'static str,
+    pub resync: &'static str,
+}
+
+pub fn ascendex_public_order_book_ws_policy() -> AscendexPublicOrderBookWsPolicy {
+    AscendexPublicOrderBookWsPolicy {
+        depth_channel_template: "depth:{symbol}",
+        bbo_channel_template: "bbo:{symbol}",
+        depth_interval_ms: 300,
+        bbo_interval: "on_change",
+        snapshot_action: "depth-snapshot",
+        snapshot_top100_action: "depth-snapshot-top100",
+        snapshot_max_levels: 500,
+        snapshot_top100_levels: 100,
+        sequence_field: "seqnum",
+        sequence_continuity: "next depth seqnum must equal previous seqnum + 1 per symbol",
+        checksum: None,
+        update_semantics: "absolute quantity at changed price levels; quantity 0 removes the level",
+        resync: "subscribe depth:{symbol}, request depth-snapshot or depth-snapshot-top100, apply only contiguous seqnum updates, and resubscribe/request a fresh snapshot on gap or non-increasing seqnum",
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AscendexSeqnumContinuity {
+    First,
+    Continuous,
+    Gap { expected: u64, actual: u64 },
+    NotIncreasing { previous: u64, actual: u64 },
+}
+
+impl AscendexSeqnumContinuity {
+    pub fn requires_resync(self) -> bool {
+        matches!(
+            self,
+            AscendexSeqnumContinuity::Gap { .. } | AscendexSeqnumContinuity::NotIncreasing { .. }
+        )
+    }
+}
+
+pub fn ascendex_check_seqnum_continuity(
+    previous: Option<u64>,
+    actual: u64,
+) -> AscendexSeqnumContinuity {
+    let Some(previous) = previous else {
+        return AscendexSeqnumContinuity::First;
+    };
+    match actual.cmp(&previous.saturating_add(1)) {
+        std::cmp::Ordering::Equal => AscendexSeqnumContinuity::Continuous,
+        std::cmp::Ordering::Greater => AscendexSeqnumContinuity::Gap {
+            expected: previous.saturating_add(1),
+            actual,
+        },
+        std::cmp::Ordering::Less => AscendexSeqnumContinuity::NotIncreasing { previous, actual },
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AscendexPublicStreamMessage {
     SubscriptionAck {
@@ -30,6 +100,7 @@ pub enum AscendexPublicStreamMessage {
     Pong,
     Heartbeat,
     OrderBook(OrderBookResponse),
+    Bbo(AscendexBbo),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +122,16 @@ pub enum AscendexWsSessionEvent {
     Public(AscendexPublicStreamMessage),
     Private(AscendexPrivateStreamMessage),
     Stream(Vec<ExchangeStreamEvent>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AscendexBbo {
+    pub symbol: SymbolScope,
+    pub bid_price: String,
+    pub bid_quantity: String,
+    pub ask_price: String,
+    pub ask_quantity: String,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +333,7 @@ impl AscendexPublicWsSession {
                     ExchangeStreamEvent::OrderBookSnapshot(book),
                 ]));
             }
+            AscendexPublicStreamMessage::Bbo(_) => {}
             AscendexPublicStreamMessage::SubscriptionAck { .. }
             | AscendexPublicStreamMessage::Pong => {}
         }
@@ -386,6 +468,20 @@ pub fn public_subscribe_payload(
     }))
 }
 
+pub fn ascendex_depth_snapshot_request(
+    symbol: &SymbolScope,
+    id: Option<&str>,
+) -> ExchangeApiResult<Value> {
+    ascendex_depth_request("depth-snapshot", symbol, id)
+}
+
+pub fn ascendex_depth_snapshot_top100_request(
+    symbol: &SymbolScope,
+    id: Option<&str>,
+) -> ExchangeApiResult<Value> {
+    ascendex_depth_request("depth-snapshot-top100", symbol, id)
+}
+
 pub fn private_subscribe_payload(
     subscription: &PrivateStreamSubscription,
     market_type: MarketType,
@@ -454,7 +550,7 @@ pub fn parse_public_stream_message(
     }
     if matches!(
         value.get("m").and_then(Value::as_str),
-        Some("depth" | "depth-snapshot")
+        Some("depth" | "depth-snapshot" | "depth-snapshot-top100")
     ) {
         let order_book = parse_orderbook_snapshot(exchange_id, market_type, symbol, value)?;
         return Ok(AscendexPublicStreamMessage::OrderBook(OrderBookResponse {
@@ -462,6 +558,13 @@ pub fn parse_public_stream_message(
             metadata: response_metadata(exchange_id.clone(), None),
             order_book,
         }));
+    }
+    if value.get("m").and_then(Value::as_str) == Some("bbo") {
+        return Ok(AscendexPublicStreamMessage::Bbo(parse_bbo(
+            exchange_id,
+            symbol,
+            value,
+        )?));
     }
     Err(stream_parse_error(
         exchange_id.clone(),
@@ -553,6 +656,76 @@ fn public_channel(subscription: &PublicStreamSubscription) -> ExchangeApiResult<
         }
         PublicStreamKind::Candles { interval } => format!("bar:{interval}:{symbol}"),
     })
+}
+
+fn ascendex_depth_request(
+    action: &str,
+    symbol: &SymbolScope,
+    id: Option<&str>,
+) -> ExchangeApiResult<Value> {
+    let symbol = normalize_symbol(&symbol.exchange_symbol.symbol, symbol.market_type)?;
+    Ok(json!({
+        "op": "req",
+        "id": id.unwrap_or(action),
+        "action": action,
+        "args": { "symbol": symbol },
+    }))
+}
+
+fn parse_bbo(
+    exchange_id: &ExchangeId,
+    symbol: SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<AscendexBbo> {
+    let data = value
+        .get("data")
+        .unwrap_or(value)
+        .get("data")
+        .unwrap_or_else(|| value.get("data").unwrap_or(value));
+    let (bid_price, bid_quantity) = parse_price_size(exchange_id, data.get("bid"), "bid")?;
+    let (ask_price, ask_quantity) = parse_price_size(exchange_id, data.get("ask"), "ask")?;
+    let updated_at = data
+        .get("ts")
+        .and_then(value_as_i64)
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
+        .unwrap_or_else(Utc::now);
+    Ok(AscendexBbo {
+        symbol,
+        bid_price,
+        bid_quantity,
+        ask_price,
+        ask_quantity,
+        updated_at,
+    })
+}
+
+fn parse_price_size(
+    exchange_id: &ExchangeId,
+    level: Option<&Value>,
+    side: &str,
+) -> ExchangeApiResult<(String, String)> {
+    let level = level.and_then(Value::as_array).ok_or_else(|| {
+        stream_parse_error(
+            exchange_id.clone(),
+            &format!("AscendEX bbo missing {side} price/size"),
+            &Value::Null,
+        )
+    })?;
+    let price = value_as_string(level.first()).ok_or_else(|| {
+        stream_parse_error(
+            exchange_id.clone(),
+            &format!("AscendEX bbo invalid {side} price"),
+            &Value::Array(level.clone()),
+        )
+    })?;
+    let quantity = value_as_string(level.get(1)).ok_or_else(|| {
+        stream_parse_error(
+            exchange_id.clone(),
+            &format!("AscendEX bbo invalid {side} quantity"),
+            &Value::Array(level.clone()),
+        )
+    })?;
+    Ok((price, quantity))
 }
 
 fn private_channel(

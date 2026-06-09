@@ -1,0 +1,49 @@
+{
+  "exchange": "bybiteu",
+  "profile_of": "bybit",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "base_url": "https://api.bybit.eu",
+  "path": "/v5/account/wallet-balance",
+  "auth": "signed",
+  "query": {
+    "accountType": { "match": "exact", "value": "UNIFIED" },
+    "coin": { "match": "absent" }
+  },
+  "headers": {
+    "X-BAPI-API-KEY": { "match": "non_empty" },
+    "X-BAPI-SIGN": { "match": "non_empty" },
+    "X-BAPI-SIGN-TYPE": { "match": "exact", "value": "2" },
+    "X-BAPI-TIMESTAMP": { "match": "non_empty" },
+    "X-BAPI-RECV-WINDOW": { "match": "exact", "value": "5000" }
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["test-secret", "real-secret"],
+  "signing_vector": "tests/fixtures/exchanges/bybiteu/signing_vectors/rest_hmac_shape.json",
+  "response_sample": {
+    "retCode": 0,
+    "retMsg": "OK",
+    "result": {
+      "list": [
+        {
+          "accountType": "UNIFIED",
+          "totalEquity": "1000.0000",
+          "coin": [
+            {
+              "coin": "USDT",
+              "walletBalance": "1000.0000",
+              "availableToWithdraw": "900.0000",
+              "equity": "1000.0000"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "runtime_boundary": "Bybit EU wallet balance reuses the Bybit V5 signed runtime when BYBITEU private REST credentials and explicit enable flag are configured.",
+  "runtime_enabled": true,
+  "trade_enabled": false,
+  "secret_free": true
+}

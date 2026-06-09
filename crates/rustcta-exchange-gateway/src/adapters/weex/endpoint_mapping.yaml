@@ -79,6 +79,30 @@ websocket:
   public:
     support: native
     subscribe: '{"method":"SUBSCRIBE","params":["BTCUSDT@depth15"],"id":1}'
+    order_book:
+      channel_template: "{symbol}@depth{level}"
+      channels:
+        - "{symbol}@depth15"
+        - "{symbol}@depth200"
+      supported_depth_levels: [15, 200]
+      default_depth_level: 15
+      fixed_update_interval_ms: null
+      interval_note: official docs do not publish a fixed millisecond interval
+      snapshot_delivery: automatic_after_subscribe
+      update_markers:
+        snapshot: SNAPSHOT
+        delta: CHANGED
+        marker_field: d
+      sequence:
+        first_update_id_field: U
+        last_update_id_field: u
+        contiguous_required: true
+      rebuild:
+        strategy: resubscribe for a fresh automatic snapshot after missed U/u continuity or reconnect
+        rest_snapshot_endpoints:
+          spot: /api/v3/market/depth
+          perpetual: /capi/v3/market/depth
+      checksum: unsupported
     heartbeat: server ping or pong message, adapter replies with PONG helper
     resync: REST order book snapshot on sequence gap or reconnect
   private:

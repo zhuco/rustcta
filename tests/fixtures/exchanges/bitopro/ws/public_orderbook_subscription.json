@@ -1,0 +1,15 @@
+{
+  "transport": "websocket",
+  "protocol": "url_path_subscription",
+  "base_url": "wss://stream.bitopro.com:443/ws",
+  "channel": "/v1/pub/order-books/BTC_TWD:5",
+  "url": "wss://stream.bitopro.com:443/ws/v1/pub/order-books/BTC_TWD:5",
+  "pair": "BTC_TWD",
+  "limit": 5,
+  "supported_limits": [1, 5, 10, 20, 30, 50],
+  "interval_ms": 1000,
+  "update_semantics": "full_order_book_snapshot_every_1s_when_updated",
+  "sequence_field": null,
+  "checksum": null,
+  "resync": "fetch REST /order-book/btc_twd snapshot and reconnect/resubscribe"
+}

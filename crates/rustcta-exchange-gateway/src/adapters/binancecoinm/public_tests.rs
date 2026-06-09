@@ -1,5 +1,6 @@
 use rustcta_exchange_api::{
-    ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    BatchAtomicity, BatchExecutionMode, ExchangeClient, OrderBookRequest, SymbolRulesRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
 use serde_json::json;
@@ -80,6 +81,49 @@ fn binancecoinm_parser_should_parse_orderbook_snapshot() {
     assert_eq!(book.exchange_symbol.unwrap().symbol, "BTCUSD_PERP");
     assert_eq!(book.sequence, Some(42));
     assert_eq!(book.bids[0].quantity, 3.0);
+}
+
+#[test]
+fn binancecoinm_capabilities_should_expose_native_batch_runtime_when_private_rest_enabled() {
+    let adapter = BinanceCoinMGatewayAdapter::new(BinanceCoinMGatewayConfig {
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BinanceCoinMGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+
+    assert!(capabilities.supports_batch_place_order);
+    assert!(capabilities.supports_batch_cancel_order);
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.mode,
+        BatchExecutionMode::Native
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.atomicity,
+        BatchAtomicity::Partial
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_cancel_orders.max_items,
+        Some(10)
+    );
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
+        .any(|endpoint| {
+            endpoint.operation == "batch_place_orders"
+                && endpoint.path.as_deref() == Some("/dapi/v1/batchOrders")
+        }));
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
+        .any(|endpoint| {
+            endpoint.operation == "batch_cancel_orders"
+                && endpoint.path.as_deref() == Some("/dapi/v1/batchOrders")
+        }));
 }
 
 #[tokio::test]

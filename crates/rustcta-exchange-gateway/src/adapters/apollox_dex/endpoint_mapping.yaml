@@ -40,16 +40,17 @@ reconciliation:
   retry_policy: retry_rate_limited_and_transient
 batch:
   place_orders:
-    support: spec_only
+    support: native
     native_batch: true
     atomicity: partial
     max_items: 5
     partial_failure: true
+    runtime_gap: live dry-run/reconciliation smoke not asserted; runtime is credential-gated and mock-tested only
   cancel_orders:
     support: unsupported
     reason: no gateway-safe native batch cancel mapping is enabled
   cancel_all_orders:
-    support: spec_only
+    support: native
     native_batch: true
     atomicity: partial
     partial_failure: true
@@ -57,6 +58,20 @@ websocket:
   public:
     support: spec_only
     url: wss://fstream.apollox.finance
+    order_book:
+      channels:
+        - "<symbol>@bookTicker"
+        - "<symbol>@depth@100ms"
+        - "<symbol>@depth@250ms"
+        - "<symbol>@depth@500ms"
+        - "<symbol>@depth5@100ms"
+        - "<symbol>@depth10@100ms"
+        - "<symbol>@depth20@100ms"
+      update_intervals_ms: [100, 250, 500]
+      depths: [1, 5, 10, 20]
+      depth_update_ids: [U, u, pu]
+      checksum: none_documented
+      resync: { mode: rest_snapshot_delta_buffer, endpoint_operation: get_order_book, snapshot_field: lastUpdateId, gap_field: pu }
     heartbeat:
       required: true
       direction: server_ping
@@ -71,8 +86,20 @@ websocket:
     renewal_ms: 1800000
     fallback: rest_reconciliation
 unsupported:
-  - product: spot
-    reason: ApolloX spot API family is outside apollox_dex scope
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official ApolloX spot API family exists separately from the fapi surface, but this adapter scope is ApolloX/APX V1 futures-style perpetual APIs only; remaining Spot runtime work is spot host/exchangeInfo/depth/ticker public specs, signed spot account private specs, spot order lifecycle/open-order/fill private specs, listen-key or private stream reconciliation, product-scope signing, and parser coverage."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/apollox_dex/request_specs/product_line_source_boundary.json
+    current_scope: "ApolloX/APX V1 futures-style perpetual profile under fapi host."
+    runtime_gap: "Spot API host, spot exchangeInfo/depth/ticker parsers, signed spot order/account endpoints, and spot private stream reconciliation are not wired."
+    required_endpoints: [spot_exchange_info, spot_depth, spot_ticker, spot_account, spot_order, spot_open_orders, spot_fills]
+  - operation: batch_cancel_orders
+    reason: "ApolloX V1 reviewed API scope does not expose a native multi-cancel endpoint suitable for shared batch_cancel_orders; single cancel and cancel-all remain request-spec only."
+  - operation: amend_order
+    reason: "ApolloX V1 reviewed API scope does not expose in-place order amend."
+  - operation: place_order_list
+    reason: "ApolloX V1 reviewed API scope does not expose OCO/OTO/order-list placement."
   - product: v2_onchain_perp
     reason: V2 requires wallet signing, chain profiles, gas and contract execution modeling
   - product: testnet
@@ -135,6 +162,9 @@ endpoints:
     request_spec_required: true
     support: spec_only
     testnet: false
+    reason: "ApolloX DEX futures balance readback is fixture-backed, but shared get_balances runtime remains disabled pending signed private REST guard, balance parser, account scope policy, and REST/user-stream reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apollox_dex/request_specs/get_balances.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/apollox_dex/request_specs/get_balances.json }
   - operation: get_positions
     transport: rest
     product: perpetual
@@ -147,6 +177,9 @@ endpoints:
     request_spec_required: true
     support: spec_only
     testnet: false
+    reason: "ApolloX DEX futures position readback is fixture-backed, but shared get_positions runtime remains disabled pending signed private REST guard, position parser, account scope policy, and REST/user-stream reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apollox_dex/request_specs/get_positions.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/apollox_dex/request_specs/get_positions.json }
   - operation: get_fees
     transport: rest
     product: perpetual
@@ -159,6 +192,9 @@ endpoints:
     request_spec_required: true
     support: spec_only
     testnet: false
+    reason: "ApolloX DEX futures commission-rate endpoint is fixture-backed as signed private REST; shared get_fees runtime remains disabled pending read-only credential guard, symbol/category parser, account scope policy, and REST/user-stream reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apollox_dex/request_specs/get_fees.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/apollox_dex/parser/get_fees_commission_rate.json }
   - operation: place_order
     transport: rest
     product: perpetual
@@ -182,10 +218,63 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 5
     request_spec_required: true
-    support: spec_only
+    support: native
     native_batch: true
     atomicity: partial
+    max_items: 5
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/apollox_dex/request_specs/batch_place_orders.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/apollox_dex/parser/batch_place_orders_ack.json
+    notes: "Credential-gated V1 signed REST runtime is enabled with local mock tests for request signing and partial failure parser; no live write success is asserted."
     testnet: false
+  - operation: batch_cancel_orders
+    transport: rest
+    product: perpetual
+    method: UNSUPPORTED
+    path: /unsupported/apollox_dex/batch_cancel_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    reason: "No ApolloX V1 gateway-safe native batch cancel endpoint is enabled; single cancel and cancel-all remain request-spec only."
+  - operation: amend_order
+    transport: rest
+    product: perpetual
+    method: UNSUPPORTED
+    path: /unsupported/apollox_dex/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    reason: "No ApolloX V1 in-place amend endpoint is exposed in the reviewed API scope."
+  - operation: place_order_list
+    transport: rest
+    product: perpetual
+    method: UNSUPPORTED
+    path: /unsupported/apollox_dex/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    reason: "No ApolloX V1 OCO/OTO/order-list endpoint is exposed in the reviewed API scope."
   - operation: cancel_order
     transport: rest
     product: perpetual
@@ -220,8 +309,16 @@ endpoints:
     rate_limit_bucket: signed_uid
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     testnet: false
+    reason: "Guarded ApolloX DEX signed private REST readback is enabled only when private REST flag and API key/secret are configured; unauthenticated runtime fails closed."
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/apollox_dex/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      parser: parse_order_state
+      fixture: tests/fixtures/exchanges/apollox_dex/order_success.json
   - operation: get_open_orders
     transport: rest
     product: perpetual
@@ -232,8 +329,15 @@ endpoints:
     rate_limit_bucket: signed_uid
     weight: 1
     request_spec_required: true
-    request_spec_fixture: tests/fixtures/exchanges/apollox_dex/request_specs/open_orders.json
-    support: spec_only
+    support: native
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/apollox_dex/request_specs/open_orders.json
+    response_parser:
+      status: implemented
+      parser: parse_open_orders
+      fixture: tests/fixtures/exchanges/apollox_dex/open_orders_success.json
+    reason: "Guarded ApolloX DEX signed private REST readback is enabled only when private REST flag and API key/secret are configured; unauthenticated runtime fails closed."
     testnet: false
   - operation: get_recent_fills
     transport: rest
@@ -245,5 +349,13 @@ endpoints:
     rate_limit_bucket: signed_uid
     weight: 5
     request_spec_required: true
-    support: spec_only
+    support: native
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/apollox_dex/request_specs/get_recent_fills.json
+    response_parser:
+      status: implemented
+      parser: parse_recent_fills
+      fixture: tests/fixtures/exchanges/apollox_dex/recent_fills_success.json
+    reason: "Guarded ApolloX DEX signed private REST readback is enabled only when private REST flag and API key/secret are configured; unauthenticated runtime fails closed."
     testnet: false

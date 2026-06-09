@@ -1,0 +1,27 @@
+{
+  "exchange": "coinw",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/private",
+  "auth": "hmac",
+  "query": {
+    "command": {
+      "match": "exact",
+      "value": "returnCompleteBalances"
+    },
+    "api_key": {
+      "match": "non_empty"
+    },
+    "sign": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "forbid_query_values_containing": [
+    "secret"
+  ],
+  "body": null
+}

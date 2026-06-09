@@ -26,7 +26,9 @@ impl Default for GrvtGatewayConfig {
             api_key: non_empty_env("GRVT_API_KEY"),
             session_cookie: non_empty_env("GRVT_COOKIE"),
             account_id: non_empty_env("GRVT_ACCOUNT_ID"),
-            enabled_private_rest: env_bool("GRVT_PRIVATE_REST_ENABLED").unwrap_or(false),
+            enabled_private_rest: env_bool("GRVT_PRIVATE_REST_ENABLED")
+                .or_else(|| env_bool("RUSTCTA_GRVT_PRIVATE_REST_ENABLED"))
+                .unwrap_or(false),
             enabled_public_streams: env_bool("GRVT_PUBLIC_STREAMS_ENABLED").unwrap_or(false),
             enabled_private_streams: env_bool("GRVT_PRIVATE_STREAMS_ENABLED").unwrap_or(false),
             request_timeout_ms: 10_000,

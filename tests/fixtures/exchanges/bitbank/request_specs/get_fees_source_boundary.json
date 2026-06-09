@@ -1,0 +1,25 @@
+{
+  "exchange": "bitbank",
+  "operation": "get_fees",
+  "support": "spec_only",
+  "source_type": "spot_pair_fee_metadata",
+  "method": "GET",
+  "path": "/spot/pairs",
+  "auth": "hmac",
+  "scope": {
+    "product": "spot",
+    "pair_param": "pair",
+    "example_pair": "btc_jpy"
+  },
+  "fee_fields": [
+    "maker_fee_rate_base",
+    "taker_fee_rate_base",
+    "maker_fee_rate_quote",
+    "taker_fee_rate_quote"
+  ],
+  "runtime_boundary": {
+    "status": "offline",
+    "reason": "Pair fee metadata exists, but this project has not implemented a shared FeeRateSnapshot parser or account-effective tier guard for bitbank get_fees.",
+    "adapter_error": "bitbank.get_fees.rest_parser_pending"
+  }
+}

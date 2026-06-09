@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::signing::LatokenSignedHeaders;
+
 #[derive(Clone)]
 pub struct LatokenRest {
     exchange_id: ExchangeId,
@@ -45,6 +47,51 @@ impl LatokenRest {
             .http
             .get(self.url(endpoint))
             .query(query)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_json(
+        &self,
+        endpoint: &str,
+        headers: LatokenSignedHeaders,
+        body: &Value,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(self.url(endpoint))
+            .header("X-LA-APIKEY", headers.api_key)
+            .header("X-LA-SIGNATURE", headers.signature)
+            .header("X-LA-DIGEST", headers.digest)
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        endpoint: &str,
+        query: &[(String, String)],
+        headers: LatokenSignedHeaders,
+    ) -> ExchangeApiResult<Value> {
+        let mut request = self
+            .http
+            .get(self.url(endpoint))
+            .header("X-LA-APIKEY", headers.api_key)
+            .header("X-LA-SIGNATURE", headers.signature)
+            .header("X-LA-DIGEST", headers.digest);
+        if !query.is_empty() {
+            request = request.query(query);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

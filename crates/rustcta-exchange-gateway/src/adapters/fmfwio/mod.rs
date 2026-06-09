@@ -1,17 +1,18 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
-    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeApiResult,
-    ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookCapability, OrderBookRequest,
-    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamCapabilities, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, BatchAtomicity,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchExecutionMode,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
+    CredentialScope, EndpointAuth, EndpointCapability, EndpointTransport, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    HistoryCapability, OpenOrdersRequest, OpenOrdersResponse, OrderBookCapability,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamCapabilities,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -88,6 +89,70 @@ impl FmfwioGatewayAdapter {
     }
 }
 
+fn fmfwio_private_spec_only_endpoints() -> Vec<EndpointCapability> {
+    let advanced_runtime = CapabilitySupport::native();
+    [
+        ("place_order", "POST", "/api/3/spot/order", "runtime"),
+        (
+            "cancel_order",
+            "DELETE",
+            "/api/3/spot/order/{client_order_id}",
+            "runtime",
+        ),
+        ("amend_order", "PATCH", "/api/3/spot/order/{client_order_id}", "runtime"),
+        (
+            "place_order_list",
+            "POST",
+            "/api/3/spot/order/list",
+            "runtime",
+        ),
+        (
+            "query_order",
+            "GET",
+            "/api/3/spot/order/{client_order_id}",
+            "runtime",
+        ),
+        ("get_open_orders", "GET", "/api/3/spot/order", "runtime"),
+        (
+            "get_recent_fills",
+            "GET",
+            "/api/3/spot/history/trade",
+            "runtime",
+        ),
+        (
+            "get_balances",
+            "GET",
+            "/api/3/spot/balance",
+            "runtime",
+        ),
+        (
+            "batch_cancel_orders",
+            "DELETE",
+            "/api/3/spot/order?symbol={symbol}",
+            "fmfwio DELETE /spot/order is cancel-all/filter-by-symbol; shared batch_cancel_orders would over-cancel a specific id list, so runtime remains offline",
+        ),
+    ]
+    .into_iter()
+    .map(|(operation, method, path, reason)| EndpointCapability {
+        operation: operation.to_string(),
+        support: if reason == "runtime" {
+            advanced_runtime.clone()
+        } else {
+            CapabilitySupport::unsupported(reason)
+        },
+        market_types: vec![MarketType::Spot],
+        transport: EndpointTransport::Rest,
+        method: Some(method.to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::Hmac,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("fmfwio_order_rest".to_string()),
+        weight: Some(1),
+        supports_testnet: false,
+    })
+    .collect()
+}
+
 #[async_trait]
 impl GatewayAdapter for FmfwioGatewayAdapter {
     fn gateway_exchange_status(&self) -> GatewayExchangeStatus {
@@ -99,7 +164,7 @@ impl GatewayAdapter for FmfwioGatewayAdapter {
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
             message: Some(
-                "fmfwio HitBTC-family spot public REST adapter; private/WS are spec-only"
+                "fmfwio HitBTC-family spot REST adapter; advanced private REST is guarded by explicit credentials"
                     .to_string(),
             ),
         }
@@ -116,7 +181,7 @@ impl ExchangeClient for FmfwioGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = self.config.private_request_specs_enabled();
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -124,20 +189,20 @@ impl ExchangeClient for FmfwioGatewayAdapter {
         ));
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
-        capabilities.supports_balances = false;
+        capabilities.supports_balances = self.config.private_request_specs_enabled();
         capabilities.supports_positions = false;
-        capabilities.supports_fees = false;
-        capabilities.supports_place_order = false;
-        capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_fees = self.config.private_request_specs_enabled();
+        capabilities.supports_place_order = self.config.private_request_specs_enabled();
+        capabilities.supports_cancel_order = self.config.private_request_specs_enabled();
+        capabilities.supports_query_order = self.config.private_request_specs_enabled();
+        capabilities.supports_open_orders = self.config.private_request_specs_enabled();
+        capabilities.supports_recent_fills = self.config.private_request_specs_enabled();
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
         capabilities.supports_quote_market_order = false;
-        capabilities.supports_amend_order = false;
-        capabilities.supports_order_list = false;
+        capabilities.supports_amend_order = self.config.private_request_specs_enabled();
+        capabilities.supports_order_list = self.config.private_request_specs_enabled();
         capabilities.supports_client_order_id = true;
         capabilities.supports_reduce_only = false;
         capabilities.supports_post_only = false;
@@ -148,28 +213,73 @@ impl ExchangeClient for FmfwioGatewayAdapter {
         capabilities.order_book = OrderBookCapability::snapshot_only(Some(100));
         capabilities.max_recent_fill_limit = None;
         capabilities.refresh_v2_from_legacy_flags();
-        capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-            "fmfwio private REST is delivered as offline request-spec/signing vectors only",
-        );
+        capabilities.capabilities_v2.private_rest = if self.config.private_request_specs_enabled() {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "fmfwio private REST runtime requires FMFWIO_PRIVATE_REST_ENABLED plus API key/secret; request specs remain offline-safe by default",
+            )
+        };
         capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
             "fmfwio public WebSocket payloads are spec fixtures; runtime supervisor is not wired",
         );
         capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
             "fmfwio private WebSocket auth payload is spec-only; use REST reconciliation after reconnect",
         );
-        capabilities.capabilities_v2.order_history = HistoryCapability::unsupported(
-            "fmfwio order history private REST is not enabled in runtime adapter",
-        );
-        capabilities.capabilities_v2.fills_history = HistoryCapability::unsupported(
-            "fmfwio fills history private REST is not enabled in runtime adapter",
-        );
+        capabilities.capabilities_v2.order_history = if self.config.private_request_specs_enabled()
+        {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: true,
+                supports_until: true,
+                supports_limit: true,
+                supports_cursor: false,
+                supports_from_id: true,
+                max_limit: Some(1000),
+                max_window_ms: None,
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "fmfwio order history private REST requires FMFWIO_PRIVATE_REST_ENABLED plus API key/secret",
+            )
+        };
+        capabilities.capabilities_v2.fills_history = if self.config.private_request_specs_enabled()
+        {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: true,
+                supports_until: true,
+                supports_limit: true,
+                supports_cursor: false,
+                supports_from_id: true,
+                max_limit: Some(1000),
+                max_window_ms: None,
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "fmfwio fills history private REST requires FMFWIO_PRIVATE_REST_ENABLED plus API key/secret",
+            )
+        };
+        capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+            support: CapabilitySupport::unsupported(
+                "fmfwio DELETE /spot/order is cancel-all/filter-by-symbol; shared batch_cancel_orders would over-cancel a specific id list, so runtime remains offline",
+            ),
+            mode: BatchExecutionMode::Unsupported,
+            atomicity: BatchAtomicity::Partial,
+            max_items: None,
+            same_symbol_required: true,
+            same_market_type_required: true,
+            supports_client_order_id: false,
+            supports_partial_failure: true,
+        };
         capabilities.capabilities_v2.credential_scopes =
             vec![CredentialScope::ReadOnly, CredentialScope::Trade];
+        capabilities.capabilities_v2.endpoints = fmfwio_private_spec_only_endpoints();
         capabilities
     }
 
-    async fn get_balances(&self, _request: BalancesRequest) -> ExchangeApiResult<BalancesResponse> {
-        self.unsupported("fmfwio.get_balances_spec_only")
+    async fn get_balances(&self, request: BalancesRequest) -> ExchangeApiResult<BalancesResponse> {
+        self.get_balances_impl(request).await
     }
 
     async fn get_positions(
@@ -193,15 +303,15 @@ impl ExchangeClient for FmfwioGatewayAdapter {
         self.get_order_book_impl(request).await
     }
 
-    async fn get_fees(&self, _request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
-        self.unsupported("fmfwio.get_fees_spec_only")
+    async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
+        self.get_fees_impl(request).await
     }
 
     async fn place_order(
         &self,
-        _request: PlaceOrderRequest,
+        request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.unsupported("fmfwio.place_order_request_spec_only")
+        self.place_order_impl(request).await
     }
 
     async fn place_quote_market_order(
@@ -213,23 +323,23 @@ impl ExchangeClient for FmfwioGatewayAdapter {
 
     async fn cancel_order(
         &self,
-        _request: CancelOrderRequest,
+        request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.unsupported("fmfwio.cancel_order_request_spec_only")
+        self.cancel_order_impl(request).await
     }
 
     async fn amend_order(
         &self,
-        _request: AmendOrderRequest,
+        request: AmendOrderRequest,
     ) -> ExchangeApiResult<AmendOrderResponse> {
-        self.unsupported("fmfwio.amend_order_request_spec_only")
+        self.amend_order_impl(request).await
     }
 
     async fn place_order_list(
         &self,
-        _request: OrderListRequest,
+        request: OrderListRequest,
     ) -> ExchangeApiResult<OrderListResponse> {
-        self.unsupported("fmfwio.order_list_request_spec_only")
+        self.place_order_list_impl(request).await
     }
 
     async fn batch_place_orders(
@@ -241,9 +351,10 @@ impl ExchangeClient for FmfwioGatewayAdapter {
 
     async fn batch_cancel_orders(
         &self,
-        _request: BatchCancelOrdersRequest,
+        request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.unsupported("fmfwio.batch_cancel_orders_not_mapped")
+        self.ensure_exchange(&request.exchange)?;
+        self.unsupported("fmfwio.batch_cancel_orders_filter_endpoint_overcancel_boundary")
     }
 
     async fn cancel_all_orders(
@@ -255,23 +366,23 @@ impl ExchangeClient for FmfwioGatewayAdapter {
 
     async fn query_order(
         &self,
-        _request: QueryOrderRequest,
+        request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.unsupported("fmfwio.query_order_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
-        _request: OpenOrdersRequest,
+        request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.unsupported("fmfwio.get_open_orders_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
-        _request: RecentFillsRequest,
+        request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.unsupported("fmfwio.get_recent_fills_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

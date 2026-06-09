@@ -9,6 +9,7 @@ CONTROL_PANEL_MODE="${CONTROL_PANEL_MODE:-legacy-local}"
 STRATEGY_BIN="${STRATEGY_BIN:-target/release/rustcta}"
 CONTROL_API_BIN="${CONTROL_API_BIN:-target/release/control_api}"
 CONTROL_API_BIND_ADDR="${CONTROL_API_BIND_ADDR:-127.0.0.1:8091}"
+CANONICAL_CONTROL_API_BIND_ADDR="127.0.0.1:8091"
 CONTROL_API_EXTERNAL_ACCESS_ENABLED="${CONTROL_API_EXTERNAL_ACCESS_ENABLED:-false}"
 CONTROL_API_TOKEN_ENV="${CONTROL_API_TOKEN_ENV:-RUSTCTA_MONITOR_TOKEN}"
 CROSS_ARB_EXECUTE="${CROSS_ARB_EXECUTE:-false}"
@@ -57,7 +58,7 @@ Environment:
   CROSS_ARB_BIN=target/release/cross_arb_live
   CROSS_ARB_EXECUTE=false
   CROSS_ARB_SKIP_PRIVATE_AUDIT=true
-  CONTROL_API_BIND_ADDR=127.0.0.1:8091
+  CONTROL_API_BIND_ADDR=127.0.0.1:8091 (fixed; do not override)
   CONTROL_API_EXTERNAL_ACCESS_ENABLED=false
   RUSTCTA_MONITOR_TOKEN=<required for API access>
   STRATEGY_ENV_FILE=.env
@@ -75,6 +76,14 @@ USAGE
 
 log() {
   printf '[separated-control] %s\n' "$*"
+}
+
+require_canonical_control_api_bind() {
+  if [[ "$CONTROL_API_BIND_ADDR" != "$CANONICAL_CONTROL_API_BIND_ADDR" ]]; then
+    printf 'Refusing to start control API on %s; only %s is allowed for the Web control panel.\n' \
+      "$CONTROL_API_BIND_ADDR" "$CANONICAL_CONTROL_API_BIND_ADDR" >&2
+    exit 8
+  fi
 }
 
 legacy_local_sources_present() {
@@ -505,6 +514,7 @@ start_strategy() {
 }
 
 start_control_api() {
+  require_canonical_control_api_bind
   require_legacy_binary "legacy control API" "$CONTROL_API_BIN"
   ensure_token
   mkdir -p "$RUN_DIR" "$LOG_DIR" "$(dirname "$COMMAND_PATH")"

@@ -1,0 +1,27 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/matcher/orderbook",
+  "auth": "waves_order_signature",
+  "body": {
+    "version": 3,
+    "senderPublicKey": "8QUefk3K8xW6bYzY1gEoQf2rN9WAVESPublicKeyFixture",
+    "matcherPublicKey": "MatcherPublicKeyFixture",
+    "assetPair": {
+      "amountAsset": "WAVES",
+      "priceAsset": "USDN"
+    },
+    "orderType": "buy",
+    "amount": 100000000,
+    "price": 250000000,
+    "timestamp": 1700000000000,
+    "expiration": 1702592000000,
+    "matcherFee": 300000,
+    "signature": "<curve25519_order_signature>"
+  },
+  "strict_body": true,
+  "expected_error_until_promoted": "wavesexchange.place_order_requires_waves_order_curve25519_signing"
+}

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -436,6 +436,7 @@ fn earliest_future(
 pub struct DualTakerArbitrageConfig {
     pub target_notional_usdt: f64,
     pub min_open_spread_pct: f64,
+    pub min_open_net_profit_pct: f64,
     pub max_open_spread_pct: f64,
     pub taker_slippage_pct: f64,
     pub close_min_net_profit_pct: f64,
@@ -445,10 +446,12 @@ pub struct DualTakerArbitrageConfig {
     pub min_orderbook_levels: usize,
     pub single_leg_timeout_ms: u64,
     pub max_consecutive_single_leg_fills: u32,
+    pub max_open_bundles: usize,
     pub max_positions_per_exchange: usize,
     pub max_active_bundles_per_symbol: usize,
     pub symbol_cooldown_secs: i64,
     pub max_hold_secs: i64,
+    pub close_on_max_hold_requires_profit: bool,
 }
 
 impl Default for DualTakerArbitrageConfig {
@@ -456,6 +459,7 @@ impl Default for DualTakerArbitrageConfig {
         Self {
             target_notional_usdt: 5.5,
             min_open_spread_pct: 0.005,
+            min_open_net_profit_pct: 0.0,
             max_open_spread_pct: 0.05,
             taker_slippage_pct: 0.0005,
             close_min_net_profit_pct: 0.0005,
@@ -465,10 +469,12 @@ impl Default for DualTakerArbitrageConfig {
             min_orderbook_levels: 1,
             single_leg_timeout_ms: 600,
             max_consecutive_single_leg_fills: 3,
+            max_open_bundles: 10,
             max_positions_per_exchange: 10,
             max_active_bundles_per_symbol: 1,
             symbol_cooldown_secs: 300,
             max_hold_secs: 86_400,
+            close_on_max_hold_requires_profit: false,
         }
     }
 }
@@ -1173,6 +1179,8 @@ pub fn evaluate_dual_taker_open_opportunities(
             .partial_cmp(&left.spread_pct)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    let mut seen_symbols = HashSet::new();
+    opportunities.retain(|opportunity| seen_symbols.insert(opportunity.canonical_symbol.as_pair()));
     opportunities
 }
 
@@ -1266,9 +1274,11 @@ pub fn evaluate_dual_taker_close(
     let net_profit_pct = net_pnl_usdt / position.base_notional_usdt();
     let max_hold_expired = position.held_secs(now) >= config.max_hold_secs;
     let profit_target_met = net_profit_pct >= config.close_min_net_profit_pct;
+    let max_hold_close_allowed =
+        max_hold_expired && (!config.close_on_max_hold_requires_profit || profit_target_met);
     let reason = if profit_target_met {
         Some(CloseReason::ProfitTarget)
-    } else if max_hold_expired {
+    } else if max_hold_close_allowed {
         Some(CloseReason::MaxHoldTime)
     } else {
         None
@@ -1423,6 +1433,7 @@ impl SingleLegGuard {
 #[serde(rename_all = "snake_case")]
 pub enum OpenBlockReason {
     StrategyHalted,
+    MaxOpenBundles,
     SymbolAlreadyActive,
     SymbolCoolingDown,
     ExchangePositionLimit,
@@ -1446,6 +1457,9 @@ impl ArbitrageRiskState {
     ) -> Result<(), OpenBlockReason> {
         if self.strategy_halted {
             return Err(OpenBlockReason::StrategyHalted);
+        }
+        if self.open_positions.len() >= config.max_open_bundles {
+            return Err(OpenBlockReason::MaxOpenBundles);
         }
         let symbol_key = symbol.as_pair();
         if self
@@ -1886,9 +1900,6 @@ fn shared_open_quantity_with_capacity(
     if short_precision.min_notional_usdt > 0.0
         && quantity * short_book.best_bid_price < short_precision.min_notional_usdt
     {
-        return None;
-    }
-    if quantity * long_book.best_ask_price < target_notional_usdt {
         return None;
     }
     Some(SharedOpenQuantity {

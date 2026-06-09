@@ -73,15 +73,36 @@ batch:
       reason: Official native USDT perpetual batch cancel endpoint is not verified; adapter uses sequential single-cancel fallback.
 websocket:
   public:
-    support: spec_only
+    support: implemented_spec_parser
     url: wss://ws-openapi.tapbit.com/stream/ws
     topics: [spot/orderBook, spot/ticker, usdt/orderBook, usdt/ticker]
+    order_book:
+      channels:
+        spot: spot/orderBook.{instrument_id}.[depth]
+        linear_perp: usdt/orderBook.{instrument_id}.[depth]
+      subscribe: { op: subscribe, args: ["{channel}"] }
+      unsubscribe: { op: unsubscribe, args: ["{channel}"] }
+      supported_depths: [5, 10, 50, 100, 200]
+      selected_depth: 200
+      push_interval_ms: null
+      sequence_field: version
+      sequence_policy: strictly_increasing
+      checksum: unsupported
+      snapshot_fallback:
+        spot_endpoint_operation: get_order_book
+        linear_perp_endpoint_operation: get_order_book_perp
+      order_book_heartbeat_interval: 5s
+      ping:
+        direction: server_ping
+        interval_ms: 5000
+        response: pong
+      parser: crates/rustcta-exchange-gateway/src/adapters/tapbit/streams.rs
     heartbeat:
       direction: server_ping
       interval_ms: 5000
       timeout_ms: 10000
       response: pong
-    resync: rest_order_book_snapshot
+    resync: rest_order_book_snapshot_after_reconnect_or_version_gap
   private:
     support: unsupported
     reason: tapbit.subscribe_private_stream.no_official_private_ws_topics
@@ -96,6 +117,20 @@ endpoints:
     rate_limit_bucket: public_ip
     weight: 1
     request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/tapbit/public_tests.rs
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/spot/instruments/trade_pair_list
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    support: native
+    reason: "Public Spot trade_pair_list includes maker/taker fee metadata; source=tapbit.spot.trade_pair_list; account-effective fee remains credential/account-tier scoped."
     response_parser:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/tapbit/public_tests.rs

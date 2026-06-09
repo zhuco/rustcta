@@ -50,6 +50,32 @@ websocket:
     support: native
     url: wss://ws-api.coincheck.com/
     channels: ["{pair}-trades", "{pair}-orderbook"]
+    order_book:
+      channel: "{pair}-orderbook"
+      subscribe_payload:
+        type: subscribe
+        channel: "{pair}-orderbook"
+      unsubscribe_payload:
+        type: unsubscribe
+        channel: "{pair}-orderbook"
+      update_semantics: "order book differences when trades occur"
+      interval_ms: 100
+      interval_source: "official docs describe approximately 0.1s when trades occur; not a fixed heartbeat cadence"
+      depth: null
+      depth_source: "official public WS docs do not publish a depth parameter for orderbook differences"
+      sequence:
+        field: null
+        contiguous: false
+        gap_detection: unsupported_no_official_sequence
+        risk: "No sequence/update id is documented for Coincheck public orderbook WS."
+      checksum:
+        supported: false
+        mode: none_documented
+        risk: "No checksum is documented for Coincheck public orderbook WS."
+      resync:
+        mode: rest_snapshot_rebuild
+        rest_endpoint_operation: get_order_book
+        triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]
     heartbeat:
       direction: transport_ping_pong
     resync: rest_order_book_snapshot
@@ -112,6 +138,62 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/coincheck/request_specs/cancel_order.json
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/coincheck/batch_place_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order placement.
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /composed/coincheck/batch_cancel_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order cancel.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /unsupported/coincheck/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coincheck.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/coincheck/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coincheck.order_list_unsupported
   - operation: get_open_orders
     product: spot
     transport: rest
@@ -132,7 +214,41 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    market_types: [spot]
+    transport: websocket
+    protocol: json
+    url: wss://ws-api.coincheck.com/
+    channel: "{pair}-orderbook"
+    support: native
+    subscribe:
+      payload:
+        type: subscribe
+        channel: "{pair}-orderbook"
+      helper: coincheck_public_subscription_spec
+    unsubscribe:
+      payload:
+        type: unsubscribe
+        channel: "{pair}-orderbook"
+      helper: coincheck_public_subscription_spec
+    message:
+      fixture: tests/fixtures/exchanges/coincheck/ws/public_orderbook_diff.json
+      bids_field: bids
+      asks_field: asks
+      update_semantics: order_book_differences
+    interval_ms: 100
+    depth: null
+    sequence_fields: []
+    checksum: none_documented
+    resync:
+      mode: rest_snapshot_rebuild
+      endpoint_operation: get_order_book
+      triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile is Spot exchange only and exposes no standard futures/perpetual/options product line."
   - operation: query_order
     reason: "Single order query not mapped to a verified current official endpoint."
   - operation: cancel_all_orders
@@ -143,3 +259,5 @@ unsupported:
     reason: "Private WS auth/user stream not adapter-verified; use REST reconciliation."
   - operation: lending_deposit_withdraw
     reason: "Funding and lending operations are outside trading runtime."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 profile 只记录 fees unsupported boundary。"

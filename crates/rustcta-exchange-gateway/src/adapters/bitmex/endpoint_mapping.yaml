@@ -46,7 +46,39 @@ batch:
 websocket:
   public:
     support: native
-    channels: [orderBookL2, trade, quote, tradeBin1m, tradeBin5m, tradeBin1h, tradeBin1d]
+    channels: [orderBookL2_25, orderBook10, orderBookL2, trade, quote, tradeBin1m, tradeBin5m, tradeBin1h, tradeBin1d]
+    subscription_mode: url_query_or_json_subscribe
+    orderbook:
+      channels:
+        - name: orderBookL2_25
+          levels: 25
+          push_interval_ms: 100
+          message_model: table_diff
+          actions: [partial, insert, update, delete]
+          keys: [symbol, id, side]
+        - name: orderBook10
+          levels: 10
+          push_interval_ms: null
+          message_model: top10_snapshot
+          actions: [partial]
+          keys: [symbol]
+        - name: orderBookL2
+          levels: full_l2
+          push_interval_ms: null
+          message_model: table_diff
+          actions: [partial, insert, update, delete]
+          keys: [symbol, id, side]
+      sequence_fields: []
+      sequence_risk: BitMEX public order book tables do not expose a monotonic sequence; table diff integrity depends on keys/id continuity and local table maintenance.
+      checksum: none
+      resync: REST /api/v1/orderBook/L2 snapshot, then resubscribe/rebuild after reconnect, missing key, delete of unknown level, or any suspected table gap.
+      fixtures:
+        - tests/fixtures/exchanges/bitmex/ws/public_orderbook_l2_25_partial.json
+        - tests/fixtures/exchanges/bitmex/ws/public_orderbook10.json
+        - tests/fixtures/exchanges/bitmex/ws/public_orderbook_l2_delete.json
+      implementation:
+        - crates/rustcta-exchange-gateway/src/adapters/bitmex/streams.rs
+        - crates/rustcta-exchange-gateway/src/adapters/bitmex/stream_tests.rs
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
@@ -89,7 +121,7 @@ endpoints:
     testnet: true
     support: native
     response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/public_tests.rs, fixture: tests/fixtures/exchanges/bitmex/orderbook_l2.json }
-    notes: strictness=snapshot_only; max_depth=100; checksum unsupported; REST snapshot after reconnect.
+    notes: strictness=snapshot_only; max_depth=100; checksum unsupported; REST snapshot after reconnect and for WS table diff resync.
   - operation: balances
     product: perpetual
     market_types: [spot, perpetual]
@@ -221,6 +253,22 @@ endpoints:
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
     notes: max_items=20; partial failure supported.
+  - operation: place_order_list
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitmex/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_cancels
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: bitmex.order_list_unsupported
   - operation: cancel_all_orders
     product: perpetual
     market_types: [spot, perpetual]

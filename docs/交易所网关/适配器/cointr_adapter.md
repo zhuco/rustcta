@@ -116,6 +116,7 @@ Declared execution and safety plans:
 - Fills pagination supports `limit` up to 100; order history is current-state/id readback rather than cursor history.
 - Reconciliation after unknown order state or private stream reconnect requires query order, open orders, and recent fills; replay is not allowed.
 - Batch place/cancel use native CoinTR endpoints, partial atomicity, max 20 items, same market type required, client order id supported.
+- Amend order and OCO/OTO/order-list placement remain explicit unsupported boundaries: the adapter has no lossless shared in-place amend or order-list semantics, so callers must cancel/replace or implement venue-specific logic outside the shared gateway.
 
 Validation notes:
 

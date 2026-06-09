@@ -1,11 +1,13 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, BatchItemResult, BatchOperationReport, BatchPlaceOrdersRequest, ExchangeApiError,
+    ExchangeApiResult, OrderState, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy,
+    SymbolRules, SymbolScope, TenantId, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, Fill,
+    FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion,
 };
 use serde_json::Value;
 
@@ -95,6 +97,294 @@ pub fn normalize_depth(depth: u32) -> u32 {
         101..=500 => 500,
         _ => 1000,
     }
+}
+
+pub fn parse_batch_place_orders_ack(
+    exchange_id: &ExchangeId,
+    request: &BatchPlaceOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<(Vec<OrderState>, BatchOperationReport)> {
+    let rows = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ApolloX DEX batch place response is not an array",
+            value,
+        )
+    })?;
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.orders.len());
+    for (index, order_request) in request.orders.iter().enumerate() {
+        let Some(row) = rows.get(index) else {
+            let error = batch_item_error(
+                exchange_id,
+                "missing ApolloX DEX batch place response item",
+                None,
+                order_request.client_order_id.clone(),
+                None,
+                Value::Null,
+            );
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "ApolloX DEX did not return a batch place result for this request item",
+                )),
+            ));
+            continue;
+        };
+        if let Some(error) =
+            apollox_batch_item_error(exchange_id, row, order_request.client_order_id.clone())
+        {
+            let plan = error.requires_reconciliation().then(|| {
+                ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchPlacePartialFailure,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "ApolloX DEX batch place item failed and requires order readback",
+                )
+            });
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                plan,
+            ));
+            continue;
+        }
+        let order = parse_order_state(exchange_id, Some(&order_request.symbol), row)?;
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+
+    Ok((
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.orders.len(),
+            results,
+        },
+    ))
+}
+
+pub fn parse_order_state(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let exchange_symbol_text = required_str(exchange_id, value, "symbol")
+        .or_else(|_| required_str(exchange_id, value, "s"))?
+        .to_ascii_uppercase();
+    let exchange_symbol = if let Some(symbol) = symbol_hint {
+        symbol.exchange_symbol.clone()
+    } else {
+        ExchangeSymbol::new(
+            exchange_id.clone(),
+            MarketType::Perpetual,
+            exchange_symbol_text,
+        )
+        .map_err(validation_error)?
+    };
+    let market_type = symbol_hint
+        .map(|symbol| symbol.market_type)
+        .unwrap_or(exchange_symbol.market_type);
+    let tif = value
+        .get("timeInForce")
+        .or_else(|| value.get("f"))
+        .and_then(Value::as_str);
+    let raw_type = value
+        .get("type")
+        .or_else(|| value.get("o"))
+        .and_then(Value::as_str)
+        .unwrap_or("LIMIT");
+    let now = Utc::now();
+
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type,
+        canonical_symbol: symbol_hint.and_then(|symbol| symbol.canonical_symbol.clone()),
+        exchange_symbol,
+        client_order_id: value_as_string(value.get("clientOrderId").or_else(|| value.get("c"))),
+        exchange_order_id: value_as_string(value.get("orderId").or_else(|| value.get("i"))),
+        side: parse_side(
+            required_str(exchange_id, value, "side")
+                .or_else(|_| required_str(exchange_id, value, "S"))?,
+        )?,
+        position_side: value
+            .get("positionSide")
+            .and_then(Value::as_str)
+            .map(parse_position_side),
+        order_type: parse_order_type(raw_type, tif),
+        time_in_force: parse_time_in_force(tif),
+        status: value
+            .get("status")
+            .or_else(|| value.get("X"))
+            .and_then(Value::as_str)
+            .map(parse_order_status)
+            .unwrap_or(OrderStatus::Unknown),
+        quantity: string_or_number(
+            value
+                .get("origQty")
+                .or_else(|| value.get("q"))
+                .or_else(|| value.get("quantity"))
+                .or_else(|| value.get("qty")),
+        )
+        .unwrap_or_else(|| "0".to_string()),
+        price: non_zero_string(
+            string_or_number(value.get("price").or_else(|| value.get("p")))
+                .unwrap_or_else(|| "0".to_string()),
+        ),
+        filled_quantity: string_or_number(value.get("executedQty").or_else(|| value.get("z")))
+            .unwrap_or_else(|| "0".to_string()),
+        average_fill_price: value_as_string(value.get("avgPrice")).or_else(|| {
+            non_zero_string(string_or_number(
+                value
+                    .get("avgPrice")
+                    .or_else(|| value.get("ap"))
+                    .or_else(|| value.get("averagePrice")),
+            )?)
+        }),
+        reduce_only: value
+            .get("reduceOnly")
+            .or_else(|| value.get("R"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        post_only: raw_type.eq_ignore_ascii_case("LIMIT_MAKER")
+            || tif.is_some_and(|value| value.eq_ignore_ascii_case("GTX")),
+        created_at: first_timestamp_millis(value, &["transactTime", "time", "O", "E"]),
+        updated_at: first_timestamp_millis(value, &["updateTime", "T", "E"]).unwrap_or(now),
+    })
+}
+
+pub fn parse_open_orders(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    market_type: MarketType,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let orders = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ApolloX DEX open orders response is not an array",
+            value,
+        )
+    })?;
+    orders
+        .iter()
+        .map(|order| {
+            if let Some(symbol_hint) = symbol_hint {
+                parse_order_state(exchange_id, Some(symbol_hint), order)
+            } else {
+                let symbol_text = required_str(exchange_id, order, "symbol")?.to_ascii_uppercase();
+                let symbol_scope = SymbolScope {
+                    exchange: exchange_id.clone(),
+                    market_type,
+                    canonical_symbol: compact_symbol_assets(&symbol_text)
+                        .and_then(|(base, quote)| CanonicalSymbol::new(base, quote).ok()),
+                    exchange_symbol: ExchangeSymbol::new(
+                        exchange_id.clone(),
+                        market_type,
+                        symbol_text,
+                    )
+                    .map_err(validation_error)?,
+                };
+                parse_order_state(exchange_id, Some(&symbol_scope), order)
+            }
+        })
+        .collect()
+}
+
+pub fn parse_recent_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "ApolloX DEX recent fills request requires canonical_symbol".to_string(),
+            })?;
+    let fills = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "ApolloX DEX recent fills response is not an array",
+            value,
+        )
+    })?;
+    fills
+        .iter()
+        .map(|fill| {
+            let is_buyer = fill
+                .get("isBuyer")
+                .or_else(|| fill.get("buyer"))
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| {
+                    fill.get("side")
+                        .and_then(Value::as_str)
+                        .is_some_and(|side| side.eq_ignore_ascii_case("BUY"))
+                });
+            let is_maker = fill
+                .get("isMaker")
+                .or_else(|| fill.get("maker"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let price = decimal_value_to_f64(fill.get("price"))?.unwrap_or(0.0);
+            let quantity = decimal_value_to_f64(fill.get("qty").or_else(|| fill.get("quantity")))?
+                .unwrap_or(0.0);
+            Ok(Fill {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: symbol.market_type,
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: value_as_string(fill.get("orderId")),
+                client_order_id: value_as_string(fill.get("clientOrderId")),
+                fill_id: value_as_string(fill.get("id")),
+                side: if is_buyer {
+                    OrderSide::Buy
+                } else {
+                    OrderSide::Sell
+                },
+                position_side: fill
+                    .get("positionSide")
+                    .and_then(Value::as_str)
+                    .map(parse_position_side)
+                    .unwrap_or(PositionSide::Net),
+                status: FillStatus::Confirmed,
+                liquidity_role: if is_maker {
+                    LiquidityRole::Maker
+                } else {
+                    LiquidityRole::Taker
+                },
+                price,
+                quantity,
+                quote_quantity: decimal_value_to_f64(
+                    fill.get("quoteQty").or_else(|| fill.get("quoteQuantity")),
+                )?,
+                fee_asset: value_as_string(fill.get("commissionAsset")),
+                fee_amount: decimal_value_to_f64(fill.get("commission"))?,
+                fee_rate: None,
+                realized_pnl: decimal_value_to_f64(fill.get("realizedPnl"))?,
+                filled_at: first_timestamp_millis(fill, &["time"]).unwrap_or_else(Utc::now),
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
 }
 
 fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
@@ -229,6 +519,197 @@ fn has_or_unlisted(values: &[Value], expected: &str) -> bool {
                 .as_str()
                 .is_some_and(|value| value.eq_ignore_ascii_case(expected))
         })
+}
+
+fn apollox_batch_item_error(
+    exchange_id: &ExchangeId,
+    value: &Value,
+    client_order_id: Option<String>,
+) -> Option<ExchangeError> {
+    let code = value.get("code").and_then(value_as_i64)?;
+    if code == 0 {
+        return None;
+    }
+    let message = value
+        .get("msg")
+        .or_else(|| value.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("ApolloX DEX batch place item failed");
+    Some(batch_item_error(
+        exchange_id,
+        message,
+        Some(code.to_string()),
+        value_as_string(value.get("clientOrderId").or_else(|| value.get("c"))).or(client_order_id),
+        value_as_string(value.get("orderId").or_else(|| value.get("i"))),
+        value.clone(),
+    ))
+}
+
+fn batch_item_error(
+    exchange_id: &ExchangeId,
+    message: impl Into<String>,
+    code: Option<String>,
+    client_order_id: Option<String>,
+    order_id: Option<String>,
+    raw: Value,
+) -> ExchangeError {
+    let message = message.into();
+    let mut error = ExchangeError::new(
+        exchange_id.clone(),
+        classify_apollox_item_error(code.as_deref(), &message),
+        message,
+        Utc::now(),
+    );
+    error.code = code;
+    error.client_order_id = client_order_id;
+    error.order_id = order_id;
+    error.raw = Some(raw);
+    error
+}
+
+fn classify_apollox_item_error(code: Option<&str>, message: &str) -> ExchangeErrorClass {
+    let code = code.unwrap_or_default();
+    let message = message.to_ascii_lowercase();
+    if matches!(code, "-2010" | "-2018") || message.contains("insufficient") {
+        ExchangeErrorClass::InsufficientBalance
+    } else if matches!(code, "-1121") || message.contains("invalid symbol") {
+        ExchangeErrorClass::InvalidSymbol
+    } else if matches!(code, "-1111" | "-1013")
+        || message.contains("precision")
+        || message.contains("filter failure")
+    {
+        ExchangeErrorClass::InvalidPrecision
+    } else if matches!(code, "-1003" | "-1015") || message.contains("too many requests") {
+        ExchangeErrorClass::RateLimited
+    } else if matches!(code, "-1021" | "-1022" | "-2014" | "-2015")
+        || message.contains("signature")
+        || message.contains("api-key")
+    {
+        ExchangeErrorClass::Authentication
+    } else if matches!(code, "-2011" | "-2013") || message.contains("order does not exist") {
+        ExchangeErrorClass::OrderNotFound
+    } else if code.is_empty() {
+        ExchangeErrorClass::UnknownOrderState
+    } else {
+        ExchangeErrorClass::OrderRejected
+    }
+}
+
+fn parse_side(value: &str) -> ExchangeApiResult<OrderSide> {
+    match value.to_ascii_uppercase().as_str() {
+        "BUY" => Ok(OrderSide::Buy),
+        "SELL" => Ok(OrderSide::Sell),
+        _ => Err(ExchangeApiError::InvalidRequest {
+            message: format!("unsupported ApolloX DEX order side {value}"),
+        }),
+    }
+}
+
+fn parse_position_side(value: &str) -> PositionSide {
+    match value.to_ascii_uppercase().as_str() {
+        "LONG" => PositionSide::Long,
+        "SHORT" => PositionSide::Short,
+        "BOTH" | "NET" => PositionSide::Net,
+        _ => PositionSide::None,
+    }
+}
+
+fn parse_order_type(order_type: &str, tif: Option<&str>) -> OrderType {
+    if order_type.eq_ignore_ascii_case("LIMIT_MAKER")
+        || tif.is_some_and(|value| value.eq_ignore_ascii_case("GTX"))
+    {
+        OrderType::PostOnly
+    } else if order_type.eq_ignore_ascii_case("MARKET") {
+        OrderType::Market
+    } else if tif.is_some_and(|value| value.eq_ignore_ascii_case("IOC")) {
+        OrderType::IOC
+    } else if tif.is_some_and(|value| value.eq_ignore_ascii_case("FOK")) {
+        OrderType::FOK
+    } else {
+        OrderType::Limit
+    }
+}
+
+fn parse_time_in_force(value: Option<&str>) -> Option<TimeInForce> {
+    match value?.to_ascii_uppercase().as_str() {
+        "GTC" => Some(TimeInForce::GTC),
+        "IOC" => Some(TimeInForce::IOC),
+        "FOK" => Some(TimeInForce::FOK),
+        "GTX" => Some(TimeInForce::GTX),
+        _ => None,
+    }
+}
+
+fn parse_order_status(value: &str) -> OrderStatus {
+    match value.to_ascii_uppercase().as_str() {
+        "NEW" => OrderStatus::New,
+        "PARTIALLY_FILLED" => OrderStatus::PartiallyFilled,
+        "FILLED" => OrderStatus::Filled,
+        "PENDING_CANCEL" => OrderStatus::PendingCancel,
+        "CANCELED" | "CANCELLED" => OrderStatus::Cancelled,
+        "REJECTED" => OrderStatus::Rejected,
+        "EXPIRED" => OrderStatus::Expired,
+        _ => OrderStatus::Unknown,
+    }
+}
+
+fn compact_symbol_assets(symbol: &str) -> Option<(&str, &str)> {
+    for quote in ["USDT", "USDC", "BUSD", "USD", "BTC", "ETH", "BNB"] {
+        if symbol.len() > quote.len() && symbol.ends_with(quote) {
+            return Some(symbol.split_at(symbol.len() - quote.len()));
+        }
+    }
+    None
+}
+
+fn decimal_value_to_f64(value: Option<&Value>) -> ExchangeApiResult<Option<f64>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(number)) => {
+            number
+                .as_f64()
+                .map(Some)
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "ApolloX DEX numeric value cannot be represented as f64".to_string(),
+                })
+        }
+        Some(Value::String(text)) if text.trim().is_empty() => Ok(None),
+        Some(Value::String(text)) => {
+            text.parse::<f64>()
+                .map(Some)
+                .map_err(|error| ExchangeApiError::InvalidRequest {
+                    message: format!("ApolloX DEX numeric parse failed: {error}"),
+                })
+        }
+        Some(_) => Err(ExchangeApiError::InvalidRequest {
+            message: "ApolloX DEX numeric field has unsupported type".to_string(),
+        }),
+    }
+}
+
+fn non_zero_string(value: String) -> Option<String> {
+    if value.trim().is_empty() || value == "0" || value == "0.0" || value == "0.00" {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn value_as_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(value) if !value.trim().is_empty() => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn first_timestamp_millis(value: &Value, fields: &[&str]) -> Option<DateTime<Utc>> {
+    fields.iter().find_map(|field| {
+        value
+            .get(*field)
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis)
+    })
 }
 
 pub(super) fn time_in_force_value(tif: Option<TimeInForce>, post_only: bool) -> &'static str {

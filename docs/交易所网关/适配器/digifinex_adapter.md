@@ -24,6 +24,10 @@ Unsupported boundaries:
 - Amend order is explicit `Unsupported`; cancel-replace is not used as a fake
   amend.
 - Perpetual quote-sized market order is unsupported.
+- Advanced-order matrix entries use standard operation names:
+  `batch_place_orders` and `batch_cancel_orders` are native partial batch
+  routes; `amend_order` and `place_order_list` are explicit unsupported
+  boundaries.
 
 ## Endpoint Mapping
 
@@ -69,4 +73,4 @@ Use read/trade scoped keys only and keep withdrawal permissions disabled.
 
 官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。DigiFinex Spot public WS 使用 JSON-RPC `depth.subscribe`，例如 `{"method":"depth.subscribe","id":1,"params":["ETH_USDT"]}`；perpetual swap 对应 `orderbook.subscribe`。
 
-Spot `depth.update` 的 params 首个布尔值区分 complete result 和 last updated result，之后是 asks/bids 和 symbol。官方未给固定推流毫秒、固定 depth、sequence 或 checksum；断线或 complete/update 异常时应回 REST spot/swap order book 重建。
+Spot `depth.update` 的 params 首个布尔值区分 complete result 和 last updated result，之后是 asks/bids 和 symbol。官方未给固定推流毫秒、固定 depth、sequence 或 checksum；mapping 记录为 no fixed ms、depth unspecified。断线或 complete/update 异常时应回 REST spot/swap order book 重建。

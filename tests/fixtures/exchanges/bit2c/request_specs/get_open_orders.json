@@ -7,6 +7,10 @@
   "path": "/Order/MyOrders",
   "auth": "signed",
   "query": {
+    "pair": {
+      "match": "exact",
+      "value": "BtcNis"
+    },
     "nonce": {
       "match": "non_empty"
     }

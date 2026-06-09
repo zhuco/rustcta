@@ -32,6 +32,8 @@ the payload is signed with HMAC-SHA256, and the digest is base64-encoded.
 
 ## Unsupported Boundary
 
+交易所不支持合约：Coinbase Exchange API 是 spot exchange API，当前 profile 未暴露标准 futures/perpetual/options 产品线。
+
 Advanced Trade `/api/v3/brokerage/*`, INTX perpetuals, transfers, deposits,
 withdrawals, margin, leverage, and funding operations are unsupported in this
 adapter.

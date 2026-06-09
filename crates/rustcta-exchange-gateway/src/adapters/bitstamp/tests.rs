@@ -1,9 +1,9 @@
 use rustcta_exchange_api::{
-    AccountId, PublicStreamKind, PublicStreamSubscription, RequestContext, TenantId,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, ExchangeClient, PublicStreamKind, PublicStreamSubscription, RequestContext,
+    TenantId, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderStatus};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::parser::{
     parse_balances, parse_fees, parse_fills, parse_order_state, parse_orderbook_snapshot,
@@ -11,8 +11,11 @@ use super::parser::{
 };
 use super::signing::bitstamp_signature;
 use super::streams::{
-    bitstamp_private_subscribe_payload, bitstamp_public_channel, bitstamp_public_subscribe_payload,
+    bitstamp_private_subscribe_payload, bitstamp_public_channel,
+    bitstamp_public_order_book_ws_policy, bitstamp_public_subscribe_payload,
+    parse_bitstamp_public_order_book_message,
 };
+use super::{BitstampGatewayAdapter, BitstampGatewayConfig};
 
 #[test]
 fn bitstamp_parser_should_map_markets_and_book() {
@@ -76,6 +79,64 @@ fn bitstamp_signing_and_ws_payload_should_match_v2_shape() {
             "data": {"channel": "diff_order_book_btcusd"}
         })
     );
+}
+
+#[test]
+fn bitstamp_public_order_book_ws_details_should_match_v2_risk_boundary() {
+    let policy = bitstamp_public_order_book_ws_policy();
+    assert_eq!(policy.url, "wss://ws.bitstamp.net");
+    assert_eq!(
+        policy.snapshot_channel_template,
+        "order_book_{market_symbol}"
+    );
+    assert_eq!(
+        policy.delta_channel_template,
+        "diff_order_book_{market_symbol}"
+    );
+    assert_eq!(policy.fixed_update_interval_ms, None);
+    assert_eq!(policy.depth, None);
+    assert_eq!(policy.sequence_field, None);
+    assert_eq!(policy.checksum, None);
+    assert_eq!(
+        policy.order_data_gap_recovery_endpoint,
+        "POST /api/v2/order_data/"
+    );
+
+    let adapter = BitstampGatewayAdapter::new(BitstampGatewayConfig::default()).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert_eq!(capabilities.max_order_book_depth, None);
+    assert_eq!(
+        capabilities.order_book.strictness,
+        rustcta_exchange_api::OrderBookStrictness::BestEffortDelta
+    );
+    assert!(!capabilities.order_book.supports_sequence);
+    assert!(!capabilities.order_book.supports_checksum);
+    assert!(capabilities.order_book.supports_resync_endpoint);
+}
+
+#[test]
+fn bitstamp_public_order_book_ws_parser_should_accept_snapshot_and_diff_envelopes() {
+    let exchange = ExchangeId::new("bitstamp").expect("exchange");
+    let snapshot: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitstamp/ws/public_order_book_snapshot.json"
+    ))
+    .expect("snapshot fixture");
+    let parsed = parse_bitstamp_public_order_book_message(&exchange, symbol_scope(), &snapshot)
+        .expect("snapshot");
+    assert_eq!(parsed.bids[0].price, 50000.0);
+    assert_eq!(parsed.asks[0].quantity, 0.4);
+    assert_eq!(parsed.sequence, None);
+    assert!(parsed.exchange_timestamp.is_some());
+
+    let diff: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bitstamp/ws/public_diff_order_book.json"
+    ))
+    .expect("diff fixture");
+    let parsed =
+        parse_bitstamp_public_order_book_message(&exchange, symbol_scope(), &diff).expect("diff");
+    assert_eq!(parsed.bids[0].price, 49999.5);
+    assert_eq!(parsed.asks[0].price, 50000.5);
+    assert_eq!(parsed.sequence, None);
 }
 
 #[test]

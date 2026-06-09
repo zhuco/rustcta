@@ -1,0 +1,13 @@
+{
+  "exchange": "fmfwio",
+  "name": "batch_cancel_orders_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "DELETE",
+  "request_path": "/api/3/spot/order?symbol=ETHBTC",
+  "payload": "DELETE/api/3/spot/order?symbol=ETHBTC171000000000010000",
+  "expected_signature": "a0ac5ec8c3135b1076ccadb1c4a3a0486d51ad8b575d49eccb4e5e0aacf9c535",
+  "payload_format": "raw_payload",
+  "body": ""
+}

@@ -1,6 +1,6 @@
 # Bybit EU Gateway Adapter
 
-Status: `rustcta-exchange-gateway` Bybit EU profile adapter for Bybit V5 public REST and WebSocket specs. Private trading is deliberately disabled.
+Status: `rustcta-exchange-gateway` Bybit EU profile adapter for Bybit V5 public REST/WebSocket plus guarded private REST read/write operations when explicit EU credentials and the private REST enable flag are configured.
 
 ## Product Boundary
 
@@ -30,7 +30,9 @@ The V5 integration guidance lists `https://api.bybit.eu` for EEA users and state
 
 ## Unsupported Boundary
 
-- Private REST reads, private REST writes, private WebSocket auth/subscriptions, real order placement, real cancels, batch operations, leverage, margin mode, position mode, and dead-man/cancel-all-after are `Unsupported`.
+- Private REST order create/cancel/cancel-all/query/open/fills and position readback reuse Bybit V5 signed runtime on the EU host only when BYBITEU/BYBIT_EU credentials and the private REST enable flag are configured. Default no-credential environments fail closed. P4 advanced order surfaces remain explicitly bounded: `amend_order`, OCO/OTO/order-list, native `batch_place_orders`, native `batch_cancel_orders`, and audit-only `cancel_all_orders` are pinned by `unsupported_boundary.json` and default-config tests as `Unsupported` until EU broker scope, dry-run safety, and post-write reconciliation are audited. Leverage, margin mode, position mode, and dead-man/cancel-all-after remain `Unsupported`.
+- 费率项目未实现/未启用：Bybit V5 `GET /v5/account/fee-rate` 语义可复用到 EU profile；当前已补 `request_specs/get_fees_fee_rate.json` 离线 request-spec 边界，但还缺 EU domain、credential scope、broker application audit、category/symbol parser 和 read-only guard，不能把共享 `get_fees` 写成已启用。
+- 账户/余额已补离线边界：Bybit V5 `GET /v5/account/wallet-balance` 已固定 EU host request-spec `request_specs/get_balances_wallet_balance.json`，矩阵按 `get_balances=离线` 记录；仍需 EU domain/scope guard、broker application audit、accountType policy、balance parser 和 read-only reconciliation。
 - The adapter does not read `RUSTCTA_BYBITEU_API_KEY`, `RUSTCTA_BYBITEU_API_SECRET`, or Bybit global credentials. This prevents accidental live trading on a regulatory profile whose credential scope has not been verified.
 - No web page endpoints, unofficial APIs, live orders, live cancels, withdrawals, or transfers are used.
 
@@ -49,7 +51,7 @@ eligibility and credential scope are audited, so the correct status is
 
 官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Bybit V5 position API 支持 `GET /v5/position/list`，category 覆盖 linear、inverse、option，支持 `symbol`、`baseCoin`、`settleCoin` 和 cursor pagination。
 
-因此 Bybit EU 仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成区域 credential scope 审计、`/v5/position/list` request spec、cursor pagination、position side/margin mode parser 和 read-only guard。
+因此 Bybit EU 仓位接口现在写 `运行`：`get_positions` 复用 Bybit V5 guarded signed REST runtime，默认无凭证或未显式开启 private REST 时 fail-closed；启用后请求 EU host `/v5/position/list`，使用 `limit=50` 和 `result.nextPageCursor` 拉取后续页，并复用 Bybit position parser 映射 side、entry/mark/liquidation price、unrealized PnL 和 leverage。当前测试只证明 mock REST/request-spec/parser/reconciliation guard，不代表 live credential 已验证。
 
 ## Endpoint Mapping
 
@@ -57,7 +59,8 @@ eligibility and credential scope are audited, so the correct status is
 
 - EU REST and WebSocket base URLs.
 - Bybit V5 public market-data endpoints as supported/spec-covered.
-- Private account/order/fills endpoints as explicit `Unsupported`.
+- Private order/fills endpoints as guarded Bybit V5 runtime or request-spec-only boundaries depending on operation.
+- Private position readback via `/v5/position/list` as guarded runtime with cursor readback tests.
 - REST reconciliation fallback only for public stream resync; private reconciliation remains unsupported.
 
 ## Official WebSocket Order Book Detail
@@ -77,3 +80,10 @@ cargo test -p rustcta-gateway bybiteu --message-format short
 ```
 
 `cargo build` is intentionally not part of this task.
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core trading now reuses the Bybit V5 signed private REST runtime on the EU host when explicit BYBITEU/BYBIT_EU credentials and private REST enable flag are configured. place/cancel/cancel-all/query/open/fills are matrix `原生`; default no-credential environments still fail closed through the existing private REST guard.
+
+## P2 Position Runtime (2026-06-09)
+
+`get_positions` now reuses the Bybit V5 signed private REST runtime on the EU host with explicit credential/enable gating. Focused tests cover the first request-spec page, cursor follow-up, signed header redaction, exchange id `bybiteu`, and parser output; matrix status is `运行`.

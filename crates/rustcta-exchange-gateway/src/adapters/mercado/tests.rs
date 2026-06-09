@@ -1,10 +1,11 @@
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeClient, PlaceOrderRequest, PublicStreamKind,
-    PublicStreamSubscription, RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeClient, OpenOrdersRequest, PlaceOrderRequest, PublicStreamKind,
+    PublicStreamSubscription, QueryOrderRequest, RecentFillsRequest, RequestContext, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderType,
-    TenantId,
+    AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderStatus,
+    OrderType, TenantId,
 };
 use serde_json::Value;
 
@@ -14,9 +15,12 @@ use super::parser::{
 };
 use super::private::{
     create_order_request_spec_fixture, mercado_cancel_all_path, mercado_order_path,
-    mercado_orders_path, mercado_place_order_body,
+    mercado_orders_path, mercado_place_order_body, mercado_recent_fills_path,
 };
-use super::private_parser::{parse_balance_assets, parse_fill_ids, parse_open_order_ids};
+use super::private_parser::{
+    parse_balance_assets, parse_fill_ids, parse_open_order_ids, parse_open_orders,
+    parse_order_state, parse_recent_fills,
+};
 use super::signing::{mercado_bearer_authorization, mercado_bearer_request_fingerprint};
 use super::streams::{mercado_public_subscribe_payload, mercado_reconnect_policy_ms};
 use super::{MercadoGatewayAdapter, MercadoGatewayConfig};
@@ -77,6 +81,10 @@ fn request_spec_auth_and_paths_should_stay_secret_free() {
     assert_eq!(
         mercado_cancel_all_path("offline-account"),
         "/accounts/offline-account/cancel_all_open_orders"
+    );
+    assert_eq!(
+        mercado_recent_fills_path("offline-account", "BTC-BRL"),
+        "/accounts/offline-account/BTC-BRL/trades"
     );
     assert_eq!(
         mercado_bearer_authorization("<redacted>"),
@@ -179,6 +187,43 @@ fn private_read_fixtures_should_cover_balances_open_orders_and_fills() {
     ))
     .expect("fills");
     assert_eq!(parse_fill_ids(&fills).expect("fills"), vec!["fill-1"]);
+
+    let order = parse_order_state(&exchange_id(), None, &open_orders["orders"][0]).expect("order");
+    assert_eq!(
+        order.exchange_order_id.as_deref(),
+        Some("01HCDAA7YJ68ZJ0FTEPR7DYDS1")
+    );
+    assert_eq!(order.status, OrderStatus::Open);
+    assert_eq!(order.price.as_deref(), Some("350000"));
+
+    let open_success: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/mercado/open_orders_success.json"
+    ))
+    .expect("open success");
+    let orders =
+        parse_open_orders(&exchange_id(), Some(&symbol("BTC-BRL")), &open_success).expect("orders");
+    assert_eq!(orders.len(), 1);
+    assert_eq!(
+        orders[0].client_order_id.as_deref(),
+        Some("offline-fixture")
+    );
+
+    let fills_success: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/mercado/fills_success.json"
+    ))
+    .expect("fills success");
+    let fills = parse_recent_fills(
+        &exchange_id(),
+        context("fills").tenant_id.expect("tenant"),
+        context("fills").account_id.expect("account"),
+        &symbol("BTC-BRL"),
+        &fills_success,
+    )
+    .expect("fills");
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].fill_id.as_deref(), Some("offline-trade-1"));
+    assert_eq!(fills[0].fee_asset.as_deref(), Some("BRL"));
+    assert_eq!(fills[0].price, 350000.0);
 }
 
 #[test]
@@ -206,6 +251,9 @@ async fn live_trading_surfaces_should_remain_explicitly_unsupported() {
     assert!(capabilities.supports_order_book_snapshot);
     assert!(!capabilities.supports_private_rest);
     assert!(!capabilities.supports_place_order);
+    assert!(!capabilities.supports_query_order);
+    assert!(!capabilities.supports_open_orders);
+    assert!(!capabilities.supports_recent_fills);
     let request = PlaceOrderRequest {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: context("place"),
@@ -226,6 +274,103 @@ async fn live_trading_surfaces_should_remain_explicitly_unsupported() {
         error,
         ExchangeApiError::Unsupported {
             operation: "mercado.place_order_offline_request_spec_only"
+        }
+    ));
+
+    let query_error = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query"),
+            symbol: symbol("BTC-BRL"),
+            client_order_id: None,
+            exchange_order_id: Some("01HCDAA7YJ68ZJ0FTEPR7DYDS1".to_string()),
+        })
+        .await
+        .expect_err("private rest disabled");
+    assert!(matches!(
+        query_error,
+        ExchangeApiError::Unsupported {
+            operation: "mercado.query_order"
+        }
+    ));
+}
+
+#[tokio::test]
+async fn private_read_capabilities_should_enable_only_with_bearer_account_config() {
+    let config = MercadoGatewayConfig {
+        enabled_private_rest: true,
+        bearer_token: Some("bearer".to_string()),
+        account_id: Some("account-id".to_string()),
+        ..MercadoGatewayConfig::default()
+    };
+    let adapter = MercadoGatewayAdapter::new(config).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_private_rest);
+    assert!(capabilities.supports_query_order);
+    assert!(capabilities.supports_open_orders);
+    assert!(capabilities.supports_recent_fills);
+    assert!(!capabilities.supports_place_order);
+    assert!(!capabilities.supports_cancel_order);
+
+    let query_client_id_error = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query-client-id"),
+            symbol: symbol("BTC-BRL"),
+            client_order_id: Some("external".to_string()),
+            exchange_order_id: None,
+        })
+        .await
+        .expect_err("client id query unsupported before network");
+    assert!(matches!(
+        query_client_id_error,
+        ExchangeApiError::Unsupported {
+            operation: "mercado.query_order.client_order_id"
+        }
+    ));
+
+    let open_page_error = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("open-page"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol("BTC-BRL")),
+            page: Some(rustcta_exchange_api::PageRequest {
+                limit: Some(10),
+                cursor: None,
+            }),
+        })
+        .await
+        .expect_err("pagination unsupported before network");
+    assert!(matches!(
+        open_page_error,
+        ExchangeApiError::Unsupported {
+            operation: "mercado.get_open_orders.pagination"
+        }
+    ));
+
+    let fills_filter_error = adapter
+        .get_recent_fills(RecentFillsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fills-filter"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol("BTC-BRL")),
+            client_order_id: None,
+            exchange_order_id: None,
+            from_trade_id: Some("trade".to_string()),
+            start_time: None,
+            end_time: None,
+            limit: Some(10),
+            page: None,
+        })
+        .await
+        .expect_err("from-trade filter unsupported before network");
+    assert!(matches!(
+        fills_filter_error,
+        ExchangeApiError::Unsupported {
+            operation: "mercado.get_recent_fills.filter_params"
         }
     ));
 }

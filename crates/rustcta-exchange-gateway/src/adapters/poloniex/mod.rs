@@ -297,8 +297,7 @@ impl ExchangeClient for PoloniexGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(150);
-        capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(150));
+        capabilities.order_book = rustcta_exchange_api::OrderBookCapability::strict_delta(Some(20));
         capabilities.max_recent_fill_limit = Some(1000);
         capabilities.refresh_v2_from_legacy_flags();
         capabilities.capabilities_v2.stream_runtime =

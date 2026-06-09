@@ -1,0 +1,32 @@
+{
+  "result": {
+    "orders": [
+      {
+        "order_id": "grvt-order-1",
+        "client_order_id": "grvt-client-1",
+        "instrument": "BTC_USDT_Perp",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "status": "OPEN",
+        "size": "0.01",
+        "filled_size": "0.004",
+        "limit_price": "64000",
+        "created_at": "2026-06-08T12:00:00Z",
+        "updated_at": "2026-06-08T12:00:01Z"
+      },
+      {
+        "order_id": "grvt-order-2",
+        "client_order_id": "grvt-client-2",
+        "instrument": "BTC_USDT_Perp",
+        "side": "SELL",
+        "order_type": "LIMIT",
+        "status": "PARTIALLY_FILLED",
+        "size": "0.02",
+        "filled_size": "0.01",
+        "limit_price": "65000",
+        "created_at": "2026-06-08T12:05:00Z",
+        "updated_at": "2026-06-08T12:05:01Z"
+      }
+    ]
+  }
+}

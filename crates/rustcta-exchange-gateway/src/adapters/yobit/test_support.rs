@@ -14,6 +14,8 @@ pub(super) struct SeenRequest {
     pub(super) query: HashMap<String, String>,
     pub(super) headers: HashMap<String, String>,
     pub(super) body: Option<Value>,
+    pub(super) body_text: String,
+    pub(super) form: HashMap<String, String>,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -32,7 +34,20 @@ pub(super) async fn spawn_rest_server(
             };
             let mut buffer = vec![0_u8; 8192];
             let bytes_read = stream.read(&mut buffer).await.unwrap();
-            let request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            if bytes_read == 0 {
+                continue;
+            }
+            let mut request_bytes = buffer[..bytes_read].to_vec();
+            if let Some(content_length) = content_length(&request_bytes) {
+                while body_len(&request_bytes) < content_length {
+                    let bytes_read = stream.read(&mut buffer).await.unwrap();
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    request_bytes.extend_from_slice(&buffer[..bytes_read]);
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request_bytes).to_string();
             seen_requests
                 .lock()
                 .unwrap()
@@ -53,6 +68,24 @@ pub(super) async fn spawn_rest_server(
     });
 
     (format!("http://{address}"), seen)
+}
+
+fn content_length(request: &[u8]) -> Option<usize> {
+    let text = String::from_utf8_lossy(request);
+    text.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse().ok())
+            .flatten()
+    })
+}
+
+fn body_len(request: &[u8]) -> usize {
+    request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| request.len().saturating_sub(index + 4))
+        .unwrap_or(0)
 }
 
 fn parse_seen_request(request_text: &str) -> SeenRequest {
@@ -84,6 +117,23 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
     let body = request_text
         .split_once("\r\n\r\n")
         .map(|(_, body)| body.trim())
+        .unwrap_or_default()
+        .to_string();
+    let form = body
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (
+                key.to_string(),
+                urlencoding::decode(value)
+                    .map(|value| value.into_owned())
+                    .unwrap_or_else(|_| value.to_string()),
+            )
+        })
+        .collect();
+    let json_body = (!body.is_empty())
+        .then_some(body.as_str())
         .filter(|body| !body.is_empty())
         .and_then(|body| serde_json::from_str(body).ok());
     SeenRequest {
@@ -91,7 +141,9 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         path: path.to_string(),
         query,
         headers,
-        body,
+        body: json_body,
+        body_text: body,
+        form,
     }
 }
 

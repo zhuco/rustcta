@@ -1,0 +1,29 @@
+{
+  "method": "depth.update",
+  "data": {
+    "market": "BTCUSDT",
+    "is_full": false,
+    "depth": {
+      "asks": [
+        [
+          "100.5",
+          "2.0"
+        ]
+      ],
+      "bids": [
+        [
+          "100.0",
+          "0"
+        ],
+        [
+          "99.5",
+          "0.5"
+        ]
+      ],
+      "last": "100.1",
+      "updated_at": 1689152421892,
+      "checksum": 43041355
+    }
+  },
+  "id": null
+}

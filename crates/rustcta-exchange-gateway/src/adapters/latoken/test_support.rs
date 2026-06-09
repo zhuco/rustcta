@@ -12,6 +12,16 @@ pub(super) struct SeenRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) body: Option<Value>,
+    headers: HashMap<String, String>,
+}
+
+impl SeenRequest {
+    pub(super) fn header(&self, key: &str) -> Option<&str> {
+        self.headers
+            .get(&key.to_ascii_lowercase())
+            .map(String::as_str)
+    }
 }
 
 pub(super) async fn spawn_rest_server(
@@ -70,10 +80,26 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
             (key.to_string(), value.to_string())
         })
         .collect();
+    let headers = request_text
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    let body = request_text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.trim())
+        .filter(|body| !body.is_empty())
+        .and_then(|body| serde_json::from_str(body).ok());
     SeenRequest {
         method,
         path: path.to_string(),
         query,
+        body,
+        headers,
     }
 }
 
@@ -100,4 +126,15 @@ pub(super) fn symbol_scope() -> SymbolScope {
         exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Spot, "BTC_USDT")
             .expect("symbol"),
     }
+}
+
+pub(super) fn private_adapter(base_url: String) -> super::LatokenGatewayAdapter {
+    super::LatokenGatewayAdapter::new(super::LatokenGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..super::LatokenGatewayConfig::default()
+    })
+    .expect("adapter")
 }

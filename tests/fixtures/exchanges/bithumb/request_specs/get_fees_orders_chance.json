@@ -1,0 +1,28 @@
+{
+  "exchange": "bithumb",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/orders/chance",
+  "auth": "jwt",
+  "query": {
+    "market": {
+      "match": "exact",
+      "value": "KRW-BTC"
+    }
+  },
+  "headers": {
+    "Authorization": {
+      "match": "prefix",
+      "value": "Bearer "
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "bithumb/jwt_query_hash",
+  "body": null
+}

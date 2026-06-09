@@ -1,0 +1,8 @@
+{
+  "Event": "Subscriptions",
+  "Data": [
+    "orderbook-xbt",
+    "ticker-xbt"
+  ],
+  "Time": 1689718230428
+}

@@ -1,0 +1,25 @@
+{
+  "exchange": "latoken",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v2/auth/order/getOrder/12609cf4-fca5-43ed-b0ea-b40fb48d3b0d",
+  "auth": "signed",
+  "headers": {
+    "X-LA-APIKEY": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "X-LA-SIGNATURE": {
+      "match": "present"
+    },
+    "X-LA-DIGEST": {
+      "match": "present"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "expected_error_until_promoted": "latoken.query_order_request_spec_only"
+}

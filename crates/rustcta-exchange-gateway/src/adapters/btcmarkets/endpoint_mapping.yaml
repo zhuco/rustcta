@@ -41,12 +41,41 @@ websocket:
     support: spec_only
     url: wss://socket.btcmarkets.net/v2
     channels: [orderbook, trade]
+    order_book:
+      channel: orderbook
+      subscribe_payload:
+        messageType: subscribe
+        channels: [orderbook]
+        marketIds: ["{marketId}"]
+      update_semantics: latest_book_state
+      interval_ms: null
+      interval_source: "official WebSocket v2 docs do not publish a fixed orderbook update interval"
+      depth: 50
+      depth_source: "orderbook message carries up to 50 bids and 50 asks"
+      sequence:
+        field: null
+        contiguous: false
+        gap_detection: unsupported_no_official_sequence
+        risk: "No sequence/update id is documented for BTC Markets public orderbook WS."
+      checksum:
+        supported: false
+        mode: none_documented
+        risk: "No checksum is documented for BTC Markets public orderbook WS."
+      heartbeat:
+        message_type: heartbeat
+        interval_ms: 5000
+      resync:
+        mode: rest_snapshot_rebuild
+        rest_endpoint_operation: get_order_book
+        triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]
     resync: rest_order_book_snapshot
   private:
     support: spec_only
     channels: [order_change, fund_change]
     fallback: rest_reconciliation
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile is Spot-only and exposes no standard futures/perpetual/options product line."
   - positions
   - amend_order
   - order_list
@@ -152,6 +181,34 @@ endpoints:
     request_spec_required: true
     native_batch: true
     atomicity: non_atomic
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /unsupported/btcmarkets/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcmarkets.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/btcmarkets/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcmarkets.order_list_unsupported
   - operation: cancel_all_orders
     product: spot
     transport: rest
@@ -194,3 +251,35 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/btcmarkets/request_specs/get_recent_fills.json
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    market_types: [spot]
+    transport: websocket
+    protocol: json
+    url: wss://socket.btcmarkets.net/v2
+    channel: orderbook
+    support: spec_only
+    subscribe:
+      messageType: subscribe
+      channels: [orderbook]
+      marketIds: ["{marketId}"]
+      helper: public_ws_session
+    message:
+      parser: parse_public_stream_message
+      fixture: tests/fixtures/exchanges/btcmarkets/ws_orderbook.json
+      messageType: orderbook
+      bids_field: bids
+      asks_field: asks
+      update_semantics: latest_book_state
+    interval_ms: null
+    depth: 50
+    sequence_fields: []
+    checksum: none_documented
+    heartbeat:
+      messageType: heartbeat
+      interval_ms: 5000
+    resync:
+      mode: rest_snapshot_rebuild
+      endpoint_operation: get_order_book
+      triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]

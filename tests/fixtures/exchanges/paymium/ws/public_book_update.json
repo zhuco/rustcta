@@ -1,0 +1,17 @@
+{
+  "event": "stream",
+  "data": {
+    "bids": [
+      {
+        "price": "64125.5",
+        "amount": "0.33"
+      }
+    ],
+    "asks": [
+      {
+        "price": "64280.0",
+        "amount": "0"
+      }
+    ]
+  }
+}

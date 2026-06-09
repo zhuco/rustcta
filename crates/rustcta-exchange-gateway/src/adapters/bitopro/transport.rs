@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::Utc;
+use reqwest::Method;
 use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
@@ -69,6 +70,57 @@ impl BitoproRest {
             .header("X-BITOPRO-APIKEY", headers.api_key)
             .header("X-BITOPRO-PAYLOAD", headers.payload_base64)
             .header("X-BITOPRO-SIGNATURE", headers.signature)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_delete(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        identity: &str,
+        path: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let payload = signing::payload_for_get_delete(identity, Utc::now().timestamp_millis())?;
+        let headers = signing::sign_headers(api_key, api_secret, payload)?;
+        let url = build_url(&self.rest_base_url, path, params);
+        let response = self
+            .http
+            .delete(url)
+            .header("X-BITOPRO-APIKEY", headers.api_key)
+            .header("X-BITOPRO-PAYLOAD", headers.payload_base64)
+            .header("X-BITOPRO-SIGNATURE", headers.signature)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_json(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        method: Method,
+        path: &str,
+        body: &Value,
+    ) -> ExchangeApiResult<Value> {
+        let payload = signing::payload_for_body(body)?;
+        let headers = signing::sign_headers(api_key, api_secret, payload)?;
+        let url = build_url(&self.rest_base_url, path, &HashMap::new());
+        let response = self
+            .http
+            .request(method, url)
+            .header("X-BITOPRO-APIKEY", headers.api_key)
+            .header("X-BITOPRO-PAYLOAD", headers.payload_base64)
+            .header("X-BITOPRO-SIGNATURE", headers.signature)
+            .json(body)
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

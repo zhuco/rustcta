@@ -17,5 +17,19 @@
   },
   "canonical_auth_input": "base64(json-body) signed with HMAC-SHA512",
   "credential_scope": "read_only",
+  "response_sample": {
+    "success": true,
+    "result": {
+      "BTC": {
+        "available": "0.01000000",
+        "freeze": "0.00200000"
+      },
+      "USDT": {
+        "available": "100.00000000",
+        "freeze": "0.00000000"
+      }
+    }
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns p2b.balances_request_spec_only until signed private read runtime, parser, and reconciliation are promoted.",
   "expected_error_until_promoted": "p2b.balances_request_spec_only"
 }

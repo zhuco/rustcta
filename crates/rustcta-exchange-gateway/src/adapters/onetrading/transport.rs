@@ -61,6 +61,31 @@ impl OneTradingPublicRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_private_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let token = self
+            .api_token
+            .as_deref()
+            .filter(|token| !token.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        let request = self
+            .http
+            .get(build_url(&self.rest_base_url, endpoint, params))
+            .header("Authorization", onetrading_authorization(token)?)
+            .header("Accept", "application/json");
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 pub fn public_get_request_spec(path: &str, query: Value) -> Value {

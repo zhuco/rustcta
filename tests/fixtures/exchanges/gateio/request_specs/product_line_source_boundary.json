@@ -1,0 +1,72 @@
+{
+  "exchange": "gateio",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["spot", "perpetual_usdt"],
+  "official_product_lines": ["spot", "perpetual_usdt", "delivery_futures", "options"],
+  "official_sources": [
+    {
+      "surface": "Gate.io API v4 Spot and Futures endpoints",
+      "evidence": "The current adapter wires Spot and USDT perpetual futures request paths, parsers, private readback, positions and order lifecycle."
+    },
+    {
+      "surface": "Gate.io API v4 Delivery Futures and Options endpoint families",
+      "evidence": "Delivery Futures and Options require separate metadata, order book, account/position/risk and private order lifecycle routing from the current /futures/usdt perpetual runtime."
+    }
+  ],
+  "runtime_isolation": "Do not route Delivery Futures or Options symbols through the existing Spot or /futures/usdt perpetual paths. Add explicit market-type routing and parser coverage before promotion.",
+  "required_endpoints": {
+    "delivery_market_metadata": [
+      "delivery contracts",
+      "delivery settlement or delivery schedule",
+      "delivery contract risk and size fields"
+    ],
+    "delivery_public_market_data": [
+      "delivery order book snapshot",
+      "delivery public order book stream"
+    ],
+    "delivery_private_account": [
+      "delivery account or margin balance",
+      "delivery positions",
+      "delivery trade fees or contract risk readback"
+    ],
+    "delivery_order_lifecycle": [
+      "delivery place order",
+      "delivery cancel order",
+      "delivery query/open orders",
+      "delivery fills"
+    ],
+    "options_market_metadata": [
+      "option underlyings",
+      "option contracts",
+      "option greeks/settlement/risk fields"
+    ],
+    "options_public_market_data": [
+      "option order book snapshot",
+      "option public order book stream"
+    ],
+    "options_private_account": [
+      "option account or margin balance",
+      "option positions",
+      "option risk readback"
+    ],
+    "options_order_lifecycle": [
+      "option place order",
+      "option cancel order",
+      "option query/open orders",
+      "option fills"
+    ]
+  },
+  "unsafe_to_promote_without": [
+    "Delivery/Options market-type routing isolated from Spot and USDT perpetual",
+    "metadata and order book fixtures for each product line",
+    "account, position and risk parser coverage",
+    "signed private order lifecycle request specs",
+    "post-write query/open/fills reconciliation"
+  ],
+  "remaining_work": [
+    "pin Delivery Futures metadata/orderbook/account/position/order endpoints",
+    "pin Options underlyings/contracts/orderbook/account/position/order endpoints",
+    "add request specs, parser fixtures and guarded runtime tests for each product line"
+  ]
+}

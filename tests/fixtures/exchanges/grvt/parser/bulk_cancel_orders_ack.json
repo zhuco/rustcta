@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "result": {
+    "results": [
+      {
+        "success": true,
+        "order_id": "grvt-order-3001",
+        "client_order_id": "grvt-bulk-cancel-1",
+        "instrument": "BTC_USDT_Perp",
+        "side": "SELL",
+        "order_type": "LIMIT",
+        "status": "CANCELLED",
+        "size": "0.001",
+        "limit_price": "65100",
+        "filled_size": "0",
+        "updated_at": "2026-06-08T12:02:00Z"
+      },
+      {
+        "success": false,
+        "order_id": "grvt-order-3002",
+        "client_order_id": "grvt-bulk-cancel-2",
+        "code": "ORDER_NOT_FOUND",
+        "message": "order not found"
+      }
+    ]
+  }
+}

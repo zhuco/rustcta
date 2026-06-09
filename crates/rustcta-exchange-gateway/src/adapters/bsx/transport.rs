@@ -4,6 +4,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::ExchangeId;
 use serde_json::Value;
 
+use super::signing;
+
 #[derive(Clone)]
 pub struct BsxRest {
     exchange_id: ExchangeId,
@@ -46,6 +48,50 @@ impl BsxRest {
         parse_response(&self.exchange_id, response).await
     }
 
+    pub async fn send_signed_get(
+        &self,
+        path: &str,
+        query: &[(String, String)],
+        auth: &BsxRestAuth,
+    ) -> ExchangeApiResult<Value> {
+        let normalized_path = normalized_path(path);
+        let timestamp_ns = chrono::Utc::now().timestamp_nanos_opt().ok_or_else(|| {
+            ExchangeApiError::Transport {
+                message: "failed to build BSX auth timestamp".to_string(),
+            }
+        })?;
+        let query_string = canonical_query(query);
+        let signature = signing::bsx_rest_auth_signature(
+            &auth.api_key,
+            &auth.api_secret,
+            timestamp_ns.into(),
+            "GET",
+            &normalized_path,
+            &query_string,
+        );
+        let mut request = self
+            .http
+            .get(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                normalized_path
+            ))
+            .header("BSX-KEY", auth.api_key.trim())
+            .header("BSX-SIGNATURE", signature)
+            .header("BSX-TIMESTAMP", timestamp_ns.to_string())
+            .header("BSX-ACCOUNT", auth.wallet_address.trim());
+        if !query.is_empty() {
+            request = request.query(query);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(&self.exchange_id, response).await
+    }
+
     pub fn products_path() -> &'static str {
         "/products"
     }
@@ -56,6 +102,14 @@ impl BsxRest {
 
     pub fn open_orders_path() -> &'static str {
         "/orders"
+    }
+
+    pub fn query_order_path(order_id: &str) -> String {
+        format!("/orders/{}", sanitize_path_segment(order_id))
+    }
+
+    pub fn recent_fills_path() -> &'static str {
+        "/trades"
     }
 
     pub fn place_order_path() -> &'static str {
@@ -73,6 +127,13 @@ impl BsxRest {
             normalized_path(path)
         )
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct BsxRestAuth {
+    pub api_key: String,
+    pub api_secret: String,
+    pub wallet_address: String,
 }
 
 async fn parse_response(
@@ -115,4 +176,17 @@ fn sanitize_path_segment(segment: &str) -> String {
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
         .collect()
+}
+
+fn canonical_query(query: &[(String, String)]) -> String {
+    let mut pairs = query
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    pairs.sort_by(|left, right| left.0.cmp(right.0).then_with(|| left.1.cmp(right.1)));
+    pairs
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
 }

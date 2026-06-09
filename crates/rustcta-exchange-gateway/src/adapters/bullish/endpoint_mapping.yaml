@@ -35,8 +35,33 @@ websocket:
   public:
     support: native
     channels: [l1Orderbook, l2Orderbook, trades, tick]
+    order_book:
+      url_path: /trading-api/v1/market-data/orderbook
+      topics: [l1Orderbook, l2Orderbook]
+      subscribe:
+        jsonrpc: "2.0"
+        type: command
+        method: subscribe
+        params: { topic: "{topic}", symbol: "{symbol}" }
+      unsubscribe:
+        jsonrpc: "2.0"
+        type: command
+        method: unsubscribe
+        params: { topic: "{topic}", symbol: "{symbol}" }
+      update_mode: live real-time; official docs do not publish a fixed millisecond interval.
+      push_interval_ms: null
+      depth: null
+      depth_boundary: no fixed depth parameter published.
+      sequence_fields: [sequenceNumber, sequenceNumberRange]
+      sequence_policy: reconnect_on_out_of_order_or_gap
+      checksum: unsupported
+      snapshot: REST /trading-api/v1/markets/{symbol}/orderbook/hybrid
+      resync_policy: Use REST hybrid snapshot after disconnect, stale book, or sequence gap.
+      parser: crates/rustcta-exchange-gateway/src/adapters/bullish/streams.rs
+      fixture: tests/fixtures/exchanges/bullish/ws_public_orderbook.json
     heartbeat: { mode: json_rpc_keepalive_ping, interval_ms: 240000, timeout_ms: 30000 }
-    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+    reconnect: { requires_resubscribe: true, stale_message_ms: 300000 }
+    resync: { mode: rest_hybrid_snapshot, endpoint_operation: order_book }
   private:
     support: jwt_cookie_required
     channels: [orders, trades, assetAccounts, derivativesPositions]
@@ -73,7 +98,7 @@ endpoints:
     testnet: true
     support: native
     response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bullish/orderbook_hybrid.json }
-  - operation: balances
+  - operation: get_balances
     product: mixed
     market_types: [spot, perpetual, futures]
     transport: rest
@@ -88,7 +113,9 @@ endpoints:
     atomicity: not_applicable
     testnet: true
     support: spec_only
+    reason: "Bullish asset account readback is fixture-backed, but shared get_balances runtime remains disabled pending JWT/session lifecycle, tradingAccountId scope guard, asset balance parser, and REST/private-stream reconciliation."
     request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_asset_accounts.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/bullish/request_specs/get_asset_accounts.json }
   - operation: positions
     product: perpetual
     market_types: [perpetual, futures]
@@ -185,12 +212,13 @@ endpoints:
     testnet: true
     support: spec_only
     request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/amend_order.json }
-    notes: Official V1AmendOrder exists for open unfilled limit orders, but runtime support is not promoted.
+    reason: bullish.amend_order_offline_jwt_nonce_reconciliation_blocked
+    notes: "Official V1AmendOrder exists for open unfilled limit orders. Keep offline: code has no JWT refresh/login lifecycle, no monotonic BX-NONCE/nonce-window guard, no amend response parser/readback reconciliation, and no dry-run guard for live private writes."
   - operation: batch_place_orders
     product: mixed
     market_types: [spot, perpetual, futures]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/bullish/batch_place_orders
     auth: unsupported
     rate_limit_bucket: bullish_unsupported
@@ -205,7 +233,7 @@ endpoints:
     product: mixed
     market_types: [spot, perpetual, futures]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/bullish/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: bullish_unsupported
@@ -248,11 +276,11 @@ endpoints:
     testnet: false
     support: unsupported
     reason: no verified quote-sized market order mapping in Bullish REST command schema
-  - operation: order_list
+  - operation: place_order_list
     product: mixed
     market_types: [spot, perpetual, futures]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/bullish/order_list
     auth: unsupported
     rate_limit_bucket: bullish_unsupported
@@ -263,7 +291,7 @@ endpoints:
     testnet: false
     support: unsupported
     reason: no official OCO/OTO order-list endpoint found
-  - operation: fees
+  - operation: get_fees
     product: mixed
     market_types: [spot, perpetual, futures]
     transport: rest
@@ -279,4 +307,5 @@ endpoints:
     testnet: true
     support: spec_only
     request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_trading_accounts_fees.json }
-    notes: Fee data is derived from tradeFeeRate on trading-account payloads and feeGroupId in market metadata; runtime fee endpoint is not promoted.
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/bullish/request_specs/get_trading_accounts_fees.json }
+    reason: "Bullish fee data is derived from tradeFeeRate on trading-account payloads and feeGroupId in market metadata, but shared get_fees runtime remains disabled pending JWT/session lifecycle, tradingAccountId/feeGroup scope guard, maker/taker parser, and REST/private-stream reconciliation."

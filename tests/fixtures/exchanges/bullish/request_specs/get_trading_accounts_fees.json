@@ -1,5 +1,5 @@
 {
-  "operation": "fees",
+  "operation": "get_fees",
   "method": "GET",
   "path": "/trading-api/v1/accounts/trading-accounts",
   "auth": "bearer_jwt",

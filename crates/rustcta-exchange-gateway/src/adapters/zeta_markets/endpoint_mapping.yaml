@@ -15,7 +15,7 @@ base_urls:
   solana_rpc: https://api.mainnet-beta.solana.com
 auth:
   public_rest: none
-  private_read_rest: unsupported; historical reads require wallet-owned Solana margin account audit
+  private_read_rest: spec_only; historical reads require wallet-owned Solana margin account audit and venue shutdown guard
   private_write_rest: unsupported; historical trading used wallet-signed Solana SDK transactions and venue is shut down
 rate_limits:
   zeta_markets_public: { scope: ip, interval_ms: 1000, limit: 5 }
@@ -25,7 +25,7 @@ pagination:
   public_orderbook: { mode: none }
   private_history: { mode: unsupported }
 reconciliation:
-  private_state: unsupported
+  private_state: project_unimplemented_legacy_margin_account_source
   public_orderbook: rest_poll
   notes: Public WS runtime is not mapped; order book resync falls back to /v2/orderbook polling when the legacy public data API is available.
 batch:
@@ -39,6 +39,27 @@ websocket:
   private:
     support: unsupported
     reason: zeta_markets.private_streams_require_wallet_owned_margin_account
+
+unsupported:
+  - operation: spot_product
+    reason: "交易所不支持现货：legacy Zeta Markets adapter maps the original Solana derivatives/perpetual venue only, and the venue has ceased operations."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：原 Zeta venue 已停止运营；legacy adapter 不补 live private fee runtime。"
+  - operation: get_positions
+    status: project_unimplemented
+    source_boundary_fixture: tests/fixtures/exchanges/zeta_markets/request_specs/get_positions_margin_account_source.json
+    reason: "Legacy Zeta positions were wallet-owned Solana margin account state, not a CEX API-key endpoint; shared get_positions runtime is project-unimplemented because the venue ceased operations and no SDK/account decoder, public-key guard, slot/reorg policy, or reconciliation is wired."
+  - operation: place_order
+    reason: "交易所不支持当前交易/私有接口 runtime：原 Zeta venue 已停止运营；legacy adapter 只保留 public scan，不补 live place_order runtime。"
+  - operation: cancel_order
+    reason: "交易所不支持当前交易/私有接口 runtime：原 Zeta venue 已停止运营；legacy adapter 只保留 public scan，不补 live cancel_order runtime。"
+  - operation: query_order
+    reason: "交易所不支持当前交易/私有接口 runtime：原 Zeta venue 已停止运营；legacy adapter 只保留 public scan，不补 live query_order runtime。"
+  - operation: get_open_orders
+    reason: "交易所不支持当前交易/私有接口 runtime：原 Zeta venue 已停止运营；legacy adapter 只保留 public scan，不补 live get_open_orders runtime。"
+  - operation: get_recent_fills
+    reason: "交易所不支持当前交易/私有接口 runtime：原 Zeta venue 已停止运营；legacy adapter 只保留 public scan，不补 live get_recent_fills runtime。"
+
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -77,31 +98,33 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/zeta_markets/balances
-    auth: unsupported
+    path: solana_margin_account_source_boundary
+    auth: none
     rate_limit_bucket: zeta_markets_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: zeta_markets.balances_require_solana_margin_account_sdk_audit
+    support: spec_only
+    reason: "Legacy Zeta balance/equity readback is wallet-owned Solana margin account state, not a CEX API-key balance endpoint; keep offline because the original venue ceased operations and no SDK/account decoder, public-key scope guard, slot/reorg policy, or reconciliation runtime is wired."
+    request_spec_fixture: tests/fixtures/exchanges/zeta_markets/request_specs/get_balances_margin_account_source.json
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/zeta_markets/positions
-    auth: unsupported
+    method: SOURCE_READ
+    path: source://zeta_markets/solana-margin-positions
+    auth: none
     rate_limit_bucket: zeta_markets_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: zeta_markets.positions_require_solana_margin_account_sdk_audit
+    support: spec_only
+    reason: "Legacy Zeta position readback is wallet-owned Solana margin account state; keep offline because the original venue ceased operations and no SDK/account decoder, public-key scope guard, slot/reorg policy, or reconciliation runtime is wired."
+    request_spec_fixture: tests/fixtures/exchanges/zeta_markets/request_specs/get_positions_margin_account_source.json
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
@@ -132,11 +155,41 @@ endpoints:
     testnet: false
     support: unsupported
     reason: zeta_markets.cancel_order_unsupported_venue_ceased_operations
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/zeta_markets/amend_order
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.amend_order_unsupported_venue_ceased_operations
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/zeta_markets/order_list
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.order_list_unsupported_venue_ceased_operations
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/zeta_markets/batch_place_orders
     auth: unsupported
     rate_limit_bucket: zeta_markets_unsupported
@@ -151,7 +204,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: DELETE
+    method: UNSUPPORTED
     path: /unsupported/zeta_markets/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: zeta_markets_unsupported

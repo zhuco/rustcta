@@ -1,0 +1,23 @@
+{
+  "adapter": "btcturk",
+  "boundary": "core_trading_source_boundary",
+  "status": "runtime_enabled",
+  "operations": [
+    "query_order",
+    "get_open_orders",
+    "get_recent_fills"
+  ],
+  "source": {
+    "auth": "signed private REST",
+    "paths": [
+      "GET /api/v1/order/{orderId}",
+      "GET /api/v1/openOrders",
+      "GET /api/v1/users/transactions/trade"
+    ]
+  },
+  "runtime_gap": [
+    "write operations remain offline request-spec-only",
+    "client-order-id lookup is unsupported for query_order",
+    "cursor/time-window fill filters are not promoted"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "exchange": "krakenfutures",
+  "operation": "krakenfutures.get_fees",
+  "boundary_type": "private_fee_schedule_volumes_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "official_fee_schedule_volumes_endpoint",
+    "source_url": "https://docs.kraken.com/api/docs/futures-api/trading/fee-schedules/",
+    "last_reviewed": "2026-06-09",
+    "products": ["perpetual", "futures"],
+    "transport": "rest",
+    "auth": "futures_private_auth",
+    "effective_fee_kind": "maker_taker_by_fee_schedule_volume",
+    "account_effective_fee_requires": [
+      "read_only_futures_credentials",
+      "fee_schedule_volume_parser",
+      "product_fee_schedule_mapping"
+    ]
+  },
+  "default_or_override_strategy": {
+    "public_fee_table_allowed_for_backtest_only": true,
+    "production_requires_private_fee_schedule_readback_or_explicit_override": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "krakenfutures.fee_schedule_source_only",
+  "remaining_work": [
+    "request_spec",
+    "private_auth_smoke",
+    "fee_schedule_volume_parser",
+    "shared_get_fees_response_mapping"
+  ]
+}

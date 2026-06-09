@@ -1,0 +1,35 @@
+{
+  "exchange": "bitbns",
+  "operation": "bitbns.get_balances",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/trade/v1/currentCoinBalance/{symbol}",
+  "auth": "hmac_sha512",
+  "query": {},
+  "headers": {
+    "X-BITBNS-APIKEY": "<redacted:api-key>",
+    "X-BITBNS-PAYLOAD": "<redacted:base64-json-payload>",
+    "X-BITBNS-SIGNATURE": "<redacted:hmac-sha512-hex>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "symbol": "BTC",
+    "timeStamp_nonce": "1700000000000",
+    "body": {}
+  },
+  "canonical_auth_input": "base64(json(symbol,timeStamp_nonce,body)) signed with HMAC-SHA512",
+  "credential_scope": "read_only",
+  "response_sample": {
+    "data": {
+      "inorderBTC": 0.002,
+      "availableorderBTC": 0.01
+    },
+    "status": 1,
+    "error": null
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns bitbns.balances_disabled until private signing, parser, KYC/region guard, and reconciliation are promoted.",
+  "expected_error_until_promoted": "bitbns.balances_disabled"
+}

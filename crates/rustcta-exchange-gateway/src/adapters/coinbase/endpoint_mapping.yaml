@@ -46,6 +46,41 @@ batch:
 websocket:
   public:
     support: native
+    url: wss://advanced-trade-ws.coinbase.com
+    subscribe:
+      type: subscribe
+      payload:
+        type: subscribe
+        product_ids: ["{product_id}"]
+        channel: "{channel}"
+        jwt: optional
+    channels:
+      heartbeat:
+        channel: heartbeats
+        interval_ms: event_driven
+        sequence: none
+      orderbook_level2:
+        channel: level2
+        products: [spot, perpetual]
+        interval_ms: event_driven
+        depth: full_level2_delta
+        message_types: [snapshot, update]
+        sequence: sequence_num
+        sequence_policy:
+          continuity: next sequence_num must be previous sequence_num + 1 after initial snapshot
+          gap_policy: reconnect_resubscribe_and_fetch_rest_product_book_snapshot
+        checksum: none
+        update_semantics: absolute new_quantity at changed price levels; quantity 0 deletes the level
+        resync: subscribe level2 plus heartbeats, fetch REST /api/v3/brokerage/product_book on connect/reconnect or sequence_num gap/regression
+      ticker:
+        channel: ticker
+        interval_ms: event_driven
+      trades:
+        channel: market_trades
+        interval_ms: event_driven
+      candles:
+        channel: candles
+        interval_ms: interval_param
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
@@ -102,6 +137,23 @@ endpoints:
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/get_balances.json }
     response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/balances_success.json }
+  - operation: get_fees
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /transaction_summary
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinbase_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs }
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
@@ -185,6 +237,38 @@ endpoints:
     testnet: false
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/batch_cancel_orders.json }
+  - operation: amend_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: PATCH
+    path: /unsupported/coinbase/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinbase_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: coinbase.amend_order_not_mapped_losslessly
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/coinbase/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinbase_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: coinbase.order_list_projection_not_mapped_to_shared_order_list
   - operation: recent_fills
     product: spot
     market_types: [spot, perpetual]

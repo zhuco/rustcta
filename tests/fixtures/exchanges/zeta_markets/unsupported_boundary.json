@@ -7,6 +7,13 @@
   "trade_enabled": false,
   "private_read_enabled": false,
   "private_write_enabled": false,
+  "balance_read_boundary": {
+    "support": "spec_only",
+    "status": "project_unimplemented",
+    "account_model": "wallet_owned_solana_margin_account",
+    "requires_exchange_api_key": false,
+    "reason": "Historical balance/equity state was wallet-owned Solana margin account data; runtime remains closed because the venue ceased operations and the SDK/account decoder, scope guard, slot/reorg policy, and reconciliation are not wired."
+  },
   "public_stream_runtime_enabled": false,
   "notes": "Zeta Markets docs state the original Solana L1 venue ceased operating as of May 2025; this adapter keeps only audited legacy public data fixtures and explicit Unsupported boundaries."
 }

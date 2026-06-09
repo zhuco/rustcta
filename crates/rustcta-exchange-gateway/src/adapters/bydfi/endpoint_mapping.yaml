@@ -33,7 +33,22 @@ websocket:
   public:
     support: native
     url: wss://stream.bydfi.com/v1/public/fapi
-    subscribe: { method: SUBSCRIBE, params: ["<symbol>@depth", "<symbol>@ticker", "<symbol>@kline_1m"] }
+    channels: [depth, depth10, depth50, depth100]
+    subscribe: { method: SUBSCRIBE, params: ["<symbol>@depth", "<symbol>@depth@100ms", "<symbol>@depth10@100ms", "<symbol>@depth50@100ms", "<symbol>@depth100@100ms", "<symbol>@ticker", "<symbol>@kline_1m"] }
+    order_book:
+      path_streams:
+        - "<symbol>@depth"
+        - "<symbol>@depth@100ms"
+        - "<symbol>@depth10@100ms"
+        - "<symbol>@depth50@100ms"
+        - "<symbol>@depth100@100ms"
+      json_subscribe_channels: ["<symbol>@depth", "<symbol>@depth@100ms", "<symbol>@depth10@100ms", "<symbol>@depth50@100ms", "<symbol>@depth100@100ms"]
+      update_intervals_ms: [100, 1000]
+      depth_levels: [10, 50, 100]
+      event_type: depthUpdate
+      sequence: unsupported
+      checksum: unsupported
+      resync: rest_order_book_snapshot
     heartbeat: { method: ping, interval_ms: 30000, expected_result: pong, retention_ms: 1200000 }
   private:
     support: unsupported
@@ -47,6 +62,22 @@ unsupported:
     reason: Private WS URL/subscription lifecycle is undocumented; use REST reconciliation.
 endpoints:
   - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/market/exchange_info
+    auth: none
+    rate_limit_bucket: bydfi_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/market
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/public_tests.rs, fixture: tests/fixtures/exchanges/bydfi/instruments.json }
+  - operation: get_fees
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -248,6 +279,22 @@ endpoints:
     support: native
     official_doc: https://developers.bydfi.com/en/futures/trade
     request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/batch_cancel_orders.json
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bydfi/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bydfi.order_list_unsupported
   - operation: cancel_all_orders
     product: perpetual
     market_types: [perpetual]

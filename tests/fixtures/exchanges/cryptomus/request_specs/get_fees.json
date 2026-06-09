@@ -1,0 +1,13 @@
+{
+  "operation": "cryptomus.get_fees",
+  "method": "GET",
+  "path": "/v2/user-api/account/tariffs",
+  "auth": "cryptomus_md5_base64_body",
+  "headers": {
+    "userId": "<redacted-user-uuid>",
+    "sign": "<md5-base64-empty-body-plus-api-key>",
+    "Content-Type": "application/json"
+  },
+  "query": {},
+  "body": null
+}

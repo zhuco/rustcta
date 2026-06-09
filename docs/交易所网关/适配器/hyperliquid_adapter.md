@@ -13,6 +13,8 @@ contexts and HIP-1 onchain spot order books. Margin, options, transfers,
 withdrawals, subaccount transfers, and vault administration are out of runtime
 scope.
 
+Spot 边界写入 `spot_product status: project_unimplemented`：当前只接 perpetual metadata/book/account/order lifecycle。补 Spot 前需要 `spotMeta`/spot asset id mapping、HIP-1 spot `l2Book` parser、spot order/cancel action encoding、spot open-orders/fills/balance reconciliation 和 parser fixtures。
+
 Official references:
 
 - API docs: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
@@ -69,8 +71,9 @@ real keys, wallet addresses, vault addresses, or mnemonics.
 - `cancel_all_orders` is not mapped to shared semantics because Hyperliquid's
   schedule-cancel dead-man switch needs a separate runtime policy.
 - Shared amend is not mapped yet; native `batchModify` has different semantics.
-- Fee tiers, leverage mutation, margin operations, transfers, vault operations,
-  and withdrawals are explicitly outside this adapter runtime.
+- 费率项目未实现/未启用：Hyperliquid 官方 fee schedule/user tier source 已记录到 `tests/fixtures/exchanges/hyperliquid/request_specs/get_fees_source_boundary.json`，覆盖 Perpetual、Spot 和 HIP-3 Perps。当前只作为离线协议/config source；生产 effective fee 需要 user fee tier readback、asset scope 和 discount/referral/staking guard，默认 schedule snapshot 只可用于 backtest/估算，不能当稳定 `get_fees` runtime。
+- Leverage mutation, margin operations, transfers, vault operations, and
+  withdrawals are explicitly outside this adapter runtime.
 - Production WebSocket supervisor connection, order-book merge, and sequence
   continuity are platform follow-ups; REST `l2Book` is the resync source.
 
@@ -92,3 +95,9 @@ cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway --test task5_dex_adapters --message-format short
 cargo test -p rustcta-exchange-gateway hyperliquid --lib --message-format short
 ```
+
+## P2 Product Line Boundary (2026-06-09)
+
+`spot_product` is an official-source project boundary, not an exchange-unsupported row. Hyperliquid exposes `spotMeta`, spot asset contexts, and HIP-1 spot order books, while this adapter is scoped to USDC-settled perpetual metadata/book/account/order lifecycle.
+
+Do not promote Spot runtime from perpetual asset indexes or order actions. Promotion requires spotMeta asset-id mapping, HIP-1 spot `l2Book` public parsers, spot order/cancel action encoding, open-order/fill/balance private readback, and asset-scope reconciliation guards.

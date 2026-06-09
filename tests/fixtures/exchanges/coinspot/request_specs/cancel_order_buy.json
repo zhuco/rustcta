@@ -1,0 +1,19 @@
+{
+  "exchange": "coinspot",
+  "operation": "coinspot.cancel_order",
+  "method": "POST",
+  "path": "/api/v2/my/buy/cancel",
+  "auth": "signed",
+  "headers": {
+    "Content-Type": "application/json",
+    "key": "test-key",
+    "sign": "<hmac_sha512_json_body>"
+  },
+  "body": {
+    "nonce": 1700000000000,
+    "id": "12345678901234567890"
+  },
+  "credential_scope": "trade",
+  "boundary": "side-specific buy cancel; sell cancel uses /api/v2/my/sell/cancel",
+  "expected_error_until_promoted": "coinspot.cancel_order_side_specific"
+}

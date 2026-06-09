@@ -12,6 +12,8 @@ pub(super) struct SeenRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) headers: HashMap<String, String>,
+    pub(super) body: Option<Value>,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -54,6 +56,9 @@ pub(super) async fn spawn_rest_server(
 }
 
 fn parse_seen_request(request_text: &str) -> SeenRequest {
+    let (head, body_text) = request_text
+        .split_once("\r\n\r\n")
+        .unwrap_or((request_text, ""));
     let request_line = request_text.lines().next().unwrap_or_default();
     let method = request_line
         .split_whitespace()
@@ -70,10 +75,21 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
             (key.to_string(), value.to_string())
         })
         .collect();
+    let headers = head
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    let body = serde_json::from_str::<Value>(body_text.trim()).ok();
     SeenRequest {
         method,
         path: path.to_string(),
         query,
+        headers,
+        body,
     }
 }
 

@@ -47,8 +47,19 @@ batch:
   cancel_orders: { support: unsupported, reason: cryptomus.batch_cancel_orders_unsupported }
 websocket:
   public:
-    support: spec_only
+    support: native
     url: wss://api-ws.cryptomus.com/ws
+    order_book:
+      depth_channel: depth_subscribe
+      subscribe_method: depth_subscribe
+      update_method: depth_update
+      topic_format: "{market}:{scale_index}"
+      scale_index_param: true
+      full_reload_field: full_reload
+      interval: "no fixed ms"
+      depth: unspecified
+      sequence: none_documented
+      checksum: none_documented
     heartbeat:
       method: ping
       direction: client_ping
@@ -56,11 +67,23 @@ websocket:
       timeout_ms: 10000
     resync: rest_order_book_snapshot
   private:
-    support: spec_only
+    support: native
     url: wss://api-ws.cryptomus.com/ws?token=<one-time-token>
     auth: one_time_ws_token
     fallback: rest_reconciliation
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
+  - operation: amend_order
+    reason: "Reviewed Cryptomus Exchange order API does not expose shared in-place amend semantics."
+  - operation: place_order_list
+    reason: "Reviewed Cryptomus Exchange order API does not expose OCO/OTO/order-list semantics."
+  - operation: batch_place_orders
+    reason: "Reviewed Cryptomus Exchange order API does not expose native batch place semantics."
+  - operation: batch_cancel_orders
+    reason: "Reviewed Cryptomus Exchange order API does not expose native batch cancel semantics."
+  - operation: cancel_all_orders
+    reason: "Reviewed Cryptomus Exchange order API does not expose safe shared cancel-all semantics."
   - merchant_payment_api
   - merchant_payout_api
   - wallet_addresses
@@ -107,7 +130,7 @@ endpoints:
     rate_limit_bucket: cryptomus_private_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     response_parser:
       fixture: tests/fixtures/exchanges/cryptomus/balances.json
   - operation: get_fees
@@ -120,8 +143,11 @@ endpoints:
     rate_limit_bucket: cryptomus_private_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/cryptomus/request_specs/get_fees.json
     response_parser:
+      status: implemented
       fixture: tests/fixtures/exchanges/cryptomus/tariffs.json
   - operation: place_order
     product: spot
@@ -133,10 +159,13 @@ endpoints:
     rate_limit_bucket: cryptomus_orders
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/cryptomus/request_specs/place_order_limit.json
-    notes: "Market-order writes remain unsupported until live gating is reviewed."
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/cryptomus/ws_private_order.json
+    notes: "Limit order writes are guarded by CRYPTOMUS_PRIVATE_REST_ENABLED plus userId/API key credentials; market orders remain unsupported."
   - operation: cancel_order
     product: spot
     transport: rest
@@ -147,9 +176,13 @@ endpoints:
     rate_limit_bucket: cryptomus_orders
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/cryptomus/request_specs/cancel_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/cryptomus/orders_active.json
+    notes: "Cancel writes are guarded by CRYPTOMUS_PRIVATE_REST_ENABLED plus userId/API key credentials; unknown/short acks fall back to a cancelled order state for readback reconciliation."
   - operation: query_order
     product: spot
     transport: rest
@@ -160,7 +193,12 @@ endpoints:
     rate_limit_bucket: cryptomus_private_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/cryptomus/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/cryptomus/orders_active.json
     notes: "Active order query falls back to /v2/user-api/exchange/orders/history."
   - operation: get_open_orders
     product: spot
@@ -172,7 +210,9 @@ endpoints:
     rate_limit_bucket: cryptomus_private_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/cryptomus/request_specs/get_open_orders.json
     response_parser:
       fixture: tests/fixtures/exchanges/cryptomus/orders_active.json
   - operation: get_recent_fills
@@ -185,7 +225,9 @@ endpoints:
     rate_limit_bucket: cryptomus_private_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/cryptomus/request_specs/get_recent_fills.json
     response_parser:
       fixture: tests/fixtures/exchanges/cryptomus/orders_history.json
   - operation: place_quote_market_order
@@ -195,12 +237,96 @@ endpoints:
     auth: unsupported
     support: unsupported
     reason: cryptomus.market_order_live_write_gated
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cryptomus/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cryptomus.amend_order_unsupported
+    notes: Cryptomus Exchange order API has no shared in-place amend endpoint in the reviewed profile.
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cryptomus/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cryptomus.order_list_unsupported
+    notes: OCO/OTO/order-list semantics are not exposed by the reviewed Exchange order API.
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cryptomus/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cryptomus.batch_place_orders_unsupported
+    notes: Native batch place is not present in the reviewed Exchange order API.
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cryptomus/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cryptomus.batch_cancel_orders_unsupported
+    notes: Native batch cancel is not present in the reviewed Exchange order API.
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cryptomus/cancel-all
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cryptomus.cancel_all_orders_unsupported
+    notes: Safe shared cancel-all semantics are not present in the reviewed Exchange order API.
 streams:
   - operation: subscribe_public_order_book
     channel: depth_subscribe
+    topic: "{market}:{scale_index}"
+    update_channel: depth_update
+    scale_index_param: true
+    full_reload_field: full_reload
+    interval: "no fixed ms"
+    depth: unspecified
+    sequence: none_documented
+    checksum: none_documented
     support: spec_only
     resync:
       endpoint_operation: get_order_book
+      reason: rest_orderbook_fallback
     fixture: tests/fixtures/exchanges/cryptomus/ws_public_depth.json
   - operation: subscribe_private_orders
     channel: order_subscribe

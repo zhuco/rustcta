@@ -1,0 +1,40 @@
+{
+  "operation": "latoken.batch_place_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/v2/auth/order/placeBulk",
+  "query": {},
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256",
+    "content-type": "application/json"
+  },
+  "body": {
+    "orders": [
+      {
+        "baseCurrency": "BTC",
+        "quoteCurrency": "USDT",
+        "side": "BUY",
+        "condition": "GTC",
+        "type": "LIMIT",
+        "clientOrderId": "latoken_batch_client_order_001",
+        "price": "64000",
+        "quantity": "0.01"
+      },
+      {
+        "baseCurrency": "ETH",
+        "quoteCurrency": "USDT",
+        "side": "SELL",
+        "condition": "GTC",
+        "type": "LIMIT",
+        "clientOrderId": "latoken_batch_client_order_002",
+        "price": "3500",
+        "quantity": "0.1"
+      }
+    ]
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "latoken.batch_place_orders_request_spec_only"
+}

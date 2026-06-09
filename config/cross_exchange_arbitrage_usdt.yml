@@ -1,8 +1,6 @@
 mode: live_small
-trading_mode: live
-enable_live_trading: true
 max_live_notional_per_trade: 5.5
-enabled_symbols: []
+max_consecutive_losses: 3
 enabled_exchanges:
 - binance
 - gate
@@ -27,7 +25,7 @@ market:
   quote_asset: USDT
   market_type: perpetual
   depth_levels: 1
-  stale_quote_ms: 500
+  stale_quote_ms: 6000
   min_common_exchanges: 2
   public_book_speed: fastest
   public_book_trigger_profile: fastest_l1_10ms
@@ -37,23 +35,24 @@ market:
   top_of_book_capacity_ratio: 0.8
 thresholds:
   min_display_raw_spread: 0.001
-  min_open_raw_spread: 0.005
-  min_open_maker_taker_net_edge: 0.005
+  min_open_raw_spread: 0.01
+  min_open_maker_taker_net_edge: 0.002
   max_open_raw_spread: 0.05
   route_overrides: []
-  close_min_net_profit_pct: 0.0005
-  lock_profit_dual_taker_pct: 0.0005
-  strong_lock_profit_dual_taker_pct: 0.001
-  max_close_spread_pct: 0.0005
+  close_min_net_profit_pct: 0.002
+  lock_profit_dual_taker_pct: 0.002
+  strong_lock_profit_dual_taker_pct: 0.004
+  max_close_spread_pct: 0.002
+  expected_close_spread_pct: 0.002
 dual_taker:
   target_notional_usdt: 5.5
-  min_open_spread_pct: 0.005
+  min_open_spread_pct: 0.01
   max_open_spread_pct: 0.05
   taker_slippage_pct: 0.0005
-  close_min_net_profit_pct: 0.0005
-  expected_close_spread_pct: 0.001
+  close_min_net_profit_pct: 0.002
+  expected_close_spread_pct: 0.002
   top_of_book_capacity_ratio: 0.8
-  orderbook_stale_ms: 500
+  orderbook_stale_ms: 6000
   min_orderbook_levels: 1
   single_leg_timeout_ms: 600
   max_consecutive_single_leg_fills: 3
@@ -61,6 +60,13 @@ dual_taker:
   max_active_bundles_per_symbol: 1
   symbol_cooldown_secs: 300
   max_hold_secs: 86400
+  close_on_max_hold_requires_profit: true
+  min_open_net_profit_pct: 0.002
+execution_quality:
+  min_open_raw_spread_pct: 0.01
+  min_open_net_edge_pct: 0.002
+  min_open_executable_depth_ratio: 1.2
+  min_close_net_profit_pct: 0.002
 sizing:
   min_notional_usdt: 5.5
   target_notional_usdt: 5.5
@@ -212,8 +218,19 @@ routing:
   order_error_rate_degrade: 0.05
   auto_failover: true
   degraded_mode_blocks_new_entries: true
+disabled:
+  exchange_symbols:
+  - exchange: binance
+    market_type: perpetual
+    symbol: SPCX/USDT
+    reason: binance_tradfi_perps_agreement_required
 execution:
-  dry_run: false
+  trading_enabled: false
+  require_release_binary: true
+  private_ws_confirmation_required: true
+  private_ws_confirmation_timeout_ms: 600
+  allow_rest_readback_confirmation: false
+  open_disabled_exchanges: []
   max_hedge_retries: 1
   single_leg_timeout_ms: 600
   maker_order_ttl_ms: 5000
@@ -227,9 +244,12 @@ execution:
   taker_ioc_slippage_limit_pct: 0.0005
   open_execution_style: dual_taker
   close_execution_style: dual_taker
+private_ws:
+  timeout_ms: 15000
+  reconnect_delay_ms: 2000
 controls:
   start_paused_new_entries: false
-  start_close_only: false
+  start_close_only: true
 reconciliation:
   open_orders_interval_secs: 5
   positions_interval_secs: 10
@@ -237,8 +257,8 @@ reconciliation:
   quantity_tolerance: 1e-8
   orphan_tolerance: 1e-6
 risk:
-  stale_quote_ms: 500
-  max_book_age_ms: 500
+  stale_quote_ms: 6000
+  max_book_age_ms: 6000
   taker_slippage_buffer: 0.0005
   max_taker_slippage_pct: 0.0005
   maker_non_fill_penalty: 0.001
@@ -247,13 +267,15 @@ risk:
   max_notional_per_exchange_usdt: 100.0
   max_total_notional_usdt: 300.0
   max_single_leg_exposure_usdt: 5.5
-  max_open_bundles: 10
+  max_open_bundles: 3
   max_open_positions: 20
+  max_consecutive_losses: 3
   max_loss_per_trade_usdt: 100.0
   max_daily_loss_usdt: 500.0
   max_drawdown_usdt: 1000.0
   max_spread_loss_bps: 25.0
   max_hold_seconds: 86400
+  close_on_max_hold_requires_profit: true
   max_consecutive_single_leg_fills: 3
   symbol_cooldown_after_close_secs: 300
   max_rest_failure_rate: 0.05
@@ -283,6 +305,8 @@ volatility_universe:
 persistence:
   enabled: true
   jsonl_dir: logs/cross_exchange_arbitrage
+  trade_ledger_path: logs/cross_exchange_arbitrage/trade_events.jsonl
+  trade_ledger_queue_capacity: 8192
   clickhouse_enabled: false
   persist_market_snapshots: false
   stop_live_on_unavailable: true
@@ -290,6 +314,7 @@ dashboard:
   enabled: true
   bind_host: 0.0.0.0
   port: 8091
+  refresh_ms: 5000
 alerts:
   enabled: true
   orphan_alert: true
@@ -628,7 +653,6 @@ universe:
   - RIVER/USDT
   - RSR/USDT
   - S/USDT
-  - SAHARA/USDT
   - SAND/USDT
   - SEI/USDT
   - SENT/USDT
@@ -721,11 +745,24 @@ universe:
   - PORTAL/USDT
   - LIGHT/USDT
   - AERGO/USDT
-  mode: curated_420_three_venues_with_hot_volatility
-  target_symbol_count: 420
-  max_symbol_count: 420
+  mode: curated_408_three_venues_ws_verified
+  target_symbol_count: 408
+  max_symbol_count: 408
   include_symbols: []
-  exclude_symbols: []
+  exclude_symbols:
+  - AERGO/USDT
+  - AGT/USDT
+  - AIGENSYN/USDT
+  - AIOT/USDT
+  - BLUAI/USDT
+  - EDEN/USDT
+  - FHE/USDT
+  - GUA/USDT
+  - H/USDT
+  - HMSTR/USDT
+  - LIGHT/USDT
+  - PORTAL/USDT
+  - SAHARA/USDT
   min_24h_quote_volume: null
 detection:
   enabled: false

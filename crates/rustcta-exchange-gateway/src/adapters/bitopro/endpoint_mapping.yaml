@@ -3,9 +3,9 @@ exchange: bitopro
 adapter: rustcta_exchange_gateway::adapters::bitopro
 metadata:
   status: validated
-  last_reviewed: "2026-06-08"
+  last_reviewed: "2026-06-09"
   source: "BitoPro official v3 REST and WebSocket docs"
-  notes: "A-08 Bitopro: Taiwan Spot exchange. Public REST is executable; private read REST is signed when credentials plus identity are configured; private writes are offline request-spec only."
+  notes: "A-08 Bitopro: Taiwan Spot exchange. Public REST is executable; private read REST is signed when credentials plus identity are configured; single, batch, and cancel-all private writes are signed runtime behind explicit credentials."
 market_types:
   - spot
 products:
@@ -80,11 +80,11 @@ reconciliation:
   after_ws_gap: rest_order_book_snapshot
 batch:
   place_orders:
-    support: spec_only
+    support: native
     max_items: 10
-    atomicity: unknown
+    atomicity: non_atomic
   cancel_orders:
-    support: spec_only
+    support: native
     mode: pair_to_order_ids_map
     atomicity: partial
 websocket:
@@ -96,6 +96,36 @@ websocket:
       order_book_snapshot: /v1/pub/order-books/{PAIR}:{limit}
       trades: /v1/pub/trades/{PAIR}
       ticker: /v1/pub/tickers/{PAIR}
+    order_book:
+      product: spot
+      protocol: url_path_subscription
+      request_model: connect_to_path
+      channel: /v1/pub/order-books/{PAIR}:{limit}
+      url_template: wss://stream.bitopro.com:443/ws/v1/pub/order-books/{PAIR}:{limit}
+      multi_pair_request: wss://stream.bitopro.com:443/ws/v1/pub/order-books/{limit}?pairs={PAIR},{PAIR}
+      default_limit: 5
+      supported_limits: [1, 5, 10, 20, 30, 50]
+      interval_ms: 1000
+      push_condition: when_order_book_updated
+      update_semantics: full_order_book_snapshot
+      delta_supported: false
+      snapshot_only: true
+      sequence:
+        field: none
+        event_id_field: eventID
+        timestamp_field: timestamp
+        continuity: unsupported_event_id_is_not_book_sequence
+        gap_detection: not_applicable_snapshot_only
+      checksum: none
+      sequence_checksum_risk: no documented sequence or checksum; every message is a full-book snapshot so there is no delta replay risk
+      response_parser:
+        status: implemented
+        fixture: tests/fixtures/exchanges/bitopro/ws/public_orderbook.json
+      request_fixture: tests/fixtures/exchanges/bitopro/ws/public_orderbook_subscription.json
+      reconnect_resync:
+        strategy: fetch_rest_order_book_snapshot_then_reconnect_resubscribe
+        endpoint_operation: get_order_book
+        rest_path: /order-book/{pair}
     heartbeat:
       direction: server_ping_client_pong
       interval_ms: 20000
@@ -112,7 +142,58 @@ websocket:
       user_trades: /v1/pub/auth/user-trades
     auth: X-BITOPRO headers on websocket request
     fallback: rest_reconciliation
+streams:
+  - operation: public_orderbook_snapshot
+    transport: websocket
+    product: spot
+    market_types: [spot]
+    channel: /v1/pub/order-books/{PAIR}:{limit}
+    url: wss://stream.bitopro.com:443/ws/v1/pub/order-books/{PAIR}:{limit}
+    protocol: url_path_subscription
+    request: connect_directly_to_channel_path
+    auth: none
+    support: native
+    interval_ms: 1000
+    push_condition: when_order_book_updated
+    depth: [1, 5, 10, 20, 30, 50]
+    default_depth: 5
+    update_semantics: snapshot_only_full_order_book
+    delta_supported: false
+    sequence: none
+    sequence_detail:
+      event_id_field: eventID
+      timestamp_field: timestamp
+      continuity: unsupported_event_id_is_not_book_sequence
+    checksum: none
+    risk: no_sequence_checksum_delta_replay_risk_snapshot_only
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitopro/ws/public_orderbook_subscription.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitopro/ws/public_orderbook.json
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_after_reconnect_or_resubscribe
 endpoints:
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /ns/fees
+    auth: none
+    rate_limit_bucket: bitopro_public
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: official VIP fee schedule is fixture-backed as a config/source table only, not a live account-effective fee runtime."
+    official_doc: https://www.bitopro.com/ns/fees
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/get_fees_source_boundary.json
   - operation: get_symbol_rules
     product: spot
     transport: rest
@@ -214,15 +295,15 @@ endpoints:
     rate_limit_bucket: orders_create
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     native_batch: false
     atomicity: not_applicable
     testnet: false
     official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/create_an_order.md
     request_spec:
-      status: fixture_only
+      status: implemented
       fixture: tests/fixtures/exchanges/bitopro/request_specs/place_order_limit.json
-    notes: "Runtime write path returns Unsupported; fixture proves offline request construction only."
+    notes: "Runtime requires explicit private REST credentials plus API identity; mock test covers signed POST body and order ack parser/fallback."
   - operation: cancel_order
     product: spot
     transport: rest
@@ -233,31 +314,33 @@ endpoints:
     rate_limit_bucket: orders_cancel
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     atomicity: not_applicable
     testnet: false
     official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/cancel_an_order.md
     request_spec:
-      status: fixture_only
+      status: implemented
       fixture: tests/fixtures/exchanges/bitopro/request_specs/cancel_order.json
-    notes: "Runtime cancel path returns Unsupported; fixture proves offline request construction only."
+    notes: "Runtime requires explicit private REST credentials plus API identity; mock test covers signed DELETE path and cancelled-state parser/fallback."
   - operation: cancel_all_orders
     product: spot
     transport: rest
     method: DELETE
-    path: /orders/all
+    path: /orders/all_or_/orders/{pair}
     auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: cancel_all
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     atomicity: partial
     testnet: false
     official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/cancel_all_orders.md
     request_spec:
-      status: fixture_only
+      status: implemented
       fixture: tests/fixtures/exchanges/bitopro/request_specs/cancel_all_orders.json
+      pair_fixture: tests/fixtures/exchanges/bitopro/request_specs/cancel_all_orders_by_pair.json
+    notes: "Runtime requires explicit private REST credentials plus API identity; mock test covers signed DELETE and tests/fixtures/exchanges/bitopro/cancel_all_orders_success.json parser/fallback."
   - operation: batch_place_orders
     product: spot
     transport: rest
@@ -268,15 +351,16 @@ endpoints:
     rate_limit_bucket: batch_create
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     native_batch: true
-    atomicity: unknown
+    atomicity: non_atomic
     max_items: 10
     testnet: false
     official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/create_batch_orders.md
     request_spec:
-      status: fixture_only
+      status: implemented
       fixture: tests/fixtures/exchanges/bitopro/request_specs/batch_place_orders.json
+    notes: "Runtime requires explicit private REST credentials; mock test covers signed request body, tests/fixtures/exchanges/bitopro/batch_place_orders_success.json, and parser fallback."
   - operation: batch_cancel_orders
     product: spot
     transport: rest
@@ -287,29 +371,53 @@ endpoints:
     rate_limit_bucket: batch_cancel
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     native_batch: true
     atomicity: partial
     testnet: false
     official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/cancel_batch_orders.md
     request_spec:
-      status: fixture_only
+      status: implemented
       fixture: tests/fixtures/exchanges/bitopro/request_specs/batch_cancel_orders.json
-  - operation: get_fees
-    product: spot
-    transport: rest
-    support: unsupported
-    reason: "Public limitations-and-fees returns venue/VIP schedule, not verified account effective fee rate."
+    notes: "Runtime requires explicit private REST credentials; mock test covers signed PUT body, tests/fixtures/exchanges/bitopro/batch_cancel_orders_success.json, and cancelled-order parser fallback."
   - operation: amend_order
     product: spot
     transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitopro/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
     support: unsupported
+    native_batch: false
+    atomicity: unsupported
     reason: "No official in-place amend endpoint was found in BitoPro v3 docs."
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/bitopro/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitopro_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bitopro.order_list_unsupported
 unsupported:
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: official_vip_fee_schedule
+    source_fixture: tests/fixtures/exchanges/bitopro/request_specs/get_fees_source_boundary.json
+    reason: "BitoPro public VIP fee schedule is now recorded as an offline config source; shared get_fees runtime remains project-unimplemented pending VIP/config loader, account-effective override, and FeeRateSnapshot mapping."
   - operation: private_write_runtime
-    reason: "Place/cancel/batch/cancel-all are documented and have offline request-spec/signing fixtures, but runtime live writes stay Unsupported by global task rule."
-  - operation: futures_perpetual_margin
-    reason: "Official reviewed BitoPro v3 docs cover Spot exchange APIs only."
+    reason: "Single place/cancel, batch place/cancel, and cancel-all are runtime-backed behind explicit private REST credentials."
+  - operation: contract_product
+    reason: "Official reviewed BitoPro v3 docs cover Spot exchange APIs only; no standard futures/perpetual/options product line is exposed."
   - operation: wallet_deposit_withdraw_transfer
     reason: "Wallet endpoints are official but outside trading gateway runtime scope."
   - operation: testnet

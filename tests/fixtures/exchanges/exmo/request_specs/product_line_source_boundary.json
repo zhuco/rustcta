@@ -1,0 +1,61 @@
+{
+  "exchange": "exmo",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "spot_private_rest",
+    "spot_websocket_specs"
+  ],
+  "official_product_lines": [
+    "exmo_margin_api"
+  ],
+  "product_line_classification": {
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "EXMO Margin requires live API stability, eligibility, leverage/collateral/risk policy, position/balance parsers, and product-scoped lifecycle."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "No stable live standard futures, perpetual, or options runtime is verified for the current adapter profile."
+    },
+    "perpetual_product": {
+      "status": "unsupported",
+      "reason": "Perpetual-futures materials are treated as active-development/not a stable live API until re-audited."
+    },
+    "futures_product": {
+      "status": "unsupported",
+      "reason": "No stable live standard futures API is wired for this spot adapter."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "live_standard_futures",
+    "live_standard_perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://documenter.getpostman.com/view/10287440/SzYXWKPi",
+      "evidence": "EXMO spot API material is the current runtime scope for this adapter."
+    },
+    {
+      "url": "https://exmo.com/",
+      "evidence": "EXMO margin/perpetual material is treated as a separate product boundary and is not wired as stable live standard-contract runtime."
+    }
+  ],
+  "runtime_isolation": "Do not route EXMO Margin or active-development derivatives material through spot runtime until live API stability, account eligibility, product metadata, positions, risk, private order lifecycle, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "live margin/derivatives API stability and product scope",
+    "account eligibility, leverage, collateral, and risk mode",
+    "positions and margin balance parser fixtures",
+    "product-scoped order lifecycle and reconciliation"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_live_standard_futures_api",
+    "perpetual": "unsupported_perpetual_futures_material_not_live_api",
+    "options": "unsupported_no_live_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

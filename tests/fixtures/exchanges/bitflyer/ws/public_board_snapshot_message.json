@@ -1,0 +1,22 @@
+{
+  "jsonrpc": "2.0",
+  "method": "channelMessage",
+  "params": {
+    "channel": "lightning_board_snapshot_BTC_JPY",
+    "message": {
+      "mid_price": 5000000.0,
+      "bids": [
+        {
+          "price": 4999999.0,
+          "size": 1.25
+        }
+      ],
+      "asks": [
+        {
+          "price": 5000001.0,
+          "size": 0.75
+        }
+      ]
+    }
+  }
+}

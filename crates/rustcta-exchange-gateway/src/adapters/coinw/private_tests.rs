@@ -427,6 +427,24 @@ async fn coinw_adapter_should_parse_futures_balances_positions_and_fees() {
         .expect("fees");
     assert_eq!(fees.fees[0].maker_rate, "0.0001");
     assert_eq!(fees.fees[0].taker_rate, "0.0006");
+
+    let requests = _seen.lock().unwrap().clone();
+    assert_eq!(requests[1].method, "GET");
+    assert_eq!(requests[1].path, "/v1/perpum/positions");
+    assert_eq!(
+        requests[1].query.get("instrument").map(String::as_str),
+        Some("BTC")
+    );
+    assert_eq!(
+        requests[1].headers.get("api_key").map(String::as_str),
+        Some("key")
+    );
+    assert!(requests[1].headers.contains_key("timestamp"));
+    assert!(requests[1].headers.contains_key("sign"));
+    assert!(!requests[1]
+        .headers
+        .values()
+        .any(|value| value.contains("secret")));
 }
 
 #[tokio::test]

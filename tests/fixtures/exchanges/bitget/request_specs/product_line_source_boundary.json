@@ -1,0 +1,71 @@
+{
+  "exchange": "bitget",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot",
+    "usdt_futures_perpetual"
+  ],
+  "current_runtime_constraints": [
+    "MarketType::Perpetual is mapped to productType=USDT-FUTURES",
+    "perpetual private requests use marginCoin=USDT",
+    "USDC-FUTURES and COIN-FUTURES productType routing is not represented by the shared market type model",
+    "Spot-Margin account, borrow, liability, and margin order semantics are not represented by the Spot runtime"
+  ],
+  "official_product_lines": [
+    "USDT-FUTURES",
+    "USDC-FUTURES",
+    "COIN-FUTURES",
+    "Spot-Margin"
+  ],
+  "official_sources": [
+    {
+      "url": "https://www.bitget.com/api-doc/contract/intro",
+      "evidence": "Bitget Futures API documents three product types for REST and WebSocket: USDT-FUTURES, USDC-FUTURES, and COIN-FUTURES."
+    },
+    {
+      "url": "https://www.bitget.com/api-doc/contract/market/Get-All-Symbols-Contracts",
+      "evidence": "The contract config endpoint requires productType and lists USDT-FUTURES, COIN-FUTURES, and USDC-FUTURES."
+    },
+    {
+      "url": "https://www.bitget.com/api-doc/contract/account/Get-Account-List",
+      "evidence": "The futures account-list endpoint also scopes account readback by productType across USDT-FUTURES, COIN-FUTURES, and USDC-FUTURES."
+    },
+    {
+      "url": "https://www.bitget.com/api-doc/margin/intro",
+      "evidence": "Bitget documents a separate Spot-Margin API surface."
+    }
+  ],
+  "runtime_isolation": "Do not promote USDC-FUTURES, COIN-FUTURES, or Spot-Margin from the existing Spot plus USDT-FUTURES runtime. Each product line needs explicit productType/profile guards, metadata and book fixtures, account/position or liability parsers, signed request specs, and post-write readback reconciliation.",
+  "required_endpoints": {
+    "usdc_futures": [
+      "contracts metadata with productType=USDC-FUTURES",
+      "order book, ticker, trades, and funding for USDC-FUTURES",
+      "account balances and positions scoped to USDC-FUTURES",
+      "place, cancel, cancel-all, query, open-orders, and fills scoped to USDC-FUTURES"
+    ],
+    "coin_futures": [
+      "contracts metadata with productType=COIN-FUTURES",
+      "order book, ticker, trades, and funding or delivery data for COIN-FUTURES",
+      "coin-margined account balances and positions",
+      "place, cancel, cancel-all, query, open-orders, and fills scoped to COIN-FUTURES"
+    ],
+    "margin": [
+      "margin product or symbol scope",
+      "margin assets, liabilities, borrow/repay state, and risk state",
+      "margin place, cancel, query, open-orders, and fills",
+      "margin mode and permission guard"
+    ]
+  },
+  "unsafe_to_promote_without": [
+    "productType and settlement coin guards",
+    "separate parser fixtures for USDC-FUTURES and COIN-FUTURES metadata/account/position/order responses",
+    "margin liability and borrow/repay parser fixtures",
+    "private signed request specs for each product line",
+    "post-write query/open/fills reconciliation per product line",
+    "live dry-run and credential-scope guard"
+  ],
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": "<redacted:secret>"
+}

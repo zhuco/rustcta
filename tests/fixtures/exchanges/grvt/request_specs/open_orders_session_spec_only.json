@@ -1,7 +1,7 @@
 {
   "exchange": "grvt",
   "operation": "open_orders",
-  "status": "unsupported_unverified",
+  "status": "guarded_runtime",
   "method": "POST",
   "base_url": "https://trades.testnet.grvt.io/full",
   "path": "/v1/open_orders",
@@ -10,10 +10,11 @@
     "X-Grvt-Account-Id": "<redacted-account-id>"
   },
   "body": {
-    "sub_account_id": "<redacted-sub-account-id>"
+    "instrument": "BTC_USDT_Perp"
   },
-  "auth": "session_cookie",
+  "auth": "api_key",
   "request_spec_required": true,
   "trade_enabled": false,
-  "expected_error": "grvt.open_orders_session_spec_only"
+  "runtime_enabled_by": "GRVT_PRIVATE_REST_ENABLED or RUSTCTA_GRVT_PRIVATE_REST_ENABLED plus session cookie and account id",
+  "response_fixture": "tests/fixtures/exchanges/grvt/open_orders_success.json"
 }

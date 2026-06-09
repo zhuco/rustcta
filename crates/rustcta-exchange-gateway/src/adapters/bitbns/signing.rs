@@ -4,6 +4,7 @@ use serde_json::json;
 use sha2::Sha512;
 
 pub fn build_payload(symbol_path: &str, body: &serde_json::Value, nonce: &str) -> String {
+    let body = serde_json::to_string(body).expect("body serializes");
     let payload = json!({
         "symbol": symbol_path,
         "timeStamp_nonce": nonce,

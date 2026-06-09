@@ -19,6 +19,37 @@ use super::WeexGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisorAction};
 
+const WEEX_DEPTH_LEVELS: [u32; 2] = [15, 200];
+const WEEX_DEFAULT_DEPTH_LEVEL: u32 = 15;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeexPublicOrderBookWsPolicy {
+    pub supported_depth_levels: &'static [u32],
+    pub default_depth_level: u32,
+    pub fixed_update_interval_ms: Option<u64>,
+    pub first_update_id_field: &'static str,
+    pub last_update_id_field: &'static str,
+    pub snapshot_marker: &'static str,
+    pub update_marker: &'static str,
+    pub checksum: Option<&'static str>,
+    pub gap_recovery: &'static str,
+}
+
+pub fn weex_public_order_book_ws_policy() -> WeexPublicOrderBookWsPolicy {
+    WeexPublicOrderBookWsPolicy {
+        supported_depth_levels: &WEEX_DEPTH_LEVELS,
+        default_depth_level: WEEX_DEFAULT_DEPTH_LEVEL,
+        fixed_update_interval_ms: None,
+        first_update_id_field: "U",
+        last_update_id_field: "u",
+        snapshot_marker: "SNAPSHOT",
+        update_marker: "CHANGED",
+        checksum: None,
+        gap_recovery:
+            "resubscribe to receive a fresh automatic snapshot when U/u continuity is broken",
+    }
+}
+
 impl WeexGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -367,8 +398,17 @@ pub fn weex_public_subscribe_payload(
     )?
     .to_ascii_uppercase();
     let channel = match &subscription.kind {
-        PublicStreamKind::OrderBookDelta => "depth15",
-        PublicStreamKind::OrderBookSnapshot => "depth15",
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => {
+            return Ok(json!({
+                "method": "SUBSCRIBE",
+                "params": [weex_public_depth_channel(
+                    &subscription.symbol.exchange_symbol.symbol,
+                    subscription.symbol.market_type,
+                    WEEX_DEFAULT_DEPTH_LEVEL,
+                )?],
+                "id": 1
+            }));
+        }
         PublicStreamKind::Trades => "trade",
         PublicStreamKind::Ticker => "ticker",
         PublicStreamKind::Candles { interval } => {
@@ -380,6 +420,24 @@ pub fn weex_public_subscribe_payload(
         "params": [format!("{symbol}@{channel}")],
         "id": 1
     }))
+}
+
+pub fn weex_public_depth_channel(
+    symbol: &str,
+    market_type: MarketType,
+    requested_depth: u32,
+) -> ExchangeApiResult<String> {
+    let symbol = normalize_weex_symbol(symbol, market_type)?.to_ascii_uppercase();
+    let depth = normalize_weex_depth_level(requested_depth);
+    Ok(format!("{symbol}@depth{depth}"))
+}
+
+fn normalize_weex_depth_level(requested_depth: u32) -> u32 {
+    if requested_depth <= 15 {
+        15
+    } else {
+        200
+    }
 }
 
 pub fn weex_private_auth_headers(

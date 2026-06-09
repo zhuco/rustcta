@@ -26,7 +26,15 @@ Status: `rustcta-exchange-gateway` Spot + USDT perpetual REST adapter with offli
 
 ## Public WebSocket Order Book
 
-Official Spot public WS supports BBO book ticker and depth feeds that should be structured before runtime use: `spot/depth/increase100` is the 100ms incremental 100-level feed, `spot/depth5`, `spot/depth20`, and `spot/depth50` are 500ms full-depth feeds, and book ticker pushes best bid/ask changes in real time. Incremental book messages carry `version`, `type=snapshot/update`, and `ms_t`; no checksum was found in the reviewed official docs, so stale-book protection needs version checks plus REST snapshot rebuild.
+Official Spot public WS supports BBO book ticker and depth feeds now recorded in the adapter mapping and stream tests:
+
+| Channel | Status | Cadence | Depth | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- | --- |
+| `spot/bookTicker:{symbol}` | Spec/parser ready | Real-time on BBO changes | 1 | No checksum/sequence documented | Reconnect/resubscribe; REST depth snapshot if promoted to local book state |
+| `spot/depth5:{symbol}` / `spot/depth20:{symbol}` / `spot/depth50:{symbol}` | Spec/parser ready | Fastest 500ms | 5/20/50 | No checksum documented | Full snapshot replacement |
+| `spot/depth/increase100:{symbol}` | Spec/parser ready | Fastest 100ms | 100 | `version`; accept `version == local + 1`, discard stale/duplicate, rebuild on gap; no checksum documented | WS `request spot/depth/increase100:{symbol}` or REST order book snapshot |
+
+The fixtures `tests/fixtures/exchanges/bitmart/ws_spot_depth_increase_snapshot.json`, `ws_spot_depth_increase_update.json`, and `ws_spot_book_ticker.json` cover the snapshot/update/BBO payload shapes.
 
 ## Authentication
 
@@ -47,3 +55,7 @@ cargo fmt --check --package rustcta-exchange-gateway
 cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway bitmart --lib --message-format short
 ```
+
+## Fee Boundary
+
+BitMart 官方 fee schedule/VIP model 已作为离线配置源记录到 `tests/fixtures/exchanges/bitmart/request_specs/get_fees_source_boundary.json`，覆盖 Spot 与 Perpetual/Futures fee table 口径。该 source 需要区分 Spot/Contract product scope、VIP level、BMX discount/asset holding 等条件；生产账户有效费率必须来自 account-effective tier/readback 或显式 override，默认表只可用于 backtest/估算。shared `get_fees` runtime 仍未启用，剩 fee schedule refresh、VIP mapping、scope guard 和 `FeeRateSnapshot` 映射。

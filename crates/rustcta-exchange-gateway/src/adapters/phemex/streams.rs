@@ -25,6 +25,88 @@ use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisor
 const PHEMEX_WS_PING_INTERVAL_MS: i64 = 15_000;
 const PHEMEX_WS_PONG_TIMEOUT_MS: i64 = 30_000;
 const PHEMEX_WS_STALE_MESSAGE_MS: i64 = 45_000;
+pub const PHEMEX_ORDERBOOK_DEPTHS: [u16; 5] = [0, 1, 5, 10, 30];
+pub const PHEMEX_DEFAULT_ORDERBOOK_DEPTH: u16 = 30;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhemexOrderBookWsPolicy {
+    pub spot_method: &'static str,
+    pub perpetual_method: &'static str,
+    pub supported_depths: &'static [u16],
+    pub default_depth: u16,
+    pub fast_interval_ms: u64,
+    pub aggregated_interval_ms: u64,
+    pub full_depth_interval_ms: u64,
+    pub snapshot_self_check_ms: u64,
+    pub sequence_field: &'static str,
+    pub checksum: Option<&'static str>,
+    pub resync: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhemexSequenceContinuity {
+    First,
+    Continuous,
+    DuplicateOrStale,
+    Gap { expected: u64, actual: u64 },
+}
+
+impl PhemexSequenceContinuity {
+    pub fn requires_resync(self) -> bool {
+        matches!(self, PhemexSequenceContinuity::Gap { .. })
+    }
+}
+
+pub fn phemex_order_book_ws_policy() -> PhemexOrderBookWsPolicy {
+    PhemexOrderBookWsPolicy {
+        spot_method: "orderbook.subscribe",
+        perpetual_method: "orderbook_p.subscribe",
+        supported_depths: &PHEMEX_ORDERBOOK_DEPTHS,
+        default_depth: PHEMEX_DEFAULT_ORDERBOOK_DEPTH,
+        fast_interval_ms: 20,
+        aggregated_interval_ms: 120,
+        full_depth_interval_ms: 100,
+        snapshot_self_check_ms: 60_000,
+        sequence_field: "sequence",
+        checksum: None,
+        resync: "track sequence continuity; rebuild from REST/WS snapshot after reconnect, sequence gap, stale stream, parse error, or failed 60s snapshot self-check",
+    }
+}
+
+pub fn phemex_check_sequence_continuity(
+    previous: Option<u64>,
+    actual: u64,
+) -> PhemexSequenceContinuity {
+    let Some(previous) = previous else {
+        return PhemexSequenceContinuity::First;
+    };
+    if actual <= previous {
+        return PhemexSequenceContinuity::DuplicateOrStale;
+    }
+    if actual == previous.saturating_add(1) {
+        return PhemexSequenceContinuity::Continuous;
+    }
+    PhemexSequenceContinuity::Gap {
+        expected: previous.saturating_add(1),
+        actual,
+    }
+}
+
+pub fn phemex_orderbook_params(
+    symbol: &str,
+    aggregated: bool,
+    depth: u16,
+) -> ExchangeApiResult<Value> {
+    if !PHEMEX_ORDERBOOK_DEPTHS.contains(&depth) {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!(
+                "phemex orderbook depth must be one of {:?}, got {depth}",
+                PHEMEX_ORDERBOOK_DEPTHS
+            ),
+        });
+    }
+    Ok(json!([symbol, aggregated, depth]))
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhemexPublicStreamMessage {
@@ -429,7 +511,12 @@ pub fn phemex_public_subscribe_payload(
         PublicStreamKind::Candles { interval } => {
             json!([symbol, normalize_ws_kline_interval(interval)?])
         }
-        PublicStreamKind::OrderBookSnapshot => json!([symbol, true]),
+        PublicStreamKind::OrderBookSnapshot => {
+            phemex_orderbook_params(&symbol, true, PHEMEX_DEFAULT_ORDERBOOK_DEPTH)?
+        }
+        PublicStreamKind::OrderBookDelta => {
+            phemex_orderbook_params(&symbol, false, PHEMEX_DEFAULT_ORDERBOOK_DEPTH)?
+        }
         _ => json!([symbol]),
     };
     Ok(json!({

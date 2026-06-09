@@ -1,0 +1,25 @@
+{
+  "exchange": "zebpay",
+  "operation": "zebpay.query_order",
+  "request_spec_only": false,
+  "runtime": "guarded_private_rest",
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/orders",
+  "auth": "bearer",
+  "credential_scope": "read_only",
+  "headers_shape": [
+    "client_id",
+    "timestamp",
+    "RequestId",
+    "Authorization"
+  ],
+  "body_or_query_shape": {
+    "trade_pair": "BTC-INR",
+    "orderid": "12345",
+    "page": 1,
+    "limit": 100
+  },
+  "source_boundary": "ZebPay spot private readback runtime is credential-gated; writes remain offline pending bearer-token onboarding, region/profile guard, reconciliation, and live dry-run controls.",
+  "runtime_guard": "ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token"
+}

@@ -50,28 +50,44 @@ Key endpoints:
 - `GET /market/data/prices`: mark/trade/spot price and funding estimate, mapped as spec-only.
 - `GET /market/data/open-interest`: open interest, mapped as spec-only.
 - `GET /trade/account/info`, `GET /trade/orders`, `GET /trade/order`, `GET /trade/account/trades`: audited private read endpoints, runtime closed by default.
-- `POST/DELETE/PATCH /trade/order`, `DELETE/POST /trade/orders`: write endpoints kept request-spec only.
+- `POST/DELETE/PATCH /trade/order`, `DELETE/POST /trade/orders`: write endpoints kept request-spec only. P4 fixtures now pin `amend_order`, `batch_place_orders`, and `batch_cancel_orders` request/parser shapes without enabling live writes.
 
 ## Signing Boundary
 
 Hibachi documents order signing using an account model with `accountId`, `nonce`, symbol/contract fields, and a `signature` field. The adapter includes an offline exchange-managed HMAC-SHA256 vector for the documented byte-packing shape:
 
 - Fixture: `tests/fixtures/exchanges/hibachi/signing_vectors/exchange_managed_hmac.json`
-- Request spec: `tests/fixtures/exchanges/hibachi/request_specs/place_order_limit.json`
+- Request specs:
+  - `tests/fixtures/exchanges/hibachi/request_specs/get_open_orders.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/query_order.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/get_recent_fills.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/positions_source_boundary.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/place_order_limit.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/amend_order.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/batch_place_orders.json`
+  - `tests/fixtures/exchanges/hibachi/request_specs/batch_cancel_orders.json`
+- Parser fixtures:
+  - `tests/fixtures/exchanges/hibachi/parser/amend_order_ack.json`
+  - `tests/fixtures/exchanges/hibachi/parser/batch_place_orders_ack.json`
+  - `tests/fixtures/exchanges/hibachi/parser/batch_cancel_orders_ack.json`
 
-Trustless/non-custodial signing and any key registration flow are not enabled in runtime. The adapter returns `hibachi.trade_write_request_spec_only` and related Unsupported boundaries for write methods.
+Trustless/non-custodial signing and any key registration flow are not enabled in runtime. P4 write endpoints are `spec_only` request/parser boundaries in `endpoint_mapping.yaml`; the adapter still returns `hibachi.trade_write_request_spec_only` for single place and specific P4 blockers for amend/batch live write methods.
 
 ## Official Core Trading Detail
 
 官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Hibachi 官方 trade REST 支持 `POST/DELETE/PATCH /trade/order` 和批量 orders endpoints。
 
-因此下单/撤单/改单不能写成 `交易所不支持`。当前只是 offline request specs 和签名向量；补交易接口前必须完成 account/signing runtime、trade order parser、批量订单边界、private readback 和 live-dry-run guard。
+因此下单/撤单/改单/批量下单/批量撤单不能写成 `交易所不支持`。`PATCH /trade/order`、`POST /trade/orders`、`DELETE /trade/orders` 只作为 request-spec/parser/mapping 线索，mapping 显式记录为 `status: project_unimplemented` 且 endpoint 为 `spec_only`；`amend_order` 还缺 shared price/full replace 字段，`batch_place_orders` 还缺 contract-id/scale signer，`batch_cancel_orders` 还缺 verified batch signature parser/reconciliation。补交易接口前必须完成 auth/signing runtime、private readback/reconciliation 和 live guard。order-list/OCO 仍按交易所不支持边界记录。
+
+P2 核心 readback 已提升为 guarded `运行`：`query_order` 读取 `GET /trade/order`，`get_open_orders` 读取 `GET /trade/orders`，`get_recent_fills` 读取 `GET /trade/account/trades`。三者默认未配置私有读权限时返回 `hibachi.*` operation boundary；只有 `HIBACHI_PRIVATE_REST_ENABLED`、API key 和 account id 同时配置时才发出 bearer private REST 请求。当前不提升下单/撤单/cancel-all，也不支持 client-order-id 查询、游标分页或时间窗/成交 id filter。
 
 ## Official Position Detail
 
 官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Hibachi 官方交易/风险资料明确有 positions、cross margin、subaccount isolated-like usage、risk panel 和 liquidation 语义。
 
-因此仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成 account/trade read-only auth smoke、positions/risk parser、cross-margin/subaccount 字段映射和 REST/WS readback。
+因此仓位接口已提升为 guarded `运行`：`get_positions` 在 `HIBACHI_PRIVATE_REST_ENABLED`、API key 和 account id 同时配置时读取 `GET /trade/account/info`，用 `tests/fixtures/exchanges/hibachi/parser/account_info_positions.json` 覆盖 positions/risk parser；默认未配置私有读权限时仍返回 `hibachi.private_rest_disabled`，不伪造 live 成功。当前仍保留 `tests/fixtures/exchanges/hibachi/request_specs/positions_source_boundary.json` 作为 account/risk readback 和 account WS 对账来源边界，后续剩 account WS reconciliation 和更完整 liquidation/risk 字段映射。
+
+账户/余额已补离线边界：Hibachi `/trade/account/info` 账户/余额/风险 readback 已固定 `request_specs/get_balances_account_info.json`，矩阵按 `get_balances=离线` 记录。当前 shared `get_balances` runtime 尚未接 auth smoke、balance/equity/risk parser、read-only guard 和 account WS reconciliation。
 
 ## WebSocket Boundary
 
@@ -88,7 +104,7 @@ Production WS runtime, sequence-gap handling, checksum validation, auth renewal,
 
 官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Hibachi SDK/公开资料有 market WS `orderbook/{symbol}` payload，market WS URL 为 `wss://data-api.hibachi.xyz/ws/market`。
 
-本批未核到固定推流毫秒、WS depth 参数、sequence 或 checksum。REST `/market/data/orderbook` 支持 `depth` 和 `granularity`，应作为断线/异常重建源；当前 adapter 不提升生产 WS runtime。
+本批未核到固定推流毫秒、WS 固定 depth、sequence 或 checksum，矩阵边界记录为无固定 ms、无固定 depth、no sequence、no checksum。REST `/market/data/orderbook` 支持 `depth` 和 `granularity`，应作为断线/异常重建源；当前 adapter 不提升生产 WS runtime。
 
 ## Capabilities
 
@@ -98,8 +114,9 @@ Production WS runtime, sequence-gap handling, checksum validation, auth renewal,
 | Symbol rules | Native | From `futureContracts` in `/market/exchange-info`. |
 | Order book snapshot | Native | From `/market/data/orderbook`. |
 | Fees | Native public readback | Maker/taker defaults from `feeConfig`. |
-| Balances/positions/open orders/fills | Unsupported runtime | Request-spec/audit boundary exists, no live read. |
-| Place/cancel/amend/batch/cancel-all | Unsupported runtime | Offline request-spec and signing vector only. |
+| Query/open orders/fills | Guarded private readback | `HIBACHI_PRIVATE_REST_ENABLED` plus API key/account id required; unsupported filters fail closed. |
+| Balances/positions | Existing guarded private readback | Unchanged in this batch; account WS reconciliation remains follow-up. |
+| Place/cancel/amend/batch/cancel-all | Project-unimplemented runtime | Official endpoints exist; offline request-spec and signing vector only. |
 | Public/private WS runtime | Unsupported | Payload fixtures and URLs only. |
 | Client order id | Unsupported | Account API notes nonce/order id identifiers and says client-id support is future work. |
 | Testnet | Unsupported/unverified | No public sandbox base URL confirmed. |
@@ -117,3 +134,6 @@ cargo test -p rustcta-gateway hibachi --message-format short
 ```
 
 Do not run `cargo build`, release builds, app/web builds, live order placement, live cancel, withdrawal, transfer, or long-running private streams for this task.
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core place/cancel/cancel-all/query/open/fills are offline/spec-only trade REST boundaries. Runtime promotion is blocked on account/signing lifecycle, contract-id/scale mapping, parsers, nonce/readback reconciliation, and live dry-run guard.

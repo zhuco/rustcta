@@ -1,0 +1,18 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "api_key": "latoken_public_test_key",
+  "api_secret": "latoken_private_test_secret",
+  "method": "POST",
+  "path": "/v2/auth/order/cancelBulk",
+  "query": [],
+  "body_params": [
+    [
+      "orders",
+      "[{\"id\":\"latoken_test_order_id_001\"},{\"id\":\"latoken_test_order_id_002\"}]"
+    ]
+  ],
+  "canonical_payload": "POST/v2/auth/order/cancelBulkorders=[{\"id\":\"latoken_test_order_id_001\"},{\"id\":\"latoken_test_order_id_002\"}]",
+  "expected_signature": "f2b2137a9ae9ffe433abb9a79eee0d8acc8d742af100855939dafb58462f4527",
+  "sanitized": true,
+  "trade_enabled": false
+}

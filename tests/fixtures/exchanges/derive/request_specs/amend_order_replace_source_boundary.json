@@ -1,0 +1,39 @@
+{
+  "exchange": "derive",
+  "operation": "amend_order",
+  "boundary_type": "advanced_order_replace_source_boundary",
+  "runtime_status": "offline_source_boundary",
+  "official_capability": {
+    "product": "option_perpetual",
+    "transport": "json_rpc",
+    "method": "private/replace",
+    "amend_model": "replace existing order by order_id with a new order payload"
+  },
+  "offline_request_fixtures": [
+    "tests/fixtures/exchanges/derive/request_specs/amend_order_replace.json"
+  ],
+  "offline_signing_fixtures": [
+    "tests/fixtures/exchanges/derive/signing_vectors/session_replace_hmac.json",
+    "tests/fixtures/exchanges/derive/signing_vectors/session_auth_boundary.json"
+  ],
+  "offline_parser_fixtures": [
+    "tests/fixtures/exchanges/derive/parser/amend_order_replace_ack.json"
+  ],
+  "unsupported_separation": {
+    "project_unimplemented": ["amend_order"],
+    "unsupported": ["place_order_list", "batch_place_orders", "batch_cancel_orders"]
+  },
+  "runtime_blockers": [
+    "production_session_jwt_or_stark_signature",
+    "shared_amend_request_lacks_full_replace_price_and_direction",
+    "replace_response_reconciliation",
+    "live_dry_run_guard"
+  ],
+  "trade_enabled": false,
+  "expected_runtime_errors": {
+    "amend_order": "derive.amend_requires_session_jwt_stark_signer_full_replace_fields_reconciliation_and_dry_run_guard",
+    "place_order_list": "derive.order_list_unsupported",
+    "batch_place_orders": "derive.batch_place_orders_unsupported",
+    "batch_cancel_orders": "derive.batch_cancel_orders_unsupported"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "exchange": "okx",
+  "operation": "place_order",
+  "product": "futures",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v5/trade/order",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "OK-ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "OK-ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "passphrase"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/json"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "okx/place_order",
+  "body": {
+    "clOrdId": "FUT1",
+    "instId": "BTC-USD-240329",
+    "ordType": "limit",
+    "posSide": "net",
+    "px": "64500",
+    "reduceOnly": true,
+    "side": "buy",
+    "sz": "1",
+    "tdMode": "cross"
+  }
+}

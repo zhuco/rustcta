@@ -1,0 +1,13 @@
+{
+  "exchange": "binanceus",
+  "name": "cancel_replace_not_amend",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/api/v3/order/cancelReplace",
+  "payload": "cancelReplaceMode=STOP_ON_FAILURE&cancelOrderId=12345&newClientOrderId=cli-replace-1&price=25001.00000000&quantity=0.01000000&recvWindow=5000&side=BUY&symbol=BTCUSDT&timeInForce=GTC&timestamp=1710000000000&type=LIMIT",
+  "expected_signature": "5875d7bbcaf81952bbca9be02edcfed7f2283b458a964fc0f23f941f8bced174",
+  "payload_format": "raw_payload",
+  "shared_semantics": "unsupported_cancel_replace_boundary"
+}

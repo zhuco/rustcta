@@ -5,7 +5,7 @@ metadata:
   status: validated
   source: docs/blockchaincom_adapter.md
   last_reviewed: "2026-06-08"
-  notes: "Blockchain.com Exchange spot adapter; public REST implemented, private REST/WS represented as offline request-spec and payload fixtures."
+  notes: "Blockchain.com Exchange spot adapter; public REST plus credential-gated account, fee, order, open-order, and fill readbacks are implemented, while private writes remain offline request-spec fixtures."
 market_types: [spot]
 products: [spot]
 rest:
@@ -45,23 +45,44 @@ batch:
   cancel_orders: { support: unsupported, reason: blockchaincom.batch_cancel_orders_unsupported }
 websocket:
   public:
-    support: spec_only
+    support: native
     url: wss://ws.blockchain.info/mercury-gateway/v1/ws
     origin_header: https://exchange.blockchain.com
     channels: [heartbeat, l2, l3, prices, symbols, ticker, trades]
     heartbeat: { channel: heartbeat, interval_ms: 5000, direction: server_message }
+    order_book:
+      channels: [l2_order_book, l3_order_book]
+      venue_channels: [l2, l3]
+      subscribe_payload:
+        action: subscribe
+        fields: [channel, symbol]
+      message_types: [snapshot, update]
+      interval: no fixed ms
+      sequence_field: seqnum
+      checksum: not_published
+      message_limit: 1200 per minute
+      resync: rest_order_book_snapshot
     sequence: { field: seqnum, gap_action: restart_connection }
     resync: rest_order_book_snapshot
   private:
-    support: spec_only
+    support: native
     channels: [auth, balances, trading]
     auth: api_secret_token_subscribe
     fallback: rest_reconciliation
 unsupported:
-  - derivatives
-  - futures
-  - perpetuals
-  - margin_positions
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_standard_contracts_in_exchange_v3_api
+    scope: exchange_spot_api_only
+    reason: "Current Blockchain.com Exchange API profile is Spot-only for this adapter; standard futures/perpetual/options are not exposed in Exchange v3, while app Perps are tracked separately as project-unimplemented."
+  - operation: perps_third_party_product
+    status: project_unimplemented
+    official_gap: app_perps_third_party_interface
+    boundary: project_unimplemented_product_line
+    scope: separate_from_exchange_spot_adapter
+    source_boundary_fixture: tests/fixtures/exchanges/blockchaincom/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [product_api_ownership, account_credential_scope, perps_metadata_positions_funding_settlement, private_order_lifecycle, reconciliation_dry_run_gate]
+    reason: "Blockchain.com app Perps / third-party interface is outside the Exchange Spot adapter and needs a separate product design if included."
   - lending
   - brokerage_swaps
   - wallet_explorer_api
@@ -103,7 +124,7 @@ endpoints:
     rate_limit_bucket: blockchaincom_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_balances.json
     official_doc: https://api.blockchain.com/v3/#get-accounts
@@ -117,9 +138,12 @@ endpoints:
     rate_limit_bucket: blockchaincom_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_fees.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/blockchaincom/fees.json
     official_doc: https://api.blockchain.com/v3/#get-fees
   - operation: place_order
     product: spot
@@ -173,9 +197,12 @@ endpoints:
     rate_limit_bucket: blockchaincom_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/blockchaincom/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/blockchaincom/orders.json
     official_doc: https://api.blockchain.com/v3/#get-orders-orderid
   - operation: get_open_orders
     product: spot
@@ -187,9 +214,12 @@ endpoints:
     rate_limit_bucket: blockchaincom_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_open_orders.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/blockchaincom/orders.json
     official_doc: https://api.blockchain.com/v3/#get-orders
   - operation: get_recent_fills
     product: spot
@@ -201,10 +231,69 @@ endpoints:
     rate_limit_bucket: blockchaincom_rest
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
       fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_recent_fills.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/blockchaincom/fills.json
     official_doc: https://api.blockchain.com/v3/#get-fills
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/blockchaincom/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: blockchaincom.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/blockchaincom/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: blockchaincom.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/blockchaincom/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: blockchaincom.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/blockchaincom/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: blockchaincom.batch_cancel_orders_unsupported
   - operation: create_deposit_address
     product: spot
     transport: rest
@@ -225,6 +314,13 @@ streams:
     support: spec_only
     resync: get_order_book
     fixture: tests/fixtures/exchanges/blockchaincom/ws/l2_snapshot.json
+  - operation: public_l3_subscribe
+    channel: l3
+    action: subscribe
+    auth: none
+    support: spec_only
+    sequence_field: seqnum
+    resync: restart_websocket_then_rest_order_book_snapshot
   - operation: public_heartbeat_subscribe
     channel: heartbeat
     action: subscribe

@@ -63,6 +63,14 @@ pub fn router(state: ControlApiState) -> Router {
         )
         .route("/api/spot-arb/dashboard", get(routes::spot_arb_dashboard))
         .route("/api/cross-arb/dashboard", get(routes::cross_arb_dashboard))
+        .route(
+            "/api/cross-arb/instruments",
+            get(routes::cross_arb_instruments),
+        )
+        .route(
+            "/api/cross-arb/market-snapshots",
+            get(routes::cross_arb_market_snapshots),
+        )
         .route("/api/scanner/exchanges", get(routes::scanner_exchanges))
         .route(
             "/api/scanner/symbol-coverage",

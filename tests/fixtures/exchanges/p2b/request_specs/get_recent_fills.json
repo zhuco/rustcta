@@ -1,6 +1,7 @@
 {
   "operation": "p2b.get_recent_fills",
-  "request_spec_only": true,
+  "request_spec_only": false,
+  "runtime_status": "guarded_native",
   "trade_enabled": false,
   "method": "POST",
   "path": "/api/v2/account/market_deals",
@@ -19,5 +20,5 @@
     "nonce": "1698489001"
   },
   "credential_scope": "read_only",
-  "expected_error_until_promoted": "p2b.recent_fills_request_spec_only"
+  "runtime_guard": "P2B_PRIVATE_REST_ENABLED or P2PB2B_PRIVATE_REST_ENABLED plus API key/secret"
 }

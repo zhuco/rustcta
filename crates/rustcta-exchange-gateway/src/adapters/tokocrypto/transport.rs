@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::signing::append_signature;
+
 #[derive(Clone)]
 pub struct TokocryptoPublicRest {
     exchange_id: ExchangeId,
@@ -51,6 +53,41 @@ impl TokocryptoPublicRest {
         let response = self
             .http
             .get(build_url(self.base_url(base), endpoint, params))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        let mut signed_params = params.clone();
+        signed_params.insert(
+            "timestamp".to_string(),
+            Utc::now().timestamp_millis().to_string(),
+        );
+        signed_params.insert("recvWindow".to_string(), recv_window_ms.to_string());
+        let query = build_raw_query_string(&signed_params);
+        let signed_query = append_signature(api_secret, &query)?;
+        let url = format!(
+            "{}{}?{}",
+            self.rest_base_url.trim_end_matches('/'),
+            endpoint,
+            signed_query
+        );
+        let response = self
+            .http
+            .get(url)
+            .header("X-MBX-APIKEY", api_key)
+            .header("Content-Type", "application/x-www-form-urlencoded")
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {
@@ -129,6 +166,17 @@ fn build_url(base: &str, endpoint: &str, params: &HashMap<String, String>) -> St
     } else {
         format!("{}{}?{}", base.trim_end_matches('/'), endpoint, query)
     }
+}
+
+fn build_raw_query_string(params: &HashMap<String, String>) -> String {
+    params
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 fn exchange_error(

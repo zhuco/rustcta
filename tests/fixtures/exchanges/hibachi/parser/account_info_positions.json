@@ -1,0 +1,52 @@
+{
+  "assets": [
+    {
+      "symbol": "USDT",
+      "quantity": "1250.50"
+    }
+  ],
+  "balance": "1250.50",
+  "maximalWithdraw": "1000.00",
+  "positions": [
+    {
+      "direction": "LONG",
+      "entryNotional": "650.00",
+      "markPrice": "65100",
+      "notionalValue": "651.00",
+      "openPrice": "65000",
+      "quantity": "0.01",
+      "symbol": "BTC/USDT-P",
+      "unrealizedFundingPnl": "0.10",
+      "unrealizedTradingPnl": "1.00"
+    },
+    {
+      "direction": "SHORT",
+      "entryNotional": "200.00",
+      "markPrice": "3200",
+      "notionalValue": "160.00",
+      "openPrice": "4000",
+      "quantity": "0.05",
+      "symbol": "ETH/USDT-P",
+      "unrealizedFundingPnl": "-0.02",
+      "unrealizedTradingPnl": "40.00"
+    },
+    {
+      "direction": "LONG",
+      "entryNotional": "0",
+      "markPrice": "150",
+      "notionalValue": "0",
+      "openPrice": "150",
+      "quantity": "0",
+      "symbol": "SOL/USDT-P",
+      "unrealizedFundingPnl": "0",
+      "unrealizedTradingPnl": "0"
+    }
+  ],
+  "totalOrderNotional": "0",
+  "totalPositionNotional": "811.00",
+  "totalUnrealizedFundingPnl": "0.08",
+  "totalUnrealizedPnl": "41.08",
+  "totalUnrealizedTradingPnl": "41.00",
+  "tradeMakerFeeRate": "0.0002",
+  "tradeTakerFeeRate": "0.0005"
+}

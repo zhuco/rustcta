@@ -1,0 +1,43 @@
+{
+  "exchange": "okxus",
+  "profile_of": "okx",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "base_url": "https://us.okx.com",
+  "path": "/api/v5/account/balance",
+  "auth": "signed",
+  "query": {
+    "ccy": { "match": "optional", "value": "USDT" }
+  },
+  "headers": {
+    "OK-ACCESS-KEY": { "match": "non_empty" },
+    "OK-ACCESS-SIGN": { "match": "non_empty" },
+    "OK-ACCESS-TIMESTAMP": { "match": "non_empty" },
+    "OK-ACCESS-PASSPHRASE": { "match": "non_empty" }
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["real", "secret", "private"],
+  "response_sample": {
+    "code": "0",
+    "msg": "",
+    "data": [
+      {
+        "totalEq": "600.00",
+        "details": [
+          {
+            "ccy": "USDT",
+            "cashBal": "600.00",
+            "availBal": "580.00",
+            "eq": "600.00"
+          }
+        ]
+      }
+    ]
+  },
+  "runtime_boundary": "OKX US account balance reuses the OKX V5 signed runtime when US private REST credentials and explicit enable flag are configured.",
+  "runtime_enabled": true,
+  "trade_enabled": false,
+  "secret_free": true
+}

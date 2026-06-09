@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "data": {
+    "orders": [
+      {
+        "success": true,
+        "order_id": 123456789,
+        "client_order_id": "aark-batch-1",
+        "symbol": "PERP_BTC_USDC",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "order_price": "64000",
+        "order_quantity": "0.01",
+        "executed_quantity": "0",
+        "status": "NEW",
+        "created_time": 1700000000000,
+        "updated_time": 1700000000000
+      },
+      {
+        "success": false,
+        "client_order_id": "aark-batch-2",
+        "symbol": "PERP_ETH_USDC",
+        "message": "insufficient margin"
+      }
+    ]
+  }
+}

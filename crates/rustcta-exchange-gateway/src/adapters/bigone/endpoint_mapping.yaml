@@ -96,6 +96,18 @@ websocket:
       - trades
       - ticker
       - candles
+    order_book:
+      channel: MarketDepth
+      subscription_request: subscribeMarketDepthRequest
+      topic: subscribeMarketDepthRequest
+      delivery: snapshot_then_update
+      sequence_fields: [changeId, prevId]
+      continuity_rule: "update.prevId must equal previous changeId; gap requires REST snapshot rebuild"
+      format_options: [json, protobuf]
+      interval: "no fixed ms"
+      depth: unspecified
+      checksum: none_documented
+      resync: rest_order_book_snapshot
     heartbeat:
       required: true
       direction: client_ping
@@ -113,6 +125,12 @@ streams:
   public_order_book:
     transport: websocket
     support: parser_only
+    channel: subscribeMarketDepthRequest
+    topic: MarketDepth
+    delivery: snapshot_then_update
+    sequence_fields: [changeId, prevId]
+    interval: "no fixed ms"
+    depth: unspecified
     heartbeat: client_ping_15000ms
     resync: rest_snapshot
     parser_fixture: tests/fixtures/exchanges/bigone/ws_public_depth.json
@@ -218,6 +236,28 @@ endpoints:
       status: implemented
       fixture: tests/fixtures/exchanges/bigone/balance.json
       test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: get_fees
+    transport: rest
+    product: spot
+    market_types: [spot]
+    method: GET
+    path: /api/v3/viewer/trading_fees
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Guarded runtime calls BigONE authenticated viewer trading_fees for Spot symbols with read-only/balance permission credentials, asset-pair filter query, and maker/taker parser coverage; contract fee remains source-only."
+    official_doc: https://open.bigone.com/docs/spot/rest/get-trading-fees/
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/get_fees_trading_fees.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser: { status: implemented, parser: rustcta_exchange_gateway::adapters::bigone::private_parser::parse_fees, test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs }
   - operation: get_positions
     transport: rest
     product: perpetual
@@ -366,6 +406,34 @@ endpoints:
       status: implemented
       fixture: tests/fixtures/exchanges/bigone/open_orders.json
       test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: amend_order
+    transport: rest
+    product: spot
+    method: PATCH
+    path: /unsupported/bigone/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bigone.amend_order_unsupported
+  - operation: place_order_list
+    transport: rest
+    product: spot
+    method: POST
+    path: /unsupported/bigone/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bigone.order_list_unsupported
   - operation: cancel_all_orders
     transport: rest
     product: spot

@@ -18,6 +18,87 @@ pub struct BitmartWsSpec {
     pub heartbeat_payload: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitmartSpotOrderBookWsPolicy {
+    pub depth_increase_channel: &'static str,
+    pub depth_increase_interval_ms: u64,
+    pub depth_increase_levels: u16,
+    pub full_depth_channels: &'static [(&'static str, u16)],
+    pub full_depth_interval_ms: u64,
+    pub book_ticker_channel: &'static str,
+    pub book_ticker_interval_ms: Option<u64>,
+    pub sequence_field: &'static str,
+    pub checksum: Option<&'static str>,
+    pub resync: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitmartVersionContinuity {
+    First,
+    Continuous,
+    DuplicateOrStale,
+    Gap { expected: u64, actual: u64 },
+}
+
+impl BitmartVersionContinuity {
+    pub fn requires_resync(self) -> bool {
+        matches!(self, BitmartVersionContinuity::Gap { .. })
+    }
+}
+
+pub fn bitmart_spot_order_book_ws_policy() -> BitmartSpotOrderBookWsPolicy {
+    BitmartSpotOrderBookWsPolicy {
+        depth_increase_channel: "spot/depth/increase100",
+        depth_increase_interval_ms: 100,
+        depth_increase_levels: 100,
+        full_depth_channels: &[
+            ("spot/depth5", 5),
+            ("spot/depth20", 20),
+            ("spot/depth50", 50),
+        ],
+        full_depth_interval_ms: 500,
+        book_ticker_channel: "spot/bookTicker",
+        book_ticker_interval_ms: None,
+        sequence_field: "version",
+        checksum: None,
+        resync: "request spot/depth/increase100 snapshot or rebuild from REST order book when version > local version + 1, reconnect, stale stream, parse error, or suspected loss",
+    }
+}
+
+pub fn bitmart_check_version_continuity(
+    previous: Option<u64>,
+    actual: u64,
+) -> BitmartVersionContinuity {
+    let Some(previous) = previous else {
+        return BitmartVersionContinuity::First;
+    };
+    if actual <= previous {
+        return BitmartVersionContinuity::DuplicateOrStale;
+    }
+    if actual == previous.saturating_add(1) {
+        return BitmartVersionContinuity::Continuous;
+    }
+    BitmartVersionContinuity::Gap {
+        expected: previous.saturating_add(1),
+        actual,
+    }
+}
+
+pub fn bitmart_spot_depth_channel(levels: u16) -> ExchangeApiResult<&'static str> {
+    match levels {
+        5 => Ok("spot/depth5"),
+        20 => Ok("spot/depth20"),
+        50 => Ok("spot/depth50"),
+        _ => Err(ExchangeApiError::InvalidRequest {
+            message: format!("bitmart spot full depth levels must be one of 5/20/50, got {levels}"),
+        }),
+    }
+}
+
+pub fn bitmart_spot_book_ticker_channel(symbol: &str) -> String {
+    format!("spot/bookTicker:{symbol}")
+}
+
 impl BitmartGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -93,11 +174,11 @@ pub fn public_subscription_spec(
         subscription.symbol.market_type,
     )?;
     let channel = match (subscription.symbol.market_type, &subscription.kind) {
-        (
-            MarketType::Spot,
-            PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta,
-        ) => {
+        (MarketType::Spot, PublicStreamKind::OrderBookSnapshot) => {
             format!("spot/depth50:{symbol}")
+        }
+        (MarketType::Spot, PublicStreamKind::OrderBookDelta) => {
+            format!("spot/depth/increase100:{symbol}")
         }
         (MarketType::Spot, PublicStreamKind::Trades) => format!("spot/trade:{symbol}"),
         (MarketType::Spot, PublicStreamKind::Ticker) => format!("spot/ticker:{symbol}"),
@@ -197,8 +278,21 @@ pub fn parse_public_order_book_event(
         return Ok(None);
     };
     let canonical = rustcta_types::CanonicalSymbol::new(base, quote).map_err(validation_error)?;
-    let bids = parse_ws_levels(data.get("bids").or_else(|| data.get("buys")))?;
-    let asks = parse_ws_levels(data.get("asks").or_else(|| data.get("sells")))?;
+    let (bids, asks) = if data.get("bid_px").is_some() || data.get("ask_px").is_some() {
+        (
+            parse_bbo_level(data.get("bid_px"), data.get("bid_sz"))?
+                .into_iter()
+                .collect(),
+            parse_bbo_level(data.get("ask_px"), data.get("ask_sz"))?
+                .into_iter()
+                .collect(),
+        )
+    } else {
+        (
+            parse_ws_levels(data.get("bids").or_else(|| data.get("buys")))?,
+            parse_ws_levels(data.get("asks").or_else(|| data.get("sells")))?,
+        )
+    };
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
         market_type,
@@ -212,6 +306,7 @@ pub fn parse_public_order_book_event(
         rustcta_types::ExchangeSymbol::new(exchange_id.clone(), market_type, symbol)
             .map_err(validation_error)?,
     );
+    snapshot.sequence = value_as_u64(data.get("version"));
     Ok(Some(snapshot))
 }
 
@@ -243,6 +338,37 @@ fn parse_ws_levels(value: Option<&Value>) -> ExchangeApiResult<Vec<OrderBookLeve
             Some(OrderBookLevel::new(price, quantity).map_err(validation_error))
         })
         .collect()
+}
+
+fn parse_bbo_level(
+    price: Option<&Value>,
+    quantity: Option<&Value>,
+) -> ExchangeApiResult<Option<OrderBookLevel>> {
+    let Some(price) = price.and_then(value_as_str) else {
+        return Ok(None);
+    };
+    let Some(quantity) = quantity.and_then(value_as_str) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        OrderBookLevel::new(
+            price.parse().map_err(validation_error)?,
+            quantity.parse().map_err(validation_error)?,
+        )
+        .map_err(validation_error)?,
+    ))
+}
+
+fn value_as_str(value: &Value) -> Option<&str> {
+    value.as_str()
+}
+
+fn value_as_u64(value: Option<&Value>) -> Option<u64> {
+    match value? {
+        Value::Number(number) => number.as_u64(),
+        Value::String(text) => text.parse().ok(),
+        _ => None,
+    }
 }
 
 fn split_stream_symbol(symbol: &str) -> Option<(String, String)> {

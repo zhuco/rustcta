@@ -1,0 +1,40 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "get_balances",
+  "status": "source_boundary_only",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/assets/balance/{address}",
+  "auth": "none_address_read",
+  "path_params": {
+    "address": "<redacted-waves-address>"
+  },
+  "account_scope": {
+    "required": ["waves_address"],
+    "credential_scopes": [],
+    "exchange_auth_required": false
+  },
+  "source_boundary": {
+    "kind": "waves_node_address_balance_readback",
+    "asset_precision_source": "asset metadata lookup required",
+    "chain_latency_policy": "node/indexer finality and stale-read guard required",
+    "matcher_reconciliation": "public-key/account mapping required",
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
+  "response_sample": {
+    "address": "<redacted-waves-address>",
+    "balances": [
+      {
+        "assetId": "WAVES",
+        "balance": 100000000,
+        "quantity_available": 100000000
+      }
+    ]
+  },
+  "runtime_boundary": "WavesExchange get_balances is source-boundary only until address/public-key scope, asset precision mapping, chain latency/reorg policy, and matcher/account reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

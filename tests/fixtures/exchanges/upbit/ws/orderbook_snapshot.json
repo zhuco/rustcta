@@ -2,6 +2,8 @@
   "type": "orderbook",
   "code": "KRW-BTC",
   "timestamp": 1712230310689,
+  "total_ask_size": 10.4,
+  "total_bid_size": 11.5,
   "stream_type": "SNAPSHOT",
   "orderbook_units": [
     {

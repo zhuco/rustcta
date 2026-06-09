@@ -33,11 +33,16 @@ Unsupported runtime support:
 
 Official WebSocket order book detail: WOOFi Pro uses the Orderly profile for
 public order book updates. `{symbol}@orderbookupdate` is documented at 200ms,
-uses `ts`/`prevTs` continuity, and has no documented checksum. Current project
-support is spec/payload only for WS runtime, so the next task is to structure
-the Orderly endpoint/account-id path, 200ms interval, request orderbook
-snapshot fallback, and `prevTs` gap handling. Source batch:
+uses `ts`/`prevTs` continuity, has no fixed depth selector (`depth:
+unspecified`), and has no documented checksum. Current project support is
+spec/payload only for WS runtime; the mapping records the Orderly
+endpoint/account-id path, 200ms interval, request orderbook snapshot fallback,
+and `prevTs` gap handling. Source batch:
 [WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+
+| Channel | Status | Cadence | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- |
+| `{symbol}@orderbookupdate` | Payload/spec ready; depth unspecified/no fixed depth | 200ms | `prevTs` must match previous `ts`; no checksum documented | Request signed Orderly `/v1/orderbook/{symbol}` snapshot and resubscribe after `prevTs` gap, reconnect, stale stream, parse error or suspected message loss |
 
 ## Endpoints
 
@@ -93,3 +98,7 @@ For this task, validation was limited to non-compiling checks per request:
 - static grep for unfinished markers and fallback error classes
 
 No `cargo build`, `cargo check`, or `cargo test` was run for this task.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：builder/admin fee routes 不进入普通账户 runtime。

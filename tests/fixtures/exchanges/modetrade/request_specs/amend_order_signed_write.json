@@ -1,0 +1,33 @@
+{
+  "exchange": "modetrade",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "project_unimplemented",
+  "method": "PUT",
+  "path": "/v1/order",
+  "auth": "signed",
+  "headers": {
+    "orderly-account-id": "<redacted-account-id>",
+    "orderly-key": "<redacted-orderly-key>",
+    "orderly-signature": "<redacted-ed25519-signature>",
+    "orderly-timestamp": "1700000000000"
+  },
+  "body": {
+    "order_id": "<redacted-order-id>",
+    "symbol": "PERP_BTC_USDC",
+    "order_price": "65000",
+    "order_quantity": "0.01",
+    "client_order_id": "modetrade-amend-boundary-1"
+  },
+  "canonical_payload": "1700000000000PUT/v1/order{\"order_id\":\"<redacted-order-id>\",\"symbol\":\"PERP_BTC_USDC\",\"order_price\":\"65000\",\"order_quantity\":\"0.01\",\"client_order_id\":\"modetrade-amend-boundary-1\"}",
+  "trade_enabled": false,
+  "expected_error": "modetrade.amend_order_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+  "remaining_runtime_work": [
+    "ModeTrade/Orderly account onboarding audit",
+    "audited Ed25519 signer wiring",
+    "trade permission scope guard",
+    "post-write query/open/fills reconciliation",
+    "live dry-run guard"
+  ]
+}

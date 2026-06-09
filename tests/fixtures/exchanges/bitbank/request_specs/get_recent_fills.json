@@ -1,0 +1,20 @@
+{
+  "operation": "bitbank.get_recent_fills",
+  "method": "GET",
+  "path": "/v1/user/spot/trade_history",
+  "query": [
+    [
+      "pair",
+      "btc_jpy"
+    ],
+    [
+      "order_id",
+      "123457"
+    ],
+    [
+      "count",
+      "100"
+    ]
+  ],
+  "body": null
+}

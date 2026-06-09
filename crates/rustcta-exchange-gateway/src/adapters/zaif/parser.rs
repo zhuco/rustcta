@@ -1,10 +1,12 @@
 use chrono::{TimeZone, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope, TenantId,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, Fill,
+    FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion, TimeInForce,
 };
 use serde_json::Value;
 
@@ -126,6 +128,151 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_zaif_open_orders(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let rows = return_map(exchange_id, value, "active_orders")?;
+    rows.iter()
+        .map(|(order_id, row)| parse_zaif_open_order(exchange_id, symbol_hint, order_id, row))
+        .collect()
+}
+
+pub fn parse_zaif_recent_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "zaif fills require canonical_symbol".to_string(),
+            })?;
+    let rows = return_map(exchange_id, value, "trade_history")?;
+    rows.iter()
+        .map(|(fill_id, row)| {
+            let row = *row;
+            let price = row
+                .get("price")
+                .and_then(value_f64)
+                .ok_or_else(|| parse_error(exchange_id, "trade_history price", row))?;
+            let quantity = row
+                .get("amount")
+                .and_then(value_f64)
+                .ok_or_else(|| parse_error(exchange_id, "trade_history amount", row))?;
+            let side = parse_side(exchange_id, row, row.get("action").and_then(Value::as_str))?;
+            Ok(Fill {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: symbol.market_type,
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: value_as_string(row.get("order_id")),
+                client_order_id: None,
+                fill_id: Some(fill_id.clone()),
+                side,
+                position_side: PositionSide::None,
+                status: FillStatus::Confirmed,
+                liquidity_role: LiquidityRole::Unknown,
+                price,
+                quantity,
+                quote_quantity: (price > 0.0 && quantity > 0.0).then_some(price * quantity),
+                fee_asset: Some(canonical_symbol.quote_asset().to_string()),
+                fee_amount: row.get("fee").and_then(value_f64),
+                fee_rate: None,
+                realized_pnl: None,
+                filled_at: row
+                    .get("timestamp")
+                    .and_then(value_i64)
+                    .and_then(|seconds| Utc.timestamp_opt(seconds, 0).single())
+                    .unwrap_or_else(Utc::now),
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
+fn parse_zaif_open_order(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    order_id: &str,
+    row: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let pair = row
+        .get("currency_pair")
+        .and_then(Value::as_str)
+        .map(normalize_zaif_pair)
+        .transpose()?;
+    let symbol = if let Some(symbol) = symbol_hint {
+        symbol.clone()
+    } else {
+        let pair =
+            pair.ok_or_else(|| parse_error(exchange_id, "active_orders currency_pair", row))?;
+        symbol_scope_from_pair(exchange_id, &pair)?
+    };
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: symbol.market_type,
+        canonical_symbol: symbol.canonical_symbol,
+        exchange_symbol: symbol.exchange_symbol,
+        client_order_id: None,
+        exchange_order_id: Some(order_id.to_string()),
+        side: parse_side(exchange_id, row, row.get("action").and_then(Value::as_str))?,
+        position_side: Some(PositionSide::None),
+        order_type: OrderType::Limit,
+        time_in_force: Some(TimeInForce::GTC),
+        status: OrderStatus::Open,
+        quantity: value_as_string(row.get("amount")).unwrap_or_else(|| "0".to_string()),
+        price: value_as_string(row.get("price")),
+        filled_quantity: "0".to_string(),
+        average_fill_price: None,
+        reduce_only: false,
+        post_only: false,
+        created_at: row
+            .get("timestamp")
+            .and_then(value_i64)
+            .and_then(|seconds| Utc.timestamp_opt(seconds, 0).single()),
+        updated_at: Utc::now(),
+    })
+}
+
+fn return_map<'a>(
+    exchange_id: &ExchangeId,
+    value: &'a Value,
+    expected: &str,
+) -> ExchangeApiResult<Vec<(String, &'a Value)>> {
+    let object = value
+        .get("return")
+        .and_then(Value::as_object)
+        .ok_or_else(|| parse_error(exchange_id, expected, value))?;
+    let mut rows = object
+        .iter()
+        .map(|(key, row)| (key.clone(), row))
+        .collect::<Vec<_>>();
+    rows.sort_by(|(left, _), (right, _)| left.cmp(right));
+    Ok(rows)
+}
+
+fn symbol_scope_from_pair(exchange_id: &ExchangeId, pair: &str) -> ExchangeApiResult<SymbolScope> {
+    let canonical = canonical_from_pair(pair)?;
+    let exchange_symbol = ExchangeSymbol::new(exchange_id.clone(), MarketType::Spot, pair)
+        .map_err(validation_error)?;
+    Ok(SymbolScope {
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Spot,
+        canonical_symbol: Some(canonical),
+        exchange_symbol,
+    })
+}
+
 fn parse_levels(
     exchange_id: &ExchangeId,
     value: Option<&Value>,
@@ -169,6 +316,22 @@ fn string_value(value: &Value) -> Option<String> {
         .map(ToString::to_string)
         .or_else(|| value.as_i64().map(|number| number.to_string()))
         .or_else(|| value.as_f64().map(|number| trim_float(number)))
+}
+
+fn value_as_string(value: Option<&Value>) -> Option<String> {
+    value.and_then(string_value)
+}
+
+fn parse_side(
+    exchange_id: &ExchangeId,
+    raw: &Value,
+    value: Option<&str>,
+) -> ExchangeApiResult<OrderSide> {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "bid" | "buy" => Ok(OrderSide::Buy),
+        "ask" | "sell" => Ok(OrderSide::Sell),
+        _ => Err(parse_error(exchange_id, "zaif order action", raw)),
+    }
 }
 
 fn trim_float(value: f64) -> String {

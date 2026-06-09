@@ -5,12 +5,12 @@ use rustcta_exchange_api::{
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamCapabilities,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamCapabilities, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -30,18 +30,27 @@ mod toolchain;
 mod transport;
 
 pub use config::GrvtGatewayConfig;
+use transport::GrvtRest;
 
 #[derive(Clone)]
 pub struct GrvtGatewayAdapter {
     exchange_id: ExchangeId,
     config: GrvtGatewayConfig,
+    rest: GrvtRest,
 }
 
 impl GrvtGatewayAdapter {
     pub fn new(config: GrvtGatewayConfig) -> ExchangeApiResult<Self> {
+        let exchange_id = ExchangeId::new("grvt").map_err(validation_error)?;
+        let rest = GrvtRest::new(
+            exchange_id.clone(),
+            config.trading_rest_base_url.clone(),
+            config.request_timeout_ms,
+        )?;
         Ok(Self {
-            exchange_id: ExchangeId::new("grvt").map_err(validation_error)?,
+            exchange_id,
             config,
+            rest,
         })
     }
 
@@ -59,6 +68,16 @@ impl GrvtGatewayAdapter {
             return Err(ExchangeApiError::Unsupported {
                 operation: "grvt.unsupported_market_type",
             });
+        }
+        Ok(())
+    }
+
+    fn ensure_optional_market_type(
+        &self,
+        market_type: Option<MarketType>,
+    ) -> ExchangeApiResult<()> {
+        if let Some(market_type) = market_type {
+            self.ensure_supported_market_type(market_type)?;
         }
         Ok(())
     }
@@ -94,10 +113,10 @@ impl ExchangeClient for GrvtGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
+        let private_read_enabled = self.config.private_session_available();
         capabilities.market_types = vec![MarketType::Perpetual, MarketType::Option];
         capabilities.supports_public_rest = false;
-        let _ = self.config.private_session_available();
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -110,9 +129,9 @@ impl ExchangeClient for GrvtGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -128,6 +147,50 @@ impl ExchangeClient for GrvtGatewayAdapter {
         capabilities.order_book = rustcta_exchange_api::OrderBookCapability::snapshot_only(None);
         capabilities.max_recent_fill_limit = None;
         toolchain::apply_toolchain_capabilities(&mut capabilities);
+        capabilities.supports_private_rest = private_read_enabled;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
+        capabilities.capabilities_v2.private_rest = if private_read_enabled {
+            rustcta_exchange_api::CapabilitySupport::native()
+        } else {
+            rustcta_exchange_api::CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED)
+        };
+        capabilities.capabilities_v2.order_history = if private_read_enabled {
+            HistoryCapability {
+                support: rustcta_exchange_api::CapabilitySupport::native(),
+                supports_limit: false,
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(private::PRIVATE_REST_DISABLED)
+        };
+        capabilities.capabilities_v2.fills_history = if private_read_enabled {
+            HistoryCapability {
+                support: rustcta_exchange_api::CapabilitySupport::native(),
+                supports_limit: true,
+                max_limit: Some(500),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(private::PRIVATE_REST_DISABLED)
+        };
+        for operation in ["query_order", "get_open_orders", "get_recent_fills"] {
+            if let Some(endpoint) = capabilities
+                .capabilities_v2
+                .endpoints
+                .iter_mut()
+                .find(|endpoint| endpoint.operation == operation)
+            {
+                endpoint.support = if private_read_enabled {
+                    rustcta_exchange_api::CapabilitySupport::native()
+                } else {
+                    rustcta_exchange_api::CapabilitySupport::unsupported(
+                        private::PRIVATE_REST_DISABLED,
+                    )
+                };
+            }
+        }
         capabilities
     }
 
@@ -141,7 +204,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
         request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("grvt.positions_session_spec_only")
+        self.unsupported(private::POSITIONS_UNSUPPORTED)
     }
 
     async fn get_symbol_rules(
@@ -205,7 +268,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("grvt.amend_order_session_spec_only")
+        self.unsupported(private::AMEND_ORDER_UNSUPPORTED)
     }
 
     async fn place_order_list(
@@ -214,7 +277,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
     ) -> ExchangeApiResult<OrderListResponse> {
         self.ensure_exchange(&request.symbol().exchange)?;
         self.ensure_supported_market_type(request.symbol().market_type)?;
-        self.unsupported("grvt.order_list_session_spec_only")
+        self.unsupported(private::ORDER_LIST_UNSUPPORTED)
     }
 
     async fn batch_place_orders(
@@ -226,7 +289,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
             self.ensure_exchange(&order.symbol.exchange)?;
             self.ensure_supported_market_type(order.symbol.market_type)?;
         }
-        self.unsupported("grvt.bulk_orders_session_spec_only")
+        self.unsupported(private::BULK_ORDERS_UNSUPPORTED)
     }
 
     async fn batch_cancel_orders(
@@ -234,7 +297,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("grvt.bulk_orders_session_spec_only")
+        self.unsupported(private::BULK_ORDERS_UNSUPPORTED)
     }
 
     async fn cancel_all_orders(
@@ -251,7 +314,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("grvt.query_order_session_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -259,7 +322,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("grvt.open_orders_session_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -267,7 +330,7 @@ impl ExchangeClient for GrvtGatewayAdapter {
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("grvt.recent_fills_session_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

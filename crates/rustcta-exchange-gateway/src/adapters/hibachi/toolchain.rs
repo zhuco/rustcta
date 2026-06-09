@@ -1,7 +1,8 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, EndpointAuth, EndpointCapability, EndpointTransport,
-    ExchangeClientCapabilities, HeartbeatCapability, HeartbeatPolicy, HistoryCapability,
-    ReconnectCapability, StreamHeartbeatDirection, StreamRuntimeCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HeartbeatCapability, HeartbeatPolicy, HistoryCapability, ReconnectCapability,
+    StreamHeartbeatDirection, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
@@ -37,10 +38,26 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
         heartbeat_policy: HeartbeatPolicy::disabled(),
         ..StreamRuntimeCapability::default()
     };
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported(private::BATCH_PLACE_UNSUPPORTED);
-    capabilities.capabilities_v2.batch_cancel_orders =
-        BatchCapability::unsupported(private::BATCH_CANCEL_UNSUPPORTED);
+    capabilities.capabilities_v2.batch_place_orders = BatchCapability {
+        support: CapabilitySupport::unsupported(private::BATCH_PLACE_UNSUPPORTED),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::Partial,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: false,
+        supports_partial_failure: true,
+    };
+    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+        support: CapabilitySupport::unsupported(private::BATCH_CANCEL_UNSUPPORTED),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::Partial,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: false,
+        supports_partial_failure: true,
+    };
     capabilities.capabilities_v2.cancel_all_orders =
         CapabilitySupport::unsupported(private::CANCEL_ALL_UNSUPPORTED);
     capabilities.capabilities_v2.order_history =
@@ -93,31 +110,128 @@ fn endpoint_capabilities() -> Vec<EndpointCapability> {
             weight: Some(1),
             supports_testnet: false,
         },
-    ];
-
-    endpoints.extend(
-        [
-            ("place_order", private::PLACE_ORDER_UNSUPPORTED),
-            ("cancel_order", private::CANCEL_ORDER_UNSUPPORTED),
-            ("amend_order", private::AMEND_ORDER_UNSUPPORTED),
-            ("batch_place_orders", private::BATCH_PLACE_UNSUPPORTED),
-            ("batch_cancel_orders", private::BATCH_CANCEL_UNSUPPORTED),
-            ("cancel_all_orders", private::CANCEL_ALL_UNSUPPORTED),
-        ]
-        .into_iter()
-        .map(|(operation, reason)| EndpointCapability {
-            operation: operation.to_string(),
-            support: CapabilitySupport::unsupported(reason),
+        EndpointCapability {
+            operation: "get_balances".to_string(),
+            support: CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED),
             market_types: vec![MarketType::Perpetual],
             transport: EndpointTransport::Rest,
-            method: Some("POST".to_string()),
-            path: Some("/trade/order".to_string()),
-            auth: EndpointAuth::Hmac,
-            credential_scopes: Vec::new(),
-            rate_limit_bucket: Some("hibachi_private_trade".to_string()),
+            method: Some("GET".to_string()),
+            path: Some("/trade/account/info".to_string()),
+            auth: EndpointAuth::ApiKey,
+            credential_scopes: vec![CredentialScope::ReadOnly],
+            rate_limit_bucket: Some("hibachi_private_rest".to_string()),
             weight: Some(1),
             supports_testnet: false,
-        }),
-    );
+        },
+        EndpointCapability {
+            operation: "get_positions".to_string(),
+            support: CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED),
+            market_types: vec![MarketType::Perpetual],
+            transport: EndpointTransport::Rest,
+            method: Some("GET".to_string()),
+            path: Some("/trade/account/info".to_string()),
+            auth: EndpointAuth::ApiKey,
+            credential_scopes: vec![CredentialScope::ReadOnly],
+            rate_limit_bucket: Some("hibachi_private_rest".to_string()),
+            weight: Some(1),
+            supports_testnet: false,
+        },
+        private_read_endpoint("query_order", "/trade/order"),
+        private_read_endpoint("get_open_orders", "/trade/orders"),
+        private_read_endpoint("get_recent_fills", "/trade/account/trades"),
+    ];
+
+    endpoints.extend([
+        signed_write_endpoint(
+            "place_order",
+            "POST",
+            "/trade/order",
+            private::PLACE_ORDER_UNSUPPORTED,
+        ),
+        signed_write_endpoint(
+            "cancel_order",
+            "DELETE",
+            "/trade/order",
+            private::CANCEL_ORDER_UNSUPPORTED,
+        ),
+        signed_write_endpoint(
+            "amend_order",
+            "PATCH",
+            "/trade/order",
+            private::AMEND_ORDER_UNSUPPORTED,
+        ),
+        signed_write_endpoint(
+            "batch_place_orders",
+            "POST",
+            "/trade/orders",
+            private::BATCH_PLACE_UNSUPPORTED,
+        ),
+        signed_write_endpoint(
+            "batch_cancel_orders",
+            "DELETE",
+            "/trade/orders",
+            private::BATCH_CANCEL_UNSUPPORTED,
+        ),
+        signed_write_endpoint(
+            "cancel_all_orders",
+            "DELETE",
+            "/trade/orders",
+            private::CANCEL_ALL_UNSUPPORTED,
+        ),
+        unsupported_endpoint("place_order_list", private::ORDER_LIST_UNSUPPORTED),
+    ]);
     endpoints
+}
+
+fn private_read_endpoint(operation: &str, path: &str) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some("GET".to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::ApiKey,
+        credential_scopes: vec![CredentialScope::ReadOnly],
+        rate_limit_bucket: Some("hibachi_private_rest".to_string()),
+        weight: Some(1),
+        supports_testnet: false,
+    }
+}
+
+fn signed_write_endpoint(
+    operation: &str,
+    method: &str,
+    path: &str,
+    reason: &'static str,
+) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(reason),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some(method.to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::Hmac,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("hibachi_private_trade".to_string()),
+        weight: Some(1),
+        supports_testnet: false,
+    }
+}
+
+fn unsupported_endpoint(operation: &str, reason: &'static str) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(reason),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: None,
+        path: None,
+        auth: EndpointAuth::None,
+        credential_scopes: Vec::new(),
+        rate_limit_bucket: Some("hibachi_unsupported".to_string()),
+        weight: Some(0),
+        supports_testnet: false,
+    }
 }

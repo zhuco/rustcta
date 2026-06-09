@@ -1,9 +1,9 @@
 # btcbox Adapter
 
-Task A-12 covers BTCBOX as a Japanese Spot venue. This adapter is intentionally
-scan-only/G1: it exposes public REST symbol discovery from `tickers` and order
-book snapshots from `depth`, while private REST trading remains offline
-request-spec only.
+Task A-12 covers BTCBOX as a Japanese Spot venue. This adapter exposes public
+REST symbol discovery from `tickers`, order book snapshots from `depth`, and
+guarded private REST readback for order query/open orders. Live writes remain
+offline request-spec only.
 
 ## API Scope
 
@@ -12,13 +12,13 @@ request-spec only.
 | Product line | Spot JPY pairs only |
 | Public REST base URL | `https://www.btcbox.co.jp/api/v1` |
 | Public REST | `GET /tickers`, `GET /ticker?coin=...`, `GET /depth?coin=...`, parser-only `GET /orders` |
-| Private REST | Documented form POST API, disabled at runtime in this adapter phase |
+| Private REST | Documented form POST API; readback is runtime-gated by `BTCBOX_PRIVATE_REST_ENABLED` plus API key/secret |
 | Signing | HMAC-SHA256 over URL-encoded form params, keyed by `md5(private_key)` |
 | Rate limits | Private documented per endpoint; public has no fixed cap, so adapter mapping uses a conservative bucket |
 | WebSocket | 交易所不支持公共 WS 行情；当前官方 API 资料是 HTTP Public/Private API |
 | Service state | BTCBOX service suspension code `901` is treated as exchange unavailable |
 | Testnet | No stable public testnet endpoint verified |
-| Region/KYC | Japanese venue; private API use is assumed to require BTCBOX account approval/KYC and is not enabled by this adapter |
+| Region/KYC | Japanese venue; private API use is assumed to require BTCBOX account approval/KYC |
 | Standard contracts | `交易所不支持合约`; current official API docs list spot JPY ticker/depth/orders/trade endpoints only |
 
 ## Official Sources
@@ -42,9 +42,10 @@ and min-size fields unset.
   BTC/BCH/LTC/ETH because those depth coins are the verified public docs scope.
 - `public_trades`: documented `GET /orders`, left `Unsupported` in this scan-only
   task because no shared gateway method/parser is wired for it.
-- `get_balances`, `get_open_orders`, `query_order`, `place_order`, and
-  `cancel_order`: offline request-spec fixtures only; runtime returns
-  `Unsupported`.
+- `query_order`: guarded private REST `POST /trade_view`, exchange-order-id only.
+- `get_open_orders`: guarded private REST `POST /trade_list`, symbol scoped.
+- `get_balances`, `place_order`, and `cancel_order`: offline request-spec
+  fixtures only; runtime returns `Unsupported`.
 
 ## Capability Boundary
 
@@ -52,14 +53,17 @@ Implemented:
 
 - `get_symbol_rules` via `GET /tickers`
 - `get_order_book` via `GET /depth?coin=<base>`
+- `query_order` via `POST /trade_view` when private REST is explicitly enabled
+- `get_open_orders` via `POST /trade_list` when private REST is explicitly enabled
 - private request-spec/signing fixtures for `balance`, `trade_list`,
   `trade_view`, `trade_cancel`, and `trade_add`
 
 Unsupported:
 
-- private REST runtime reads/writes
-- balances, fees, open orders, query order, fills
-- place/cancel/cancel-all/batch/order-list runtime operations
+- private REST writes
+- balances, fees, fills
+- place/cancel runtime operations; offline request-spec fixtures exist only for documented single-order endpoints
+- advanced orders stay explicitly unsupported: `amend_order`, `place_order_list`, `batch_place_orders`, `batch_cancel_orders`, and audit-only `cancel_all_orders`
 - public/private streams：交易所不支持公共 WS 行情；REST `depth` is the polling fallback
 - fiat deposits, withdrawals, bank transfers, wallet operations, and ledgers
 - standard futures/perpetual/options: `交易所不支持合约`
@@ -84,3 +88,7 @@ cargo test -p rustcta-gateway btcbox --message-format short
 ```
 
 Do not use `cargo build` for this task.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前资料未验证到稳定 BTCBOX fee endpoint。

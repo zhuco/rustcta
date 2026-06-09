@@ -23,5 +23,5 @@
   "auth": "session_cookie_plus_external_signer",
   "request_spec_required": true,
   "trade_enabled": false,
-  "expected_error": "grvt.bulk_orders_session_spec_only"
+  "expected_error": "grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard"
 }

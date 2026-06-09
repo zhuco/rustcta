@@ -48,6 +48,39 @@ fn bitget_parser_fixtures_should_cover_success_empty_and_error_shapes() {
     );
 }
 
+#[test]
+fn bitget_symbol_rules_should_skip_invalid_exchange_symbols() {
+    let exchange = super::test_support::exchange_id();
+    let rules = parse_symbol_rules(
+        &exchange,
+        MarketType::Perpetual,
+        &json!({
+            "data": [
+                {
+                    "symbol": "BTCUSDT",
+                    "baseCoin": "BTC",
+                    "quoteCoin": "USDT",
+                    "pricePrecision": "1",
+                    "quantityPrecision": "3",
+                    "status": "online"
+                },
+                {
+                    "symbol": "龙USDT",
+                    "baseCoin": "龙",
+                    "quoteCoin": "USDT",
+                    "pricePrecision": "4",
+                    "quantityPrecision": "0",
+                    "status": "online"
+                }
+            ]
+        }),
+    )
+    .expect("rules");
+
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].base_asset, "BTC");
+}
+
 #[tokio::test]
 async fn bitget_adapter_should_load_perpetual_order_book_from_public_rest() {
     let (base_url, seen) = spawn_rest_server(vec![json!({

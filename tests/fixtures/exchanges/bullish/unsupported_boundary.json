@@ -6,11 +6,12 @@
   "unsupported": [
     "bullish.place_order_offline_request_spec_only",
     "bullish.cancel_order_offline_request_spec_only",
-    "bullish.batch_place_orders_unverified",
-    "bullish.batch_cancel_orders_unverified",
-    "bullish.cancel_all_orders_unverified",
-    "bullish.quote_market_order_unverified",
-    "bullish.order_list_unverified",
+    "bullish.amend_order_offline_request_spec_only",
+    "bullish.batch_place_orders_unsupported",
+    "bullish.batch_cancel_orders_unsupported",
+    "bullish.cancel_all_orders_offline_request_spec_only",
+    "bullish.quote_market_order_unsupported",
+    "bullish.order_list_unsupported",
     "bullish.fees_offline_request_spec_only"
   ]
 }

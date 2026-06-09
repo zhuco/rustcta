@@ -1,0 +1,13 @@
+{
+  "exchange": "fmfwio",
+  "name": "amend_order_replace_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "PATCH",
+  "request_path": "/api/3/spot/order/cli-fmfwio-1",
+  "payload": "PATCH/api/3/spot/order/cli-fmfwio-1new_client_order_id=cli-fmfwio-1-r1&price=0.046020&quantity=0.050171000000000010000",
+  "expected_signature": "e8173a4004acc2bec0f5955efdcfe6e0890fec53cf17f2105c634cef728b9d2b",
+  "payload_format": "raw_payload",
+  "body": "new_client_order_id=cli-fmfwio-1-r1&price=0.046020&quantity=0.050"
+}

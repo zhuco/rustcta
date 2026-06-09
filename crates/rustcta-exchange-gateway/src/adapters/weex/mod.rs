@@ -274,7 +274,7 @@ impl ExchangeClient for WeexGatewayAdapter {
         ];
         capabilities.max_order_book_depth = Some(200);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(200));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(200));
         capabilities.max_recent_fill_limit = Some(100);
         capabilities.capabilities_v2 = weex_capabilities_v2(private);
         capabilities

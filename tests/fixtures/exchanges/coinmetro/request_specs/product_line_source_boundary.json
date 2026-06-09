@@ -1,0 +1,48 @@
+{
+  "exchange": "coinmetro",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "spot_private_request_specs"
+  ],
+  "official_product_lines": [
+    "margin_swap_tram_like_product_boundary"
+  ],
+  "product_line_classification": {
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Margin/Swap/TRAM-like surfaces need taxonomy, eligibility, collateral, positions, risk, fees, private lifecycle, and REST/WS reconciliation before runtime."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "Current official sources do not expose standard futures, perpetual, or options contract products."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "futures",
+    "perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://documentation.coinmetro.com/",
+      "evidence": "Coinmetro product materials include margin/swap/TRAM-like surfaces, but this adapter only wires spot market data and offline private request specs."
+    }
+  ],
+  "runtime_isolation": "Do not route Coinmetro margin, swap, TRAM-like, leverage, collateral, or position semantics through the spot adapter until product scope, credentials, account eligibility, parser fixtures, private order lifecycle, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "product taxonomy and account eligibility",
+    "margin/swap collateral, position, risk, and fee parser fixtures",
+    "private order lifecycle request specs and parsers",
+    "REST/WS readback and reconciliation"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_standard_futures_api",
+    "perpetual": "unsupported_no_standard_perpetual_api",
+    "options": "unsupported_no_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

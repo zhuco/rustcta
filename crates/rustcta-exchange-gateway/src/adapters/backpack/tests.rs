@@ -18,13 +18,14 @@ use super::private_parser::{
 };
 use super::signing::{backpack_signature, canonical_batch_payload};
 use super::streams::{
-    backpack_ping_payload, backpack_private_stream, backpack_public_stream,
+    backpack_depth_stream, backpack_depth_subscribe_payload, backpack_ping_payload,
+    backpack_private_stream, backpack_public_order_book_ws_policy, backpack_public_stream,
     backpack_public_subscribe_payload, parse_backpack_public_stream_message,
     parse_backpack_stream_event, BackpackPublicStreamMessage,
 };
 use super::test_support::{
     assert_request_matches_spec, context, fixed_time, fixture, perp_symbol_scope, private_config,
-    request_spec, signing_vector, spawn_rest_server, spot_symbol_scope,
+    request_spec, signing_vector, spawn_rest_server, spot_symbol_scope, ws_fixture,
 };
 use super::{BackpackGatewayAdapter, BackpackGatewayConfig};
 
@@ -179,6 +180,15 @@ fn backpack_stream_helpers_should_build_public_and_private_channels() {
         backpack_public_subscribe_payload(&public),
         json!({"method": "SUBSCRIBE", "params": ["depth.SOL_USDC_PERP"]})
     );
+    assert_eq!(
+        backpack_depth_stream("SOL_USDC_PERP", Some(200)).unwrap(),
+        "depth.200ms.SOL_USDC_PERP"
+    );
+    assert_eq!(
+        backpack_depth_subscribe_payload(&public.symbol, Some(600)).unwrap(),
+        json!({"method": "SUBSCRIBE", "params": ["depth.600ms.SOL_USDC_PERP"]})
+    );
+    assert!(backpack_depth_stream("SOL_USDC_PERP", Some(100)).is_err());
     assert_eq!(backpack_ping_payload(), json!({"method": "PING"}));
 
     let private = PrivateStreamSubscription {
@@ -193,6 +203,31 @@ fn backpack_stream_helpers_should_build_public_and_private_channels() {
         backpack_private_stream(&private).unwrap(),
         "account.orderUpdate"
     );
+}
+
+#[test]
+fn backpack_public_order_book_ws_policy_should_describe_depth_replay_and_resync() {
+    let policy = backpack_public_order_book_ws_policy();
+
+    assert_eq!(policy.book_ticker_channel_template, "bookTicker.{symbol}");
+    assert_eq!(policy.realtime_depth_channel_template, "depth.{symbol}");
+    assert_eq!(
+        policy.aggregate_depth_channel_template,
+        "depth.{interval_ms}ms.{symbol}"
+    );
+    assert_eq!(policy.aggregate_intervals_ms, &[200, 600, 1000]);
+    assert_eq!(policy.rest_snapshot_endpoint, "GET /api/v1/depth");
+    assert_eq!(
+        policy.rest_snapshot_limits,
+        &[5, 10, 20, 50, 100, 500, 1000]
+    );
+    assert_eq!(policy.snapshot_sequence_field, "lastUpdateId");
+    assert_eq!(policy.depth_first_update_field, "U");
+    assert_eq!(policy.depth_final_update_field, "u");
+    assert_eq!(policy.book_ticker_sequence_field, "u");
+    assert_eq!(policy.checksum, None);
+    assert!(policy.resync.contains("lastUpdateId"));
+    assert!(policy.resync.contains("previous u + 1"));
 }
 
 #[tokio::test]
@@ -464,11 +499,11 @@ fn backpack_public_stream_parser_should_parse_trade_ticker_and_candle_events() {
 
 #[test]
 fn backpack_public_stream_parser_should_normalize_depth_and_book_ticker_events() {
-    let symbol = symbol(MarketType::Spot, "SOL_USDC");
+    let spot = symbol(MarketType::Spot, "SOL_USDC");
     let depth = parse_backpack_stream_event(
         &exchange_id(),
-        Some(&symbol),
-        r#"{"stream":"depth.SOL_USDC","data":{"b":[["10.0","1.0"]],"a":[["10.2","2.0"]],"u":"77","E":1704000000000000}}"#,
+        Some(&spot),
+        &ws_fixture("public_depth_realtime").to_string(),
     )
     .unwrap();
     assert_eq!(depth.len(), 1);
@@ -477,21 +512,38 @@ fn backpack_public_stream_parser_should_normalize_depth_and_book_ticker_events()
             assert_eq!(response.order_book.sequence, Some(77));
             assert_eq!(response.order_book.best_bid().unwrap().price, 10.0);
             assert_eq!(response.order_book.best_ask().unwrap().price, 10.2);
+            assert_eq!(
+                response
+                    .order_book
+                    .exchange_timestamp
+                    .unwrap()
+                    .timestamp_millis(),
+                1_704_000_000_000
+            );
         }
         other => panic!("unexpected depth event: {other:?}"),
     }
 
+    let perp = symbol(MarketType::Perpetual, "SOL_USDC_PERP");
+    let aggregate_depth = parse_backpack_public_stream_message(
+        &exchange_id(),
+        Some(&perp),
+        &ws_fixture("public_depth_200ms"),
+    )
+    .unwrap();
+    match aggregate_depth {
+        BackpackPublicStreamMessage::OrderBook(order_book) => {
+            assert_eq!(order_book.sequence, Some(202));
+            assert_eq!(order_book.best_bid().unwrap().price, 99.9);
+            assert_eq!(order_book.best_ask().unwrap().quantity, 0.8);
+        }
+        other => panic!("unexpected aggregate depth event: {other:?}"),
+    }
+
     let book_ticker = parse_backpack_public_stream_message(
         &exchange_id(),
-        Some(&symbol),
-        &json!({
-            "stream": "bookTicker.SOL_USDC",
-            "data": {
-                "b": [["9.9", "3"]],
-                "a": [["10.1", "4"]],
-                "u": "78"
-            }
-        }),
+        Some(&spot),
+        &ws_fixture("public_book_ticker"),
     )
     .unwrap();
     match book_ticker {

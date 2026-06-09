@@ -1,0 +1,52 @@
+{
+  "exchange": "kcex",
+  "operation": "get_balances",
+  "product": "mixed",
+  "boundary": "account_balance_openapi_unverified_source_only",
+  "runtime_enabled": false,
+  "source": {
+    "surfaces": [
+      "KCEX Spot account balance OpenAPI to be verified",
+      "KCEX perpetual account equity OpenAPI to be verified"
+    ],
+    "requires": [
+      "official_openapi_account_balance_endpoint",
+      "verified_signing_rule",
+      "read_only_credential_scope"
+    ],
+    "account_id_shape": "KCEX UID or account id fixture",
+    "does_not_use": [
+      "real_api_key",
+      "real_api_secret",
+      "undocumented_browser_cookie"
+    ]
+  },
+  "request_shape_sample": {
+    "method": "GET_OR_POST_PENDING_OFFICIAL_OPENAPI",
+    "path": "official-kcex-account-balance-path-pending-verification",
+    "auth": "read_only_signed_request_pending_verification"
+  },
+  "decoded_sample": {
+    "account_id": "kcex-account-id-fixture",
+    "balances": [
+      {
+        "asset": "USDT",
+        "wallet_balance": "250.000000",
+        "available": "200.000000",
+        "equity": "250.000000"
+      }
+    ]
+  },
+  "runtime_gap": [
+    "official KCEX OpenAPI verification",
+    "signing and timestamp rule verification",
+    "spot/perpetual balance parser",
+    "read-only reconciliation"
+  ],
+  "fixture_policy": {
+    "contains_api_key": false,
+    "contains_api_secret": false,
+    "contains_real_account_id": false,
+    "live_call_allowed": false
+  }
+}

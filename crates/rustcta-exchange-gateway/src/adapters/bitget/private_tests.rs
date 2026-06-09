@@ -46,6 +46,7 @@ fn bitget_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
         api_secret: Some("secret".to_string()),
         passphrase: Some("passphrase".to_string()),
         enabled_private_rest: true,
+        enabled_public_streams: true,
         ..BitgetGatewayConfig::default()
     })
     .expect("adapter");
@@ -73,7 +74,7 @@ fn bitget_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.public_streams,
-        CapabilitySupport::RestFallback { .. }
+        CapabilitySupport::Native
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.private_streams,
@@ -394,6 +395,23 @@ async fn bitget_adapter_should_route_private_rest_readbacks_with_signed_headers(
     );
     assert_eq!(open_orders.orders[0].side, OrderSide::Sell);
     assert_eq!(open_orders.orders[0].status, OrderStatus::New);
+
+    let empty_open_orders = super::private_parser::parse_orders(
+        &exchange_id(),
+        Some(&symbol_scope()),
+        MarketType::Spot,
+        &json!({
+            "code": "00000",
+            "msg": "success",
+            "requestTime": 1780949470141i64,
+            "data": {
+                "endId": null,
+                "entrustedList": null
+            }
+        }),
+    )
+    .expect("empty open orders response");
+    assert!(empty_open_orders.is_empty());
 
     let fees = adapter
         .get_fees(FeesRequest {

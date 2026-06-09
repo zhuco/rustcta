@@ -1,0 +1,11 @@
+{
+  "depth": 30,
+  "orderbook_p": {
+    "asks": [["20702.9", "0"]],
+    "bids": [["20700.6", "1.100"]]
+  },
+  "sequence": 77668173,
+  "symbol": "BTCUSDT",
+  "timestamp": 1666854171221355264,
+  "type": "incremental"
+}

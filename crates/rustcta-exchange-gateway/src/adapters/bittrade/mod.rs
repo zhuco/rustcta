@@ -84,7 +84,9 @@ impl GatewayAdapter for BittradeGatewayAdapter {
             private_stream_connected: false,
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
-            message: Some("bittrade spot public REST and offline request-spec adapter".to_string()),
+            message: Some(
+                "bittrade spot public REST with guarded private readback REST".to_string(),
+            ),
         }
     }
 }
@@ -97,9 +99,10 @@ impl ExchangeClient for BittradeGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
+        let private_rest_enabled = self.config.private_rest_enabled();
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_rest_enabled;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities =
@@ -112,9 +115,9 @@ impl ExchangeClient for BittradeGatewayAdapter {
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_rest_enabled;
+        capabilities.supports_open_orders = private_rest_enabled;
+        capabilities.supports_recent_fills = private_rest_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_client_order_id = false;
@@ -230,24 +233,21 @@ impl ExchangeClient for BittradeGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.unsupported("bittrade.query_order.offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bittrade.get_open_orders.offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bittrade.get_recent_fills.offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

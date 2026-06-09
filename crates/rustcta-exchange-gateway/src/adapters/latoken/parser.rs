@@ -112,6 +112,7 @@ pub fn parse_orderbook_snapshot(
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
     snapshot.exchange_timestamp = first_timestamp(value, &["timestamp", "time", "updatedAt"]);
+    snapshot.sequence = value_as_u64(value.get("nonce").or_else(|| value.get("sequence")));
     Ok(snapshot)
 }
 
@@ -280,6 +281,14 @@ fn number_from_value(value: &Value) -> Option<f64> {
         Value::Number(number) => number.as_f64(),
         _ => None,
     }
+}
+
+fn value_as_u64(value: Option<&Value>) -> Option<u64> {
+    value.and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_str()?.trim().parse().ok())
+    })
 }
 
 fn first_timestamp(value: &Value, fields: &[&str]) -> Option<DateTime<Utc>> {

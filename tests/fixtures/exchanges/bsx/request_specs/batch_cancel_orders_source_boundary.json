@@ -1,0 +1,30 @@
+{
+  "exchange": "bsx",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/source/bsx/batch-cancel-orders-boundary",
+  "auth": "signed",
+  "status": "spec_only",
+  "source_boundary": "multi_cancel_and_cancel_all_not_shared_batch_runtime",
+  "source_transport": "rest_or_websocket",
+  "source_auth": "bsx_account_headers_or_authenticated_orders_channel",
+  "trade_enabled": false,
+  "official_sources": [
+    "https://api-docs.bsx.exchange/reference/ws-cancel-order",
+    "https://api-docs.bsx.exchange/reference/cancelallorders",
+    "https://api-docs.bsx.exchange/reference/ws-orders"
+  ],
+  "shared_semantics": "offline_boundary",
+  "parser_fixture": "tests/fixtures/exchanges/bsx/parser/batch_cancel_orders_ack.json",
+  "runtime_guard": "bsx.batch_cancel_orders_spec_only_no_safe_cancel_shape_session_reconciliation_guard",
+  "partial_failure_model": "per-item success/failure report with query/open-orders reconciliation for rejected, omitted or ambiguous items",
+  "reason": "BSX exposes cancel surfaces and account order updates as a fixture-backed offline batch_cancel_orders boundary with parser evidence, but shared runtime still lacks a selected non-overcancel request shape, account/session signer, sequence/dry-run guard, and partial-failure reconciliation runtime.",
+  "remaining_runtime_work": [
+    "select a non-overcancel cancel-list request shape instead of cancel-all fallback",
+    "wire BSX account headers and EIP-712/session signing",
+    "wire account order update reconciliation",
+    "enable sequence and live dry-run guard"
+  ]
+}

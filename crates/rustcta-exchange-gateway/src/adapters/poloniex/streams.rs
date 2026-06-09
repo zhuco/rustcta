@@ -15,9 +15,8 @@ use rustcta_types::{
 use serde_json::{json, Value};
 
 use super::parser::{
-    decimal_as_f64, first_timestamp_millis, normalize_depth, normalize_poloniex_symbol,
-    parse_error, parse_orderbook_snapshot, parse_side, split_poloniex_symbol, value_as_i64,
-    value_as_string,
+    decimal_as_f64, first_timestamp_millis, normalize_poloniex_symbol, parse_error,
+    parse_orderbook_snapshot, parse_side, split_poloniex_symbol, value_as_i64, value_as_string,
 };
 use super::private_parser::{parse_balances, parse_order_state, parse_positions};
 use super::signing::{sign_payload, signature_payload};
@@ -26,6 +25,47 @@ use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisorAction};
 
 const POLONIEX_WS_HEARTBEAT_PAYLOAD: &str = r#"{"event":"ping"}"#;
+const POLONIEX_PUBLIC_ORDER_BOOK_LEVELS: u32 = 20;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoloniexPublicOrderBookWsPolicy {
+    pub spot_url: &'static str,
+    pub futures_url: &'static str,
+    pub channel: &'static str,
+    pub levels: u32,
+    pub update_mode: &'static str,
+    pub spot_sequence_fields: &'static [&'static str],
+    pub futures_sequence_fields: &'static [&'static str],
+    pub checksum_field: Option<&'static str>,
+    pub resync_strategy: &'static str,
+}
+
+pub fn poloniex_public_order_book_ws_policy() -> PoloniexPublicOrderBookWsPolicy {
+    PoloniexPublicOrderBookWsPolicy {
+        spot_url: "wss://ws.poloniex.com/ws/public",
+        futures_url: "wss://ws.poloniex.com/ws/v3/public",
+        channel: "book_lv2",
+        levels: POLONIEX_PUBLIC_ORDER_BOOK_LEVELS,
+        update_mode: "real-time 20-level level-2 order book",
+        spot_sequence_fields: &["id", "lastId"],
+        futures_sequence_fields: &["id", "lid"],
+        checksum_field: None,
+        resync_strategy: "On reconnect, stale stream, sequence gap, or regression, discard the local book, refetch the REST order book snapshot, resubscribe to book_lv2, then apply only messages whose previous id matches the local id.",
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoloniexOrderBookSequence {
+    pub current_id: i64,
+    pub previous_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoloniexOrderBookReplayDecision {
+    Initialize,
+    Apply,
+    Rebuild,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PoloniexPublicStreamMessage {
@@ -421,7 +461,7 @@ pub fn poloniex_public_subscribe_payload(
         subscription.kind,
         PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta
     ) {
-        payload["depth"] = json!(normalize_depth(20, subscription.symbol.market_type).min(20));
+        payload["depth"] = json!(POLONIEX_PUBLIC_ORDER_BOOK_LEVELS);
     }
     Ok(payload)
 }
@@ -494,6 +534,50 @@ pub fn is_poloniex_ws_pong(value: &Value) -> bool {
     value.get("event").and_then(Value::as_str) == Some("pong")
         || value.get("type").and_then(Value::as_str) == Some("pong")
         || value.get("op").and_then(Value::as_str) == Some("pong")
+}
+
+pub fn poloniex_order_book_sequence(
+    value: &Value,
+    market_type: MarketType,
+) -> Option<PoloniexOrderBookSequence> {
+    let item = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .unwrap_or(value);
+    let current_id = item.get("id").and_then(value_as_i64)?;
+    let previous_id = match market_type {
+        MarketType::Perpetual => item
+            .get("lid")
+            .or_else(|| item.get("lastId"))
+            .and_then(value_as_i64),
+        _ => item
+            .get("lastId")
+            .or_else(|| item.get("lid"))
+            .and_then(value_as_i64),
+    };
+    Some(PoloniexOrderBookSequence {
+        current_id,
+        previous_id,
+    })
+}
+
+pub fn poloniex_order_book_replay_decision(
+    local_last_id: Option<i64>,
+    incoming: PoloniexOrderBookSequence,
+) -> PoloniexOrderBookReplayDecision {
+    let Some(local_last_id) = local_last_id else {
+        return PoloniexOrderBookReplayDecision::Initialize;
+    };
+    if incoming.current_id <= local_last_id {
+        return PoloniexOrderBookReplayDecision::Rebuild;
+    }
+    match incoming.previous_id {
+        Some(previous_id) if previous_id == local_last_id => PoloniexOrderBookReplayDecision::Apply,
+        Some(_) => PoloniexOrderBookReplayDecision::Rebuild,
+        None if incoming.current_id == local_last_id + 1 => PoloniexOrderBookReplayDecision::Apply,
+        None => PoloniexOrderBookReplayDecision::Rebuild,
+    }
 }
 
 pub fn parse_poloniex_public_stream_message(

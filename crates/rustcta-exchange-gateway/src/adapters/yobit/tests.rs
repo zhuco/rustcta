@@ -1,14 +1,16 @@
 use rustcta_exchange_api::{
-    BalancesRequest, BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, OrderBookRequest,
-    PlaceOrderRequest, PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind,
-    PublicStreamSubscription, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    BalancesRequest, BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest,
+    OrderBookRequest, PlaceOrderRequest, PrivateStreamKind, PrivateStreamSubscription,
+    PublicStreamKind, PublicStreamSubscription, QueryOrderRequest, RecentFillsRequest,
+    SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{AccountId, MarketType, OrderSide, OrderType};
+use rustcta_types::{AccountId, MarketType, OrderSide, OrderStatus, OrderType};
 
+use super::parser::{parse_open_orders, parse_order_state, parse_recent_fills};
 use super::private::{
-    balance_params, build_private_request_spec, open_orders_params, recent_fills_params,
-    request_spec_params_from_order, YOBIT_CANCEL_ORDER_METHOD, YOBIT_OPEN_ORDERS_METHOD,
-    YOBIT_PLACE_ORDER_METHOD, YOBIT_RECENT_FILLS_METHOD, YOBIT_TAPI_PATH,
+    balance_params, build_private_request_spec, open_orders_params, query_order_params,
+    recent_fills_params, request_spec_params_from_order, YOBIT_CANCEL_ORDER_METHOD,
+    YOBIT_OPEN_ORDERS_METHOD, YOBIT_PLACE_ORDER_METHOD, YOBIT_RECENT_FILLS_METHOD, YOBIT_TAPI_PATH,
 };
 use super::signing::hmac_sha512_hex;
 use super::streams::yobit_rest_reconciliation_fallback;
@@ -24,6 +26,15 @@ fn fixture(name: &str) -> serde_json::Value {
         "depth_success.json" => {
             include_str!("../../../../../tests/fixtures/exchanges/yobit/depth_success.json")
         }
+        "order_info_success.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/yobit/order_info_success.json")
+        }
+        "open_orders_success.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/yobit/open_orders_success.json")
+        }
+        "trade_history_success.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/yobit/trade_history_success.json"
+        ),
         "request_specs/place_order_limit_buy.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/yobit/request_specs/place_order_limit_buy.json"
         ),
@@ -62,13 +73,15 @@ fn yobit_capabilities_should_expose_scan_only_spot_public_rest() {
     assert!(capabilities.supports_public_rest);
     assert!(capabilities.supports_symbol_rules);
     assert!(capabilities.supports_order_book_snapshot);
-    assert!(!capabilities.supports_private_rest);
+    assert!(capabilities.supports_private_rest);
     assert!(!capabilities.supports_place_order);
     assert!(!capabilities.supports_cancel_order);
+    assert!(capabilities.supports_query_order);
+    assert!(capabilities.supports_open_orders);
+    assert!(capabilities.supports_recent_fills);
     assert!(!capabilities.supports_public_streams);
     assert!(!capabilities.supports_private_streams);
     assert!(capabilities.capabilities_v2.public_rest.is_supported());
-    assert!(!capabilities.capabilities_v2.private_rest.is_supported());
     assert_eq!(capabilities.max_order_book_depth, Some(2000));
 
     let boundary = fixture("unsupported_boundary.json");
@@ -161,7 +174,9 @@ async fn yobit_private_operations_should_stay_unsupported_even_with_credentials(
     .expect("adapter");
 
     assert!(adapter.config.private_rest_configured());
-    assert!(!adapter.capabilities().supports_private_rest);
+    assert!(adapter.capabilities().supports_private_rest);
+    assert!(!adapter.capabilities().supports_place_order);
+    assert!(!adapter.capabilities().supports_cancel_order);
     let error = adapter
         .get_balances(BalancesRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -178,6 +193,198 @@ async fn yobit_private_operations_should_stay_unsupported_even_with_credentials(
             operation: "yobit.balances_request_spec_only"
         }
     ));
+}
+
+#[tokio::test]
+async fn yobit_readbacks_should_fail_closed_without_private_rest_guard() {
+    let adapter = YobitGatewayAdapter::default_public().expect("adapter");
+    let error = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query-disabled"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("100025362".to_string()),
+        })
+        .await
+        .expect_err("private readbacks disabled");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "yobit.query_order"
+        }
+    ));
+}
+
+#[test]
+fn yobit_private_readback_parsers_should_normalize_tapi_payloads() {
+    let order = parse_order_state(
+        &exchange_id(),
+        Some(&symbol_scope()),
+        &fixture("order_info_success.json"),
+    )
+    .expect("order");
+    assert_eq!(order.exchange_order_id.as_deref(), Some("100025362"));
+    assert_eq!(order.status, OrderStatus::PartiallyFilled);
+    assert_eq!(order.quantity, "0.01000000");
+    assert_eq!(order.filled_quantity, "0.006");
+
+    let open_orders = parse_open_orders(
+        &exchange_id(),
+        Some(&symbol_scope()),
+        &fixture("open_orders_success.json"),
+    )
+    .expect("open orders");
+    assert_eq!(open_orders.len(), 2);
+    assert_eq!(open_orders[1].side, OrderSide::Sell);
+    assert_eq!(open_orders[1].status, OrderStatus::Open);
+
+    let fills = parse_recent_fills(
+        &exchange_id(),
+        context("fills-parser").tenant_id.unwrap(),
+        context("fills-parser").account_id.unwrap(),
+        &symbol_scope(),
+        &fixture("trade_history_success.json"),
+    )
+    .expect("fills");
+    assert_eq!(fills.len(), 2);
+    assert_eq!(fills[0].fill_id.as_deref(), Some("200000001"));
+    assert_eq!(fills[0].order_id.as_deref(), Some("100025362"));
+    assert_eq!(fills[0].quantity, 0.006);
+}
+
+#[tokio::test]
+async fn yobit_should_query_order_over_guarded_tapi() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("order_info_success.json")]).await;
+    let adapter = YobitGatewayAdapter::new(YobitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: "yobit_public_fixture_key".to_string(),
+        api_secret: "yobit_secret_fixture".to_string(),
+        enabled_private_rest: true,
+        ..YobitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("100025362".to_string()),
+        })
+        .await
+        .expect("query");
+
+    assert_eq!(
+        response
+            .order
+            .as_ref()
+            .and_then(|order| order.exchange_order_id.as_deref()),
+        Some("100025362")
+    );
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, YOBIT_TAPI_PATH);
+    assert_eq!(
+        request.headers.get("key").map(String::as_str),
+        Some("yobit_public_fixture_key")
+    );
+    assert!(request
+        .headers
+        .get("sign")
+        .is_some_and(|sign| sign.len() == 128));
+    assert_eq!(
+        request.form.get("method").map(String::as_str),
+        Some("OrderInfo")
+    );
+    assert_eq!(
+        request.form.get("order_id").map(String::as_str),
+        Some("100025362")
+    );
+    assert!(request.form.get("nonce").is_some());
+    assert!(request.body_text.contains("method=OrderInfo"));
+}
+
+#[tokio::test]
+async fn yobit_should_fetch_open_orders_over_guarded_tapi() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("open_orders_success.json")]).await;
+    let adapter = YobitGatewayAdapter::new(YobitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: "yobit_public_fixture_key".to_string(),
+        api_secret: "yobit_secret_fixture".to_string(),
+        enabled_private_rest: true,
+        ..YobitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("open-orders"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+            page: None,
+        })
+        .await
+        .expect("open orders");
+
+    assert_eq!(response.orders.len(), 2);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(
+        request.form.get("method").map(String::as_str),
+        Some("ActiveOrders")
+    );
+    assert_eq!(
+        request.form.get("pair").map(String::as_str),
+        Some("btc_usdt")
+    );
+    assert!(request.form.get("nonce").is_some());
+}
+
+#[tokio::test]
+async fn yobit_should_fetch_recent_fills_over_guarded_tapi() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("trade_history_success.json")]).await;
+    let adapter = YobitGatewayAdapter::new(YobitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: "yobit_public_fixture_key".to_string(),
+        api_secret: "yobit_secret_fixture".to_string(),
+        enabled_private_rest: true,
+        ..YobitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_recent_fills(RecentFillsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fills"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+            client_order_id: None,
+            exchange_order_id: None,
+            from_trade_id: None,
+            start_time: None,
+            end_time: None,
+            limit: Some(2),
+            page: None,
+        })
+        .await
+        .expect("recent fills");
+
+    assert_eq!(response.fills.len(), 2);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(
+        request.form.get("method").map(String::as_str),
+        Some("TradeHistory")
+    );
+    assert_eq!(
+        request.form.get("pair").map(String::as_str),
+        Some("btc_usdt")
+    );
+    assert_eq!(request.form.get("count").map(String::as_str), Some("2"));
+    assert!(request.form.get("nonce").is_some());
 }
 
 #[tokio::test]
@@ -328,6 +535,25 @@ fn yobit_private_request_specs_should_be_sanitized_and_request_spec_only() {
     assert_eq!(
         fills_spec.body,
         "method=TradeHistory&pair=btc_usdt&count=100&nonce=1700000002"
+    );
+
+    let query_request = QueryOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("query-spec"),
+        symbol: symbol_scope(),
+        client_order_id: None,
+        exchange_order_id: Some("100025362".to_string()),
+    };
+    let query_spec = build_private_request_spec(
+        &query_order_params(&query_request).expect("query params"),
+        1_700_000_005,
+        "yobit_public_fixture_key",
+        "yobit_secret_fixture",
+    )
+    .expect("query spec");
+    assert_eq!(
+        query_spec.body,
+        "method=OrderInfo&order_id=100025362&nonce=1700000005"
     );
 }
 

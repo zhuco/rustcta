@@ -1,0 +1,12 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "api_key": "latoken_public_test_key",
+  "api_secret": "latoken_private_test_secret",
+  "method": "GET",
+  "path": "/v2/auth/trade/fee/BTC/USDT",
+  "query": [],
+  "body_params": [],
+  "canonical_payload": "GET/v2/auth/trade/fee/BTC/USDT",
+  "expected_signature": "38742bd195f7821f653f4fd95c1fabda19a9449f50cdb8b9a1a3f552a1d5a3ba",
+  "sanitized": true
+}

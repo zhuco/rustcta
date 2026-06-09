@@ -1,0 +1,19 @@
+{
+  "exchange": "derive",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["option", "perpetual"],
+  "official_product_lines": ["spot", "option", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Derive Exchange JSON-RPC instruments and trading docs",
+      "evidence": "Spot trading exists in the Derive Exchange API family, while this adapter currently maps option/perpetual JSON-RPC instruments and session/account boundaries."
+    }
+  ],
+  "runtime_isolation": "Keep Derive spot separate from option/perpetual runtime and from derive_chain_perps settlement profile until spot filters and session signing are audited.",
+  "remaining_work": [
+    "filter spot instruments and add spot orderbook/ticker/trade fixtures",
+    "add spot balances, create/cancel/get-orders and trades request specs",
+    "wire session/JWT/Stark auth, product-scope guard and reconciliation"
+  ]
+}

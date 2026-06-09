@@ -20,7 +20,7 @@ auth payload fixtures and parser coverage; runtime trading stays disabled.
 | --- | --- |
 | Product line | Exchange API Spot; platform perps/margin-like surfaces are separate and not connected by this adapter |
 | Public REST | `GET /symbols`, `GET /l2/{symbol}` parser and transport |
-| Private REST | `GET /accounts`, `GET /fees`, order read/write and fills are request-spec/fixture only |
+| Private REST | `GET /accounts`, `GET /fees`, `GET /orders/{orderId}`, `GET /orders`, and `GET /fills` are credential-gated read runtime; private writes remain request-spec/fixture only |
 | WebSocket | Public/private subscribe payloads, auth payload, heartbeat fixture, sequence-gap restart policy |
 | Endpoint mapping | `crates/rustcta-exchange-gateway/src/adapters/blockchaincom/endpoint_mapping.yaml` |
 | Fixtures | `tests/fixtures/exchanges/blockchaincom/` |
@@ -57,22 +57,28 @@ Implemented runtime methods:
 
 - `get_symbol_rules`
 - `get_order_book`
+- `get_balances` when `BLOCKCHAINCOM_PRIVATE_REST_ENABLED` and API token are configured
+- `get_fees` when `BLOCKCHAINCOM_PRIVATE_REST_ENABLED` and API token are configured
+- `query_order`, `get_open_orders`, and `get_recent_fills` when `BLOCKCHAINCOM_PRIVATE_REST_ENABLED` and API token are configured
 
 Offline request-spec only:
 
-- `get_balances`
-- `get_fees`
 - `place_order`
 - `cancel_order`
 - `cancel_all_orders`
-- `query_order`
-- `get_open_orders`
-- `get_recent_fills`
 
 Unsupported:
 
 - Standard derivatives, futures, perpetuals and margin position management through the Exchange API: `交易所不支持合约` under the current Exchange API scope.
 - Blockchain.com app Perps / third-party Hyperliquid interface: `项目未实现` if the project decides to support it, and it must be designed separately from this Exchange Spot adapter.
+- Mapping records `perps_third_party_product` as
+  `status: project_unimplemented`, `official_gap: app_perps_third_party_interface`,
+  and `scope: separate_from_exchange_spot_adapter`; Exchange v3 standard
+  contracts remain `contract_product=unsupported`.
+- Status recommendation: keep app Perps / third-party derivatives separate from
+  the Exchange v3 Spot adapter until API ownership, credential scope, market
+  metadata, positions/funding/settlement, private lifecycle, and reconciliation
+  are designed.
 - exchange funding surfaces such as deposit address creation, withdrawals and whitelist management
 - wallet explorer, pay partner, brokerage quote/swap and lending APIs
 - batch place/cancel, amend and order-list semantics
@@ -89,9 +95,10 @@ the WebSocket connection and resyncing public books via REST.
 
 Official order book channels are `l2` for aggregated book and `l3` for
 order-level book. Both use subscribe payloads with `channel` and `symbol`; the
-docs do not give a fixed millisecond interval or checksum. Mapping should add
-`l2`/`l3`, snapshot/update semantics, `seqnum` gap detection, and REST/WS
-snapshot rebuild. Source batch:
+docs do not give a fixed millisecond interval or checksum. The mapping records
+`l2`/`l3` as L2/L3 order book channels, snapshot/update semantics, `seqnum` gap
+detection, the 1200 messages/minute WebSocket message limit, no fixed ms, and
+REST/WS snapshot rebuild. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
 
 The WebSocket message limit documented by the exchange docs is 1200 messages per

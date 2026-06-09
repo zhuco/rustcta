@@ -6,9 +6,31 @@
     "oxfun.symbol_rules_rest_unverified_ws_market_parser_only",
     "oxfun.order_book_rest_unverified_ws_resync_required",
     "oxfun.place_order_ws_request_spec_only",
-    "oxfun.batch_place_orders_ws_request_spec_only",
+    "oxfun.batch_place_orders_ws_private_write_runtime_blocked",
     "oxfun.private_stream_runtime_unverified"
   ],
   "scan_only": false,
-  "trade_enabled": false
+  "trade_enabled": false,
+  "advanced_order_separation": {
+    "project_unimplemented": [
+      "batch_place_orders"
+    ],
+    "unsupported": [
+      "amend_order",
+      "place_order_list",
+      "batch_cancel_orders"
+    ]
+  },
+  "expected_runtime_errors": {
+    "amend_order": "oxfun.amend_order_unverified",
+    "place_order_list": "oxfun.order_list_unverified",
+    "batch_place_orders": "oxfun.batch_place_orders_ws_request_spec_only",
+    "batch_cancel_orders": "oxfun.batch_cancel_orders_ws_request_spec_only"
+  },
+  "batch_place_blockers": [
+    "authenticated private WebSocket session lifecycle is not wired into ExchangeClient runtime",
+    "placeorders dataArray partial-failure parser and request-tag reconciliation are fixture-only",
+    "no dry-run guard or REST/private-stream readback after WS write"
+  ],
+  "reconciliation_report": "tests/fixtures/exchanges/oxfun/ws/private_batch_place_reconciliation_report.json"
 }

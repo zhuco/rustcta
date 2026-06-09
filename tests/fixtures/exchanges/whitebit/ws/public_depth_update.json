@@ -1,0 +1,11 @@
+{
+  "method": "depth_update",
+  "params": [
+    {
+      "bids": [["65000", "0.2"]],
+      "asks": [["65010", "0.3"]],
+      "update_id": 101,
+      "timestamp": 1743054548000
+    }
+  ]
+}

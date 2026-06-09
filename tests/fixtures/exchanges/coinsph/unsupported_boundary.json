@@ -1,0 +1,21 @@
+{
+  "exchange": "coinsph",
+  "market_type": "spot",
+  "advanced_order_runtime": false,
+  "ordinary_spot_trading_runtime": true,
+  "unsupported_operations": {
+    "amend_order": "coinsph.amend_order",
+    "place_order_list": "coinsph.place_order_list",
+    "batch_place_orders": "coinsph.batch_place_orders",
+    "batch_cancel_orders": "coinsph.batch_cancel_orders",
+    "cancel_all_orders": "coinsph.cancel_all_orders"
+  },
+  "capability_flags": {
+    "supports_amend_order": false,
+    "supports_order_list": false,
+    "supports_batch_place_order": false,
+    "supports_batch_cancel_order": false,
+    "supports_cancel_all_orders": false
+  },
+  "reason": "Reviewed Coins.ph spot trade profile exposes ordinary order/cancel/readback but no shared amend, OCO/OTO order-list, native batch place/cancel, or audited safe cancel-all semantics."
+}

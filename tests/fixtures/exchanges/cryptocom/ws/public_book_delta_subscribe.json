@@ -1,0 +1,9 @@
+{
+  "id": 42,
+  "method": "subscribe",
+  "params": {
+    "channels": ["book.BTC_USDT.10"],
+    "book_subscription_type": "SNAPSHOT_AND_UPDATE",
+    "book_update_frequency": 100
+  }
+}

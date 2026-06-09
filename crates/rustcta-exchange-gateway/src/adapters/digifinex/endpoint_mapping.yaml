@@ -28,9 +28,20 @@ reconciliation:
 batch:
   place: { support: native, atomicity: partial, max_items: null, partial_failure: true }
   cancel: { support: native, atomicity: partial, max_items: null, partial_failure: true }
+  place_orders: { support: native, atomicity: partial, max_items: null, partial_failure: true }
+  cancel_orders: { support: native, atomicity: partial, max_items: null, partial_failure: true }
 websocket:
   public:
     support: spec_only
+    order_book:
+      spot_subscribe_method: depth.subscribe
+      spot_update_method: depth.update
+      swap_subscribe_method: orderbook.subscribe
+      complete_update_flag: "params[0] true=complete false=update"
+      interval: "no fixed ms"
+      depth: unspecified
+      sequence: none_documented
+      checksum: none_documented
     heartbeat: { mode: server_ping, interval_ms: 30000, timeout_ms: 45000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
@@ -38,6 +49,28 @@ websocket:
     heartbeat: { mode: server_ping, interval_ms: 30000, timeout_ms: 45000 }
     auth_renewal: { mode: none }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+streams:
+  - operation: subscribe_public_order_book_spot
+    channel: depth.subscribe
+    update_channel: depth.update
+    transport: websocket
+    auth: none
+    support: spec_only
+    complete_update_flag: "params[0] true=complete false=update"
+    interval: "no fixed ms"
+    depth: unspecified
+    sequence: none_documented
+    checksum: none_documented
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  - operation: subscribe_public_order_book_swap
+    channel: orderbook.subscribe
+    transport: websocket
+    auth: none
+    support: spec_only
+    interval: "no fixed ms"
+    depth: unspecified
+    checksum: none_documented
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -85,6 +118,24 @@ endpoints:
     testnet: false
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }
+  - operation: get_fees
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /v3/spot/my_trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }
+    notes: Swap fee readback uses /swap/v2/account/balance in the same runtime path.
   - operation: positions
     product: perpetual
     transport: rest
@@ -133,7 +184,7 @@ endpoints:
     testnet: false
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_route_orders_and_batches }
-  - operation: batch_orders
+  - operation: batch_place_orders
     product: perpetual
     market_types: [spot, perpetual]
     transport: rest
@@ -149,6 +200,56 @@ endpoints:
     testnet: false
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_route_orders_and_batches }
+    notes: Spot batch place uses /v3/spot/order/batch_new.
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /swap/v2/trade/batch_cancel_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_route_orders_and_batches }
+    notes: Spot batch cancel uses /v3/spot/order/cancel with comma-separated order ids.
+  - operation: amend_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/digifinex/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: digifinex.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/digifinex/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: digifinex.order_list_unsupported
   - operation: open_orders
     product: spot
     market_types: [spot, perpetual]

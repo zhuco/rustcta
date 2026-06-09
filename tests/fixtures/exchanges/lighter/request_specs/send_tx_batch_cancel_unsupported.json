@@ -1,0 +1,22 @@
+{
+  "exchange": "lighter",
+  "operation": "send_tx_batch_cancel",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/sendTxBatch",
+  "auth": "bearer",
+  "request_spec_required": true,
+  "requires_signed_tx": true,
+  "body": {
+    "txs": [
+      {
+        "tx_type": "cancel_order",
+        "market_index": 0,
+        "order_index": "<redacted-order-index>"
+      }
+    ]
+  },
+  "expected_error": "lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard",
+  "trade_enabled": false
+}

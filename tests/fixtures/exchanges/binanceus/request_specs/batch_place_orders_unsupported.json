@@ -1,0 +1,18 @@
+{
+  "exchange": "binanceus",
+  "operation": "batch_place_orders",
+  "boundary": "unsupported_native_batch_place",
+  "product": "spot",
+  "transport": "rest",
+  "method": "UNSUPPORTED",
+  "path": "/unsupported/binanceus/batch_place_orders",
+  "auth": "unsupported",
+  "trade_enabled": false,
+  "shared_semantics": "unsupported",
+  "source_boundary": {
+    "reviewed_profile": "Binance.US Spot",
+    "review_result": "No verified Binance.US native batch-place endpoint maps losslessly to the shared batch_place_orders request model.",
+    "excluded_alias": "Do not reuse Binance.com batch-order routes for Binance.US without a Binance.US-specific official endpoint audit."
+  },
+  "reason": "Binance.US Spot currently exposes single-order placement in this adapter profile; native batch place remains unsupported for the shared gateway boundary."
+}

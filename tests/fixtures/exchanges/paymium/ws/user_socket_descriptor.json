@@ -1,6 +1,7 @@
 {
   "url": "https://paymium.com/user",
   "path": "/ws/socket.io",
+  "protocol": "socket.io_v1.3",
   "emit": [
     "channel",
     "USER_CHANNEL_ID"

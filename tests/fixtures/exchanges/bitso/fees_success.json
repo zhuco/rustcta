@@ -1,0 +1,23 @@
+{
+  "success": true,
+  "payload": {
+    "fees": [
+      {
+        "book": "btc_mxn",
+        "fee_percent": "0.6500",
+        "fee_decimal": "0.00650000",
+        "taker_fee_percent": "0.6500",
+        "taker_fee_decimal": "0.00650000",
+        "maker_fee_percent": "0.5000",
+        "maker_fee_decimal": "0.00500000",
+        "volume_currency": "mxn",
+        "current_volume": "4375.99",
+        "next_volume": "1500000.00",
+        "next_maker_fee_percent": "0.490",
+        "next_taker_fee_percent": "0.637"
+      }
+    ],
+    "deposit_fees": [],
+    "withdrawal_fees": {}
+  }
+}

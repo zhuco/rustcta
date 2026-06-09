@@ -10,5 +10,18 @@
   },
   "canonical_auth_input": "base64(<api_key>:<api_secret>)",
   "credential_scope": "read_only",
+  "response_sample": {
+    "BTC": {
+      "free": "0.01000000",
+      "used": "0.00200000",
+      "total": "0.01200000"
+    },
+    "USDT": {
+      "free": "100.00000000",
+      "used": "0.00000000",
+      "total": "100.00000000"
+    }
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns bitteam.balances_request_spec_only until Basic auth smoke, parser, and reconciliation are promoted.",
   "expected_error_until_promoted": "bitteam.balances_request_spec_only"
 }

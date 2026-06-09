@@ -1,0 +1,15 @@
+{
+  "exchange": "bittrade",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/order/openOrders",
+  "auth": "hmac",
+  "query": {
+    "symbol": "btcjpy",
+    "size": "100"
+  },
+  "body": null,
+  "strict_body": true
+}

@@ -1,0 +1,29 @@
+{
+  "exchange": "paymium",
+  "operation": "paymium.get_balances",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/user",
+  "url": "https://paymium.com/api/v1/user",
+  "auth": "hmac_sha256",
+  "query": {},
+  "headers": {
+    "Api-Key": "<redacted:api-key>",
+    "Api-Nonce": "1700000000000",
+    "Api-Signature": "<redacted:hmac-sha256-hex>"
+  },
+  "canonical_auth_input": "nonce + full_url + body signed with HMAC-SHA256",
+  "credential_scope": "read_only",
+  "response_sample": {
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "balance_btc": "0.01000000",
+    "locked_btc": "0.00200000",
+    "balance_eur": "100.00",
+    "locked_eur": "0.00"
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns paymium.balances_private_rest_deferred until API-token/OAuth auth, BTC/EUR parser, and read-only scope guard are promoted.",
+  "expected_error_until_promoted": "paymium.balances_private_rest_deferred"
+}

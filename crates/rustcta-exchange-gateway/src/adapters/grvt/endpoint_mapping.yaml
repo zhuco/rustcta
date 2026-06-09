@@ -6,7 +6,7 @@ metadata:
   status: draft
   source: docs/grvt_adapter.md
   last_reviewed: "2026-06-08"
-  notes: Task 9 conservative GRVT gateway shell. Official public market-data API is audited; runtime REST trading stays disabled until parser/request-spec coverage is promoted.
+  notes: Task 9 conservative GRVT gateway shell. Query/order/open-order/fill readbacks are guarded private REST behind session-cookie/account configuration; writes/account/fee/position runtime stays disabled until parser/request-spec coverage is promoted.
 market_types: [perpetual, option]
 products: [perpetual, option]
 base_urls:
@@ -27,18 +27,33 @@ rate_limits:
 pagination:
   private_history: { mode: unsupported }
 reconciliation:
-  private_state: unsupported
-  notes: Private order/fill/position reconciliation requires authenticated session-cookie fixtures before runtime promotion.
+  private_state: query_order/open_orders/recent_fills guarded runtime
+  notes: Private order/fill readbacks require `GRVT_PRIVATE_REST_ENABLED` or `RUSTCTA_GRVT_PRIVATE_REST_ENABLED` plus session cookie and account id; write and position reconciliation remain disabled.
 batch:
-  place: { support: unsupported, reason: grvt.bulk_orders_session_spec_only }
-  cancel: { support: unsupported, reason: grvt.bulk_orders_session_spec_only }
+  place: { support: spec_only, status: project_unimplemented, reason: grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard }
+  cancel: { support: spec_only, status: project_unimplemented, reason: grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard }
 websocket:
   public:
     support: parser_only
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
-    sequence: snapshots use sequence_number 0; deltas increase by 1 and gaps require reconnect/resubscribe
+    sequence: snapshots use sequence_number 0; deltas carry sequence_number and prev_sequence_number; gaps require reconnect/resubscribe
     channels:
-      book_snapshot: { path: v1.book.s, support: parser_only, fixture: tests/fixtures/exchanges/grvt/ws/book_delta.json }
+      book_snapshot: { path: v1.book.s, selector_format: "{instrument}@{interval_ms}-{depth}", interval_ms: 500, depth_levels: [50], support: parser_only, fixture: tests/fixtures/exchanges/grvt/ws/book_delta.json }
+      book_delta: { path: v1.book.d, selector_format: "{instrument}@{interval_ms}-{depth}", interval_ms: 500, depth_levels: [50], sequence_fields: [sequence_number, prev_sequence_number], support: parser_only, fixture: tests/fixtures/exchanges/grvt/ws/book_delta.json }
+    order_book:
+      snapshot_channel: v1.book.s
+      delta_channel: v1.book.d
+      fixed_update_interval_ms: 500
+      depth_levels: [50]
+      sequence:
+        current_field: sequence_number
+        previous_field: prev_sequence_number
+        contiguous_required: true
+        gap_policy: reconnect_resubscribe
+      checksum: unsupported
+      resync:
+        mode: resubscribe_snapshot
+        fallback: REST market data snapshot
   private:
     support: unsupported
     auth_renewal: { mode: session_cookie, status: unsupported }
@@ -46,7 +61,70 @@ websocket:
       orders: { path: v1/order, support: unsupported_unverified, auth: api_key, reason: grvt.private_stream_session_spec_only }
       positions: { path: v1/positions, support: unsupported_unverified, auth: api_key, reason: grvt.private_stream_session_spec_only }
       fills: { path: v1/fill, support: unsupported_unverified, auth: api_key, reason: grvt.private_stream_session_spec_only }
+unsupported:
+  - operation: spot_product
+    reason: Current GRVT trading profile is perpetual/options focused; spot remains unsupported until official spot product support is re-reviewed.
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: public_fee_tier_table
+    source_fixture: tests/fixtures/exchanges/grvt/fees_tier_boundary.json
+    reason: "GRVT publishes active maker/taker fee tiers, but shared get_fees runtime is project-unimplemented pending fee tier config source, session/account scope audit for account-effective tiers, and optional private readback parser."
+  - operation: get_balances
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/balances_session_spec_only.json
+    reason: "Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending GRVT session/account scope audit, balance request spec, and private readback parser wiring."
+  - operation: get_positions
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/positions_session_spec_only.json
+    reason: "Official/API/SDK position readback exists and the request-spec fixture is pinned, but shared get_positions runtime is project-unimplemented pending session-cookie auth smoke, positions parser, account/sub-account scope, private WS/readback reconciliation, and read-only runtime gating."
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/amend_order_session_spec_only.json
+    reason: "Official/API amend order path exists in session-spec trading docs, but shared amend_order runtime is project-unimplemented pending session-cookie auth, EIP-712/external signer runtime, write reconciliation, and live dry-run guard; fixture-only ack parser is covered."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json
+    reason: "Official /v2/bulk_orders path exists, but shared batch_place_orders runtime is project-unimplemented pending session-cookie auth, EIP-712/external signer runtime, write reconciliation, and live dry-run guard; fixture-only bulk parser is covered."
+  - operation: batch_cancel_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json
+    reason: "Official /v2/bulk_orders path exists, but shared batch_cancel_orders runtime is project-unimplemented pending session-cookie auth, EIP-712/external signer runtime, write reconciliation, and live dry-run guard; fixture-only bulk parser is covered."
 endpoints:
+  - operation: get_balances
+    product: mixed
+    market_types: [perpetual, option]
+    transport: rest
+    method: POST
+    path: /source/grvt/account-balance
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "GRVT session/account balance readback is pinned as an offline source boundary; runtime remains disabled pending session-cookie auth smoke, account/sub-account scope guard, balance parser, and private WS/readback reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/balances_session_spec_only.json
+  - operation: get_fees
+    product: mixed
+    market_types: [perpetual, option]
+    transport: rest
+    method: GET
+    path: /help/fee-model
+    auth: none
+    rate_limit_bucket: grvt_public
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: active public maker/taker tier table is fixture-backed as a config source only; account-effective tier still needs session/private readback or explicit override."
+    official_doc: https://help.grvt.io/en/articles/9614699-how-does-grvt-s-fee-model-work
+    request_spec:
+      fixture: tests/fixtures/exchanges/grvt/fees_tier_boundary.json
   - operation: symbol_rules
     product: perpetual
     market_types: [perpetual, option]
@@ -56,7 +134,7 @@ endpoints:
     auth: none
     rate_limit_bucket: grvt_market_data
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: not_applicable
     testnet: true
@@ -71,7 +149,7 @@ endpoints:
     auth: none
     rate_limit_bucket: grvt_market_data
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: not_applicable
     testnet: true
@@ -86,7 +164,7 @@ endpoints:
     auth: none
     rate_limit_bucket: grvt_market_data
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: not_applicable
     testnet: true
@@ -105,8 +183,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: grvt.positions_session_spec_only
+    support: spec_only
+    reason: grvt.positions_requires_session_cookie_external_signer_subaccount_scope_parser_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/positions_session_spec_only.json
+    notes: "Offline boundary only: session cookie/account/sub-account fields are redacted and no shared get_positions runtime is enabled."
   - operation: open_orders
     product: perpetual
     market_types: [perpetual]
@@ -120,8 +200,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: grvt.open_orders_session_spec_only
+    support: native
+    reason: "GRVT open-orders session-cookie readback runtime is guarded by GRVT_PRIVATE_REST_ENABLED/RUSTCTA_GRVT_PRIVATE_REST_ENABLED plus session cookie and account id; writes remain disabled."
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/open_orders_session_spec_only.json
+    response_parser: { status: implemented, parser: parse_grvt_orders, fixture: tests/fixtures/exchanges/grvt/open_orders_success.json }
   - operation: query_order
     product: perpetual
     market_types: [perpetual]
@@ -135,8 +217,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: grvt.query_order_session_spec_only
+    support: native
+    reason: "GRVT query-order session-cookie readback runtime is guarded by GRVT_PRIVATE_REST_ENABLED/RUSTCTA_GRVT_PRIVATE_REST_ENABLED plus session cookie and account id; writes remain disabled."
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/query_order_session_spec_only.json
+    response_parser: { status: implemented, parser: parse_grvt_single_order, fixture: tests/fixtures/exchanges/grvt/order_success.json }
   - operation: recent_fills
     product: perpetual
     market_types: [perpetual]
@@ -150,8 +234,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: grvt.recent_fills_session_spec_only
+    support: native
+    reason: "GRVT recent-fills session-cookie readback runtime is guarded by GRVT_PRIVATE_REST_ENABLED/RUSTCTA_GRVT_PRIVATE_REST_ENABLED plus session cookie and account id; account/fee/position runtime remains disabled."
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/recent_fills_session_spec_only.json
+    response_parser: { status: implemented, parser: parse_grvt_fills, fixture: tests/fixtures/exchanges/grvt/recent_fills_success.json }
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
@@ -165,7 +251,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
+    support: spec_only
     reason: requires EIP-712 order signing and authenticated session boundary
   - operation: cancel_order
     product: perpetual
@@ -180,7 +266,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
+    support: spec_only
     reason: grvt.cancel_order_session_spec_only
   - operation: cancel_all_orders
     product: perpetual
@@ -195,7 +281,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
+    support: spec_only
     reason: grvt.cancel_all_orders_session_spec_only
   - operation: amend_order
     product: perpetual
@@ -210,8 +296,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: grvt.amend_order_session_spec_only
+    support: spec_only
+    reason: grvt.amend_requires_session_renewal_eip712_signer_and_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/amend_order_session_spec_only.json
+    notes: "Offline boundary only: official session write shape and fixture-only ack parser are pinned, but EIP-712/external signer runtime, reconciliation and live guard are not wired."
   - operation: bulk_orders
     product: perpetual
     market_types: [perpetual]
@@ -225,5 +313,56 @@ endpoints:
     native_batch: true
     atomicity: partial
     testnet: true
-    support: unsupported_unverified
-    reason: grvt.bulk_orders_session_spec_only
+    support: spec_only
+    reason: grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json
+    notes: "Offline boundary only: bulk payload and fixture-only create/cancel ack parser are covered; shared batch traits remain disabled until session renewal, EIP-712/external signer, partial parser/report, write/readback reconciliation, and dry-run guard are wired."
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/bulk_orders
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json
+    notes: "Offline boundary only: create entries and partial-failure parser fixture are covered; shared batch_place_orders runtime remains disabled until session renewal, EIP-712/external signer, partial parser/report, write/readback reconciliation, and dry-run guard are wired."
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/bulk_orders
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json
+    notes: "Offline boundary only: cancel entries and partial-failure parser fixture are covered; shared batch_cancel_orders runtime remains disabled until session renewal, EIP-712/external signer, partial parser/report, write/readback reconciliation, and dry-run guard are wired."
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/grvt/order_list
+    auth: unsupported
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: grvt.order_list_unsupported

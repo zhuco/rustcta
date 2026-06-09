@@ -5,11 +5,27 @@ use rustcta_exchange_api::{
 use rustcta_types::{AccountId, MarketType};
 use serde_json::json;
 
+use super::parser::parse_orderbook_snapshot;
 use super::streams::{
-    coinone_pong_response, coinone_private_subscription_spec, coinone_public_subscription_spec,
+    coinone_orderbook_id, coinone_orderbook_id_is_newer, coinone_pong_response,
+    coinone_private_subscription_spec, coinone_public_order_book_ws_policy,
+    coinone_public_subscription_spec,
 };
 use super::test_support::{context, exchange_id, symbol_scope};
 use super::{CoinoneGatewayAdapter, CoinoneGatewayConfig};
+
+fn coinone_ws_fixture(name: &str) -> serde_json::Value {
+    let text = match name {
+        "ws_public_orderbook_snapshot.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/coinone/ws_public_orderbook_snapshot.json"
+        ),
+        "ws_public_orderbook_update.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/coinone/ws_public_orderbook_update.json"
+        ),
+        _ => panic!("unknown coinone websocket fixture {name}"),
+    };
+    serde_json::from_str(text).expect("coinone websocket fixture")
+}
 
 #[test]
 fn coinone_public_stream_spec_should_build_krw_subscription_and_ping_pong() {
@@ -31,6 +47,47 @@ fn coinone_public_stream_spec_should_build_krw_subscription_and_ping_pong() {
         coinone_pong_response(&json!({"request_type": "PING"})).expect("pong"),
         json!({"request_type": "PONG"})
     );
+}
+
+#[test]
+fn coinone_public_orderbook_policy_should_document_snapshot_delta_boundary() {
+    let policy = coinone_public_order_book_ws_policy();
+
+    assert_eq!(policy.url, "wss://stream.coinone.co.kr");
+    assert_eq!(policy.channel, "ORDERBOOK");
+    assert_eq!(policy.topic_fields, &["quote_currency", "target_currency"]);
+    assert!(policy.first_message_semantics.contains("last order book"));
+    assert!(policy
+        .update_semantics
+        .contains("only when the order book changes"));
+    assert_eq!(policy.depth, None);
+    assert_eq!(policy.interval_ms, None);
+    assert_eq!(policy.order_book_id_field, "data.id");
+    assert!(policy
+        .order_book_id_semantics
+        .contains("not a documented contiguous sequence"));
+    assert_eq!(policy.sequence_field, None);
+    assert_eq!(policy.checksum, None);
+    assert!(policy.reconnect_resync.contains("/public/v2/orderbook/KRW"));
+}
+
+#[test]
+fn coinone_orderbook_ws_fixtures_should_parse_id_and_book_levels() {
+    let snapshot = coinone_ws_fixture("ws_public_orderbook_snapshot.json");
+    let update = coinone_ws_fixture("ws_public_orderbook_update.json");
+
+    assert_eq!(snapshot["channel"], "ORDERBOOK");
+    assert_eq!(update["channel"], "ORDERBOOK");
+
+    let snapshot_id = coinone_orderbook_id(&snapshot).expect("snapshot order book id");
+    let update_id = coinone_orderbook_id(&update).expect("update order book id");
+    assert!(coinone_orderbook_id_is_newer(snapshot_id, update_id));
+
+    let book = parse_orderbook_snapshot(&exchange_id(), symbol_scope(), &snapshot)
+        .expect("parse coinone ws orderbook");
+    assert_eq!(book.sequence, Some(1_693_560_155_038_001));
+    assert_eq!(book.bids.len(), 2);
+    assert_eq!(book.asks.len(), 2);
 }
 
 #[test]

@@ -61,6 +61,8 @@ stream when the book changes and carries 300 bids/asks per side. `diffDepth`
 pushes changed levels every second. USDT-M also documents `wholeBookTicker` for
 BBO. Payload version `v` is not guaranteed unique, so REST `/quote/v1/depth`
 snapshot fallback is required on gaps.
+`endpoint_mapping.yaml` records `depth`, `diffDepth`, `wholeBookTicker`, 300ms
+snapshot cadence, 1s diff cadence, depth levels 300, `v` risk, and REST fallback.
 
 ## Official Position Detail
 
@@ -97,3 +99,7 @@ a dedicated external testnet are not advertised as supported.
 - `CARGO_TARGET_DIR=target/toobit-task-check cargo check -p rustcta-exchange-gateway --lib`
 - `CARGO_TARGET_DIR=target/toobit-task-check cargo test -p rustcta-exchange-gateway toobit --lib`
 - `python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/toobit/endpoint_mapping.yaml`
+
+## Fee Boundary
+
+费率来源在官方/account/config 资料中存在；当前已补 futures `GET /api/v1/futures/commissionRate` 的 `request_specs/get_fees_commission_rate.json` 离线 request-spec 边界，并用 `request_specs/get_fees_spot_source_boundary.json` 记录 Spot 配置型 fee source fallback。shared `get_fees` runtime 仍属项目未实现/未启用；补齐前需完成 futures parser、spot fallback source policy 和 credential guard。

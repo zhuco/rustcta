@@ -6,6 +6,7 @@ use rustcta_strategy_cross_exchange_arbitrage::runtime_contract::{
     build_runtime_contract, CrossArbExchangeReadinessRow,
 };
 use rustcta_strategy_cross_exchange_arbitrage::CrossExchangeArbitrageConfig;
+use serde_json::json;
 
 #[test]
 fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution_contracts() {
@@ -196,6 +197,50 @@ fn app_runtime_should_enqueue_price_audit_events_without_blocking_strategy_cycle
     assert_eq!(runtime.async_db_queue_len(), 0);
 }
 
+#[test]
+fn app_runtime_should_stop_new_opens_after_five_consecutive_losing_closes() {
+    let captured_at = fixed_now();
+    let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+        "risk": {
+            "max_consecutive_losses": 5
+        }
+    }));
+    let mut runtime = CrossArbAppRuntime::new(config).with_live_orders_enabled(true);
+
+    for index in 1..=4 {
+        let cycle = runtime.run_cycle(
+            ready_input_with_loss(index, 1),
+            captured_at + chrono::Duration::seconds(index),
+        );
+        assert_eq!(cycle.execution.submitted_intents, 1);
+        assert_eq!(cycle.execution.consecutive_loss_closes, index as u32);
+        assert!(!cycle.execution.stopped_by_loss_guard);
+        assert!(cycle.execution.new_opens_allowed);
+    }
+
+    let stopped = runtime.run_cycle(
+        ready_input_with_loss(5, 1),
+        captured_at + chrono::Duration::seconds(5),
+    );
+
+    assert_eq!(stopped.execution.requested_intents, 1);
+    assert_eq!(stopped.execution.submitted_intents, 0);
+    assert_eq!(stopped.execution.consecutive_loss_closes, 5);
+    assert_eq!(stopped.execution.max_consecutive_losses, 5);
+    assert!(stopped.execution.blocked_by_loss_guard);
+    assert!(stopped.execution.stopped_by_loss_guard);
+    assert!(!stopped.execution.new_opens_allowed);
+    assert!(runtime.stopped_by_loss_guard());
+    assert!(stopped
+        .notifications
+        .iter()
+        .any(|notification| notification.notification_kind == "risk_auto_stop"));
+    assert!(stopped
+        .storage_events
+        .iter()
+        .any(|event| event.event_kind == "risk_auto_stop"));
+}
+
 fn ready_exchanges() -> Vec<CrossArbExchangeReadinessRow> {
     ["binance", "gate", "bitget"]
         .into_iter()
@@ -210,6 +255,29 @@ fn ready_exchanges() -> Vec<CrossArbExchangeReadinessRow> {
             ready: true,
         })
         .collect()
+}
+
+fn ready_input_with_loss(index: i64, execution_intents: usize) -> CrossArbRuntimeInput {
+    CrossArbRuntimeInput {
+        execution_intents,
+        exchange_readiness_rows: ready_exchanges(),
+        db_writer_ready: true,
+        position_takeover_complete: true,
+        singleton_acquired: true,
+        price_audit_events: vec![close_price_audit_event(
+            &format!("loss-bundle-{index}"),
+            "-0.01",
+        )],
+        ..Default::default()
+    }
+}
+
+fn close_price_audit_event(bundle_id: &str, actual_pnl: &str) -> CrossArbDbPriceAuditEvent {
+    let mut event = price_audit_event(bundle_id, "100.00", Some("99.99"));
+    event.event_kind = "close_price_audit";
+    event.lifecycle = "close";
+    event.actual_pnl_usdt = Some(actual_pnl.to_string());
+    event
 }
 
 fn price_audit_event(

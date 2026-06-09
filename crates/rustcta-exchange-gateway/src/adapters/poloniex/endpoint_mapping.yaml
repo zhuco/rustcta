@@ -36,6 +36,36 @@ websocket:
       linear_perp: [book_lv2, trades, tickers, candles_minute]
     heartbeat: { required: true, direction: client_ping, interval_ms: 20000, timeout_ms: 10000 }
     resync: rest_order_book_snapshot_after_reconnect
+    order_book:
+      channel: book_lv2
+      spot_url: wss://ws.poloniex.com/ws/public
+      futures_url: wss://ws.poloniex.com/ws/v3/public
+      mode: realtime_l2_delta
+      levels: 20
+      fixed_update_interval_ms: null
+      interval_note: Official Spot/Futures V3 docs describe book_lv2 as real-time and do not publish a fixed millisecond cadence.
+      subscription:
+        event: subscribe
+        payload: { event: subscribe, channel: [book_lv2], symbols: ["{symbol}"], depth: 20 }
+      sequence:
+        spot_fields: [id, lastId]
+        futures_fields: [id, lid]
+        continuity: previous_message_id_must_match_local_book_id
+        rebuild_on: [sequence_gap, sequence_regression, reconnect, stale_stream, parse_error]
+      checksum:
+        supported: false
+        field: null
+        risk: No official checksum field is documented for Poloniex book_lv2; id continuity is the loss detector.
+      resync:
+        spot_snapshot:
+          operation: get_order_book
+          method: GET
+          path: /markets/{symbol}/orderBook
+        futures_snapshot:
+          operation: get_order_book
+          method: GET
+          path: /v3/market/orderBook
+        strategy: Discard local book, fetch REST snapshot, resubscribe to book_lv2, then apply only messages whose lastId/lid matches the local id.
   private:
     support: native
     auth: hmac
@@ -259,3 +289,35 @@ endpoints:
     atomicity: unknown
     testnet: false
     official_doc: Poloniex trade history endpoints.
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: websocket
+    protocol: json
+    url: wss://ws.poloniex.com/ws/public | wss://ws.poloniex.com/ws/v3/public
+    channel: book_lv2
+    support: native
+    auth: none
+    request:
+      event: subscribe
+      payload: { event: subscribe, channel: [book_lv2], symbols: ["{symbol}"], depth: 20 }
+    response_parser:
+      status: implemented
+      fixtures:
+        - tests/fixtures/exchanges/poloniex/ws/public_spot_book_lv2.json
+        - tests/fixtures/exchanges/poloniex/ws/public_futures_book_lv2.json
+    depth:
+      fixed_levels: 20
+    interval:
+      fixed_update_interval_ms: null
+      note: Official Spot/Futures V3 docs describe book_lv2 as real-time and do not publish a fixed millisecond cadence.
+    sequence:
+      spot_fields: [id, lastId]
+      futures_fields: [id, lid]
+      continuity: previous_message_id_must_match_local_book_id
+    checksum:
+      supported: false
+      field: null
+    resync:
+      strategy: REST snapshot rebuild and book_lv2 resubscribe on sequence gap/regression, reconnect, stale stream, or parse error.

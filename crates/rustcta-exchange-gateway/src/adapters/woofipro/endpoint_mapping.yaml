@@ -40,9 +40,46 @@ websocket:
     support: spec_only
     helper_only: true
     heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+    order_book:
+      product: perpetual
+      market_types: [perpetual]
+      url: wss://ws-evm.orderly.org/ws/stream/{account_id}
+      protocol: websocket_json
+      channel: "{symbol}@orderbookupdate"
+      subscribe:
+        payload:
+          id: "woofipro-{symbol}@orderbookupdate"
+          event: subscribe
+          topic: "{symbol}@orderbookupdate"
+        symbol_format: PERP_BASE_QUOTE
+        account_id_required_for_path: true
+      interval_ms: 200
+      update_semantics: changed_price_levels
+      zero_quantity_deletes: true
+      depth: unspecified
+      depth_boundary: "depth: unspecified; official Orderly orderbookupdate docs do not publish a fixed depth selector for this profile."
+      sequence:
+        fields: [ts, prevTs]
+        continuity: "message.prevTs must equal previous message ts"
+        gap_detection: prevTs_mismatch_or_regression
+      checksum:
+        supported: false
+        field: null
+        risk: "Orderly orderbookupdate docs do not publish checksum for this profile."
+      resync:
+        mode: request_orderbook_snapshot_then_resubscribe
+        rest_endpoint_operation: get_order_book
+        rest_endpoint: /v1/orderbook/{symbol}
+        rest_auth: orderly_account_signed_read
+        triggers: [connect, reconnect, prevTs_gap, stale_stream, parse_error, suspected_message_loss]
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: spot_product
+    reason: WOOFi Pro profile maps Orderly perpetual trading; WOOFi Swap is not a shared spot order book for this adapter.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：builder/admin fee routes 不进入普通账户 runtime。"
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -264,21 +301,6 @@ endpoints:
     support: native
     official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
     request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/get_recent_fills.json
-  - operation: get_fees
-    product: perpetual
-    market_types: [perpetual]
-    transport: rest
-    method: GET
-    path: /unsupported/woofipro/fees
-    auth: unsupported
-    rate_limit_bucket: woofipro_unsupported
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: woofipro.fees_require_orderly_account_audit
 streams:
   - operation: public_orderbook_delta
     product: perpetual
@@ -286,9 +308,15 @@ streams:
     channel: "{symbol}@orderbookupdate"
     auth: none
     support: spec_only
+    interval_ms: 200
+    depth: unspecified
+    depth_boundary: "depth: unspecified; no fixed depth is documented for this Orderly profile."
+    sequence_fields: [ts, prevTs]
+    checksum: none_documented
     resync:
       endpoint_operation: get_order_book
       mode: signed_rest_required
+      trigger: prevTs_gap_or_reconnect
   - operation: public_builder_ticker
     product: perpetual
     transport: websocket

@@ -37,6 +37,15 @@ order book channel sends order book differences. The reviewed docs do not expose
 a fixed depth parameter, sequence, or checksum; runtime should periodically
 resync from REST and apply stale-book checks.
 
+| Channel | Status | Subscription | Interval | Depth | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- | --- | --- |
+| `{pair}-orderbook` | Native public WS payload helper | JSON `subscribe` / `unsubscribe` | Approx. 0.1s when trades occur; not a fixed heartbeat cadence | Not documented | No sequence or checksum documented | Start from `GET /api/order_books`; rebuild after reconnect, stale stream, parse error, or suspected message loss |
+| `{pair}-trades` | Native public WS payload helper | JSON `subscribe` / `unsubscribe` | Approx. 0.1s when trades occur | N/A | N/A | N/A |
+
+The fixture `tests/fixtures/exchanges/coincheck/ws/public_orderbook_diff.json`
+records the unsequenced order book difference shape and zero-amount delete
+boundary used by local-book consumers.
+
 ## Unsupported Boundary
 
 Standard futures, perpetuals, and options are `交易所不支持合约` under the current
@@ -54,3 +63,7 @@ cargo fmt --check --package rustcta-exchange-gateway
 cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway coincheck --lib --message-format short
 ```
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前 profile 只记录 fees unsupported boundary。

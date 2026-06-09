@@ -1,18 +1,17 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, BatchAtomicity,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchExecutionMode,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
-    CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, HeartbeatCapability, HistoryCapability,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, ReconnectCapability, StreamAuthCapability,
-    StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeApiResult,
+    ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse, HeartbeatCapability,
+    HistoryCapability, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
+    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    ReconnectCapability, StreamAuthCapability, StreamHeartbeatDirection, StreamResyncCapability,
+    StreamRuntimeCapability, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 use serde_json::Value;
@@ -272,26 +271,9 @@ impl ExchangeClient for CoinoneGatewayAdapter {
         capabilities.capabilities_v2.batch_place_orders = BatchCapability::unsupported(
             "coinone batch place is intentionally unsupported until a documented native endpoint is mapped",
         );
-        capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
-            support: if private_enabled {
-                CapabilitySupport::composed(
-                    "coinone batch cancel is gateway-composed from sequential cancel requests",
-                )
-            } else {
-                CapabilitySupport::unsupported("coinone batch cancel requires private credentials")
-            },
-            mode: if private_enabled {
-                BatchExecutionMode::ComposedSequential
-            } else {
-                BatchExecutionMode::Unsupported
-            },
-            atomicity: BatchAtomicity::NonAtomic,
-            max_items: Some(20),
-            same_symbol_required: true,
-            same_market_type_required: true,
-            supports_client_order_id: false,
-            supports_partial_failure: false,
-        };
+        capabilities.capabilities_v2.batch_cancel_orders = BatchCapability::unsupported(
+            "coinone native batch cancel is intentionally unsupported; use single cancel or native cancel-all only",
+        );
         capabilities.capabilities_v2.fills_history = HistoryCapability {
             support: if private_enabled {
                 CapabilitySupport::native()
@@ -386,9 +368,9 @@ impl ExchangeClient for CoinoneGatewayAdapter {
 
     async fn batch_cancel_orders(
         &self,
-        request: BatchCancelOrdersRequest,
+        _request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.batch_cancel_orders_impl(request).await
+        self.unsupported_private("coinone.batch_cancel_orders")
     }
 
     async fn amend_order(
@@ -396,6 +378,13 @@ impl ExchangeClient for CoinoneGatewayAdapter {
         _request: AmendOrderRequest,
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.unsupported_private("coinone.amend_order")
+    }
+
+    async fn place_order_list(
+        &self,
+        _request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        self.unsupported_private("coinone.order_list_unsupported")
     }
 
     async fn cancel_all_orders(
@@ -438,41 +427,6 @@ impl ExchangeClient for CoinoneGatewayAdapter {
         subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
         self.subscribe_private_stream_impl(subscription).await
-    }
-}
-
-impl CoinoneGatewayAdapter {
-    pub(super) async fn batch_cancel_orders_impl(
-        &self,
-        request: BatchCancelOrdersRequest,
-    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        crate::adapters::ensure_exchange_api_schema(request.schema_version)?;
-        self.ensure_exchange(&request.exchange)?;
-        if request.cancels.is_empty() {
-            return Err(ExchangeApiError::InvalidRequest {
-                message: "coinone batch_cancel_orders requires at least one cancel".to_string(),
-            });
-        }
-        if request.cancels.len() > 20 {
-            return Err(ExchangeApiError::InvalidRequest {
-                message: "coinone batch_cancel_orders supports at most 20 cancels".to_string(),
-            });
-        }
-        let mut orders = Vec::with_capacity(request.cancels.len());
-        for cancel in request.cancels {
-            orders.push(self.cancel_order_impl(cancel).await?.order);
-        }
-        let cancelled_count = orders.len() as u32;
-        Ok(BatchCancelOrdersResponse {
-            schema_version: rustcta_exchange_api::EXCHANGE_API_SCHEMA_VERSION,
-            metadata: crate::adapters::response_metadata(
-                request.exchange,
-                request.context.request_id,
-            ),
-            orders,
-            cancelled_count,
-            report: None,
-        })
     }
 }
 

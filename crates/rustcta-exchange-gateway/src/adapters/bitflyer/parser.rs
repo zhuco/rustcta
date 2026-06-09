@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope, TenantId,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, Fill,
+    FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion,
 };
 use serde_json::Value;
 
@@ -97,6 +99,152 @@ pub fn parse_orderbook_snapshot(
         .and_then(Value::as_str)
         .and_then(parse_bitflyer_datetime);
     Ok(snapshot)
+}
+
+pub fn parse_public_board_snapshot_message(
+    exchange_id: &ExchangeId,
+    symbol: rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderBookSnapshot> {
+    let params = value.get("params").ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "bitFlyer public WS board message missing params",
+            value,
+        )
+    })?;
+    let channel = required_str(exchange_id, params, "channel")?;
+    if !channel.starts_with("lightning_board_snapshot_") {
+        return Err(parse_error(
+            exchange_id.clone(),
+            "bitFlyer public WS board snapshot requires lightning_board_snapshot channel",
+            value,
+        ));
+    }
+    let message = params.get("message").ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "bitFlyer public WS board snapshot missing params.message",
+            value,
+        )
+    })?;
+    parse_orderbook_snapshot(exchange_id, symbol, message)
+}
+
+pub fn parse_bitflyer_order_state(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let symbol = bitflyer_symbol_scope(exchange_id, symbol_hint, value)?;
+    let quantity = value_as_string(value.get("size")).unwrap_or_else(|| "0".to_string());
+    let filled_quantity =
+        value_as_string(value.get("executed_size")).unwrap_or_else(|| "0".to_string());
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: symbol.market_type,
+        canonical_symbol: symbol.canonical_symbol.clone(),
+        exchange_symbol: symbol.exchange_symbol,
+        client_order_id: value_as_string(value.get("child_order_acceptance_id")),
+        exchange_order_id: value_as_string(value.get("child_order_id").or_else(|| value.get("id"))),
+        side: parse_side(value.get("side").and_then(Value::as_str)),
+        position_side: Some(PositionSide::None),
+        order_type: parse_order_type(value.get("child_order_type").and_then(Value::as_str)),
+        time_in_force: parse_time_in_force(value.get("time_in_force").and_then(Value::as_str)),
+        status: parse_order_status(value.get("child_order_state").and_then(Value::as_str)),
+        quantity,
+        price: value_as_string(value.get("price")),
+        filled_quantity: filled_quantity.clone(),
+        average_fill_price: value_as_string(value.get("average_price"))
+            .filter(|value| value != "0" && value != "0.0"),
+        reduce_only: false,
+        post_only: false,
+        created_at: value
+            .get("child_order_date")
+            .and_then(Value::as_str)
+            .and_then(parse_bitflyer_datetime),
+        updated_at: value
+            .get("child_order_date")
+            .and_then(Value::as_str)
+            .and_then(parse_bitflyer_datetime)
+            .unwrap_or_else(Utc::now),
+    })
+}
+
+pub fn parse_bitflyer_open_orders(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let rows = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "bitFlyer child orders response missing array",
+            value,
+        )
+    })?;
+    rows.iter()
+        .map(|row| parse_bitflyer_order_state(exchange_id, symbol_hint, row))
+        .collect()
+}
+
+pub fn parse_bitflyer_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "bitflyer fills require canonical_symbol".to_string(),
+            })?;
+    let rows = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "bitFlyer executions response missing array",
+            value,
+        )
+    })?;
+    rows.iter()
+        .map(|row| {
+            let price = decimal_value_to_f64(row.get("price"))?.unwrap_or(0.0);
+            let quantity = decimal_value_to_f64(row.get("size"))?.unwrap_or(0.0);
+            Ok(Fill {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: symbol.market_type,
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: value_as_string(row.get("child_order_id")),
+                client_order_id: value_as_string(row.get("child_order_acceptance_id")),
+                fill_id: value_as_string(row.get("id")),
+                side: parse_side(row.get("side").and_then(Value::as_str)),
+                position_side: PositionSide::None,
+                status: FillStatus::Confirmed,
+                liquidity_role: LiquidityRole::Unknown,
+                price,
+                quantity,
+                quote_quantity: (price > 0.0 && quantity > 0.0).then_some(price * quantity),
+                fee_asset: Some(canonical_symbol.base_asset().to_string()),
+                fee_amount: decimal_value_to_f64(row.get("commission"))?,
+                fee_rate: None,
+                realized_pnl: None,
+                filled_at: row
+                    .get("exec_date")
+                    .and_then(Value::as_str)
+                    .and_then(parse_bitflyer_datetime)
+                    .unwrap_or_else(Utc::now),
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
 }
 
 pub fn normalize_product_code(symbol: &str) -> ExchangeApiResult<String> {
@@ -201,6 +349,63 @@ pub(super) fn decimal_value_to_f64(value: Option<&Value>) -> ExchangeApiResult<O
 
 pub(super) fn value_as_string(value: Option<&Value>) -> Option<String> {
     string_or_number(value)
+}
+
+fn bitflyer_symbol_scope(
+    exchange_id: &ExchangeId,
+    symbol_hint: Option<&SymbolScope>,
+    value: &Value,
+) -> ExchangeApiResult<SymbolScope> {
+    if let Some(symbol) = symbol_hint {
+        return Ok(symbol.clone());
+    }
+    let product_code = required_str(exchange_id, value, "product_code")?.to_ascii_uppercase();
+    let market_type = market_type_from_product_code(&product_code);
+    let (base_asset, quote_asset) = canonical_assets_from_product_code(&product_code)?;
+    Ok(SymbolScope {
+        exchange: exchange_id.clone(),
+        market_type,
+        canonical_symbol: Some(
+            CanonicalSymbol::new(base_asset, quote_asset).map_err(validation_error)?,
+        ),
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, product_code)
+            .map_err(validation_error)?,
+    })
+}
+
+fn parse_side(value: Option<&str>) -> OrderSide {
+    if value.unwrap_or_default().eq_ignore_ascii_case("SELL") {
+        OrderSide::Sell
+    } else {
+        OrderSide::Buy
+    }
+}
+
+fn parse_order_type(value: Option<&str>) -> OrderType {
+    match value.unwrap_or_default().to_ascii_uppercase().as_str() {
+        "MARKET" => OrderType::Market,
+        _ => OrderType::Limit,
+    }
+}
+
+fn parse_time_in_force(value: Option<&str>) -> Option<TimeInForce> {
+    match value?.to_ascii_uppercase().as_str() {
+        "GTC" => Some(TimeInForce::GTC),
+        "IOC" => Some(TimeInForce::IOC),
+        "FOK" => Some(TimeInForce::FOK),
+        _ => None,
+    }
+}
+
+fn parse_order_status(value: Option<&str>) -> OrderStatus {
+    match value.unwrap_or_default().to_ascii_uppercase().as_str() {
+        "ACTIVE" => OrderStatus::New,
+        "COMPLETED" => OrderStatus::Filled,
+        "CANCELED" | "CANCELLED" => OrderStatus::Cancelled,
+        "EXPIRED" => OrderStatus::Expired,
+        "REJECTED" => OrderStatus::Rejected,
+        _ => OrderStatus::Unknown,
+    }
 }
 
 pub(super) fn parse_error(

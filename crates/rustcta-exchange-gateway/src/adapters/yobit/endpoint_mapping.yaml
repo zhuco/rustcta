@@ -1,218 +1,304 @@
 schema_version: 1
 exchange: yobit
 adapter: rustcta_exchange_gateway::adapters::yobit
-status_date: "2026-06-08"
+status_date: '2026-06-08'
 metadata:
   status: validated
   source: docs/yobit_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: A-37 scan-only Spot adapter. Public REST v3 is implemented for pair info and order books; private Trade API is request-spec-only and disabled.
-market_types: [spot]
-products: [spot]
+  last_reviewed: '2026-06-08'
+  notes: A-37 scan-only Spot adapter. Public REST v3 is implemented for pair info and order books; private Trade API is request-spec-only
+    and disabled.
+market_types:
+- spot
+products:
+- spot
 base_urls:
   rest: https://yobit.net
 auth:
-  private_rest: Key header plus HMAC-SHA512 Sign over URL-encoded /tapi/ POST body; request-spec-only until read-only/live-dry-run validation
+  private_rest: Key header plus HMAC-SHA512 Sign over URL-encoded /tapi/ POST body; request-spec-only until read-only/live-dry-run
+    validation
 rate_limits:
-  yobit_public: { scope: ip, interval_ms: 60000, limit: 100 }
-  yobit_private: { scope: key, interval_ms: 60000, limit: 100 }
+  yobit_public:
+    scope: ip
+    interval_ms: 60000
+    limit: 100
+  yobit_private:
+    scope: key
+    interval_ms: 60000
+    limit: 100
 pagination:
-  open_orders: { mode: request_spec_only, max_limit: null }
-  fills: { mode: offset_limit, max_limit: 1000, request_spec_only: true }
+  open_orders:
+    mode: request_spec_only
+    max_limit: null
+  fills:
+    mode: offset_limit
+    max_limit: 1000
+    request_spec_only: true
 reconciliation:
   private_state: rest_request_spec_only
-  readbacks: [get_open_orders, get_recent_fills]
-  notes: Private REST is not enabled by capabilities; after promotion use /tapi/ ActiveOrders and TradeHistory as REST reconciliation fallback.
+  readbacks:
+  - get_open_orders
+  - get_recent_fills
+  notes: Private REST is not enabled by capabilities; after promotion use /tapi/ ActiveOrders and TradeHistory as REST reconciliation
+    fallback.
 batch:
-  place: { support: unsupported, reason: yobit.batch_place_orders_unverified }
-  cancel: { support: unsupported, reason: yobit.batch_cancel_orders_unverified }
+  place:
+    support: unsupported
+    reason: yobit.batch_place_orders_unverified
+  cancel:
+    support: unsupported
+    reason: yobit.batch_cancel_orders_unverified
 websocket:
   public:
     support: unsupported
     reason: yobit.public_streams_unverified
-    heartbeat: { mode: unsupported }
+    heartbeat:
+      mode: unsupported
   private:
     support: unsupported
     reason: yobit.private_streams_unverified
-    auth_renewal: { mode: unsupported }
+    auth_renewal:
+      mode: unsupported
+unsupported:
+- operation: contract_product
+  reason: Current official/API profile does not expose standard futures/perpetual/options products.
+- operation: get_balances
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/yobit/request_specs/get_balances.json
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending TAPI HMAC-SHA512 read-only auth, getInfo parser, and account reconciliation.
+- operation: get_fees
+  status: project_unimplemented
+  source_type: public_info_pair_fee
+  source_fixture: tests/fixtures/exchanges/yobit/request_specs/get_fees_source_boundary.json
+  reason: YoBit public /api/3/info pair fee field is recorded as an offline source boundary; shared get_fees runtime remains
+    project-unimplemented pending pair fee parser and single-rate maker/taker policy.
 endpoints:
-  - operation: get_symbol_rules
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /api/3/info
-    auth: none
-    rate_limit_bucket: yobit_public
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://www.yobit.net/en/api/
-  - operation: get_order_book
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /api/3/depth/{pair}
-    auth: none
-    rate_limit_bucket: yobit_public
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    params:
-      - name: limit
-      - name: ignore_invalid
-    official_doc: https://www.yobit.net/en/api/
-  - operation: get_balances
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /tapi/
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: yobit_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: yobit.balances_request_spec_only
-    params:
-      - name: method
-        value: getInfo
-      - name: nonce
-    request_spec:
-      fixture: tests/fixtures/exchanges/yobit/request_specs/get_balances.json
-    official_doc: https://www.yobit.net/en/api/
-  - operation: place_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /tapi/
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: yobit_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: yobit.place_order_request_spec_only
-    params:
-      - name: method
-        value: Trade
-      - name: pair
-      - name: type
-      - name: rate
-      - name: amount
-      - name: nonce
-    request_spec:
-      fixture: tests/fixtures/exchanges/yobit/request_specs/place_order_limit_buy.json
-    official_doc: https://www.yobit.net/en/api/
-  - operation: cancel_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /tapi/
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: yobit_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: yobit.cancel_order_request_spec_only
-    params:
-      - name: method
-        value: CancelOrder
-      - name: order_id
-      - name: nonce
-    request_spec:
-      fixture: tests/fixtures/exchanges/yobit/request_specs/cancel_order.json
-    official_doc: https://www.yobit.net/en/api/
-  - operation: query_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /tapi/
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: yobit_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: yobit.query_order_request_spec_only
-    params:
-      - name: method
-        value: OrderInfo
-      - name: order_id
-      - name: nonce
-    request_spec:
-      fixture: tests/fixtures/exchanges/yobit/request_specs/query_order.json
-    official_doc: https://www.yobit.net/en/api/
-  - operation: get_open_orders
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /tapi/
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: yobit_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: yobit.open_orders_request_spec_only
-    params:
-      - name: method
-        value: ActiveOrders
-      - name: pair
-      - name: nonce
-    request_spec:
-      fixture: tests/fixtures/exchanges/yobit/request_specs/get_open_orders.json
-    official_doc: https://www.yobit.net/en/api/
-  - operation: get_recent_fills
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /tapi/
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: yobit_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: yobit.recent_fills_request_spec_only
-    params:
-      - name: method
-        value: TradeHistory
-      - name: pair
-      - name: count
-      - name: nonce
-    request_spec:
-      fixture: tests/fixtures/exchanges/yobit/request_specs/get_recent_fills.json
-    official_doc: https://www.yobit.net/en/api/
+- operation: get_fees
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /api/3/info
+  auth: none
+  rate_limit_bucket: yobit_public
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: 'P3 fee boundary: public pair metadata fee field is fixture-backed only; parser and single-rate policy are not wired
+    into shared get_fees runtime.'
+  official_doc: https://www.yobit.net/en/api/
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/get_fees_source_boundary.json
+- operation: get_symbol_rules
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /api/3/info
+  auth: none
+  rate_limit_bucket: yobit_public
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://www.yobit.net/en/api/
+- operation: get_order_book
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /api/3/depth/{pair}
+  auth: none
+  rate_limit_bucket: yobit_public
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  params:
+  - name: limit
+  - name: ignore_invalid
+  official_doc: https://www.yobit.net/en/api/
+- operation: get_balances
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /tapi/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: yobit_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending TAPI HMAC-SHA512 read-only auth, getInfo parser, and account reconciliation.
+  params:
+  - name: method
+    value: getInfo
+  - name: nonce
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/get_balances.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/yobit/request_specs/get_balances.json
+    source: response_sample
+  notes: 'P3 balance boundary: TAPI getInfo request spec and sanitized response sample are pinned offline; runtime still returns
+    yobit.balances_request_spec_only.'
+  official_doc: https://www.yobit.net/en/api/
+- operation: place_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /tapi/
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: yobit_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: YoBit TAPI Trade is fixture-backed offline; runtime stays disabled pending write dry-run controls, ack parser, and post-write readback reconciliation.
+  params:
+  - name: method
+    value: Trade
+  - name: pair
+  - name: type
+  - name: rate
+  - name: amount
+  - name: nonce
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/place_order_limit_buy.json
+  official_doc: https://www.yobit.net/en/api/
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /tapi/
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: yobit_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: YoBit TAPI CancelOrder is fixture-backed offline; runtime stays disabled pending write dry-run controls, cancel parser, and post-write readback reconciliation.
+  params:
+  - name: method
+    value: CancelOrder
+  - name: order_id
+  - name: nonce
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/cancel_order.json
+  official_doc: https://www.yobit.net/en/api/
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: query_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /tapi/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: yobit_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Guarded read-only runtime is enabled for OrderInfo behind YOBIT_PRIVATE_REST_ENABLED plus TAPI key/secret; write endpoints remain disabled.
+  params:
+  - name: method
+    value: OrderInfo
+  - name: order_id
+  - name: nonce
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/query_order.json
+  official_doc: https://www.yobit.net/en/api/
+  notes: 'P2 core readback runtime: credential-gated HMAC-SHA512 TAPI POST; requires exchange_order_id. Response fixture: tests/fixtures/exchanges/yobit/order_info_success.json. No write support is promoted.'
+- operation: get_open_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /tapi/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: yobit_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Guarded read-only runtime is enabled for ActiveOrders behind YOBIT_PRIVATE_REST_ENABLED plus TAPI key/secret; write endpoints remain disabled.
+  params:
+  - name: method
+    value: ActiveOrders
+  - name: pair
+  - name: nonce
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/get_open_orders.json
+  official_doc: https://www.yobit.net/en/api/
+  notes: 'P2 core readback runtime: credential-gated HMAC-SHA512 TAPI POST; requires symbol scope. Response fixture: tests/fixtures/exchanges/yobit/open_orders_success.json. No write support is promoted.'
+- operation: get_recent_fills
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /tapi/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: yobit_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Guarded read-only runtime is enabled for TradeHistory behind YOBIT_PRIVATE_REST_ENABLED plus TAPI key/secret; write endpoints remain disabled.
+  params:
+  - name: method
+    value: TradeHistory
+  - name: pair
+  - name: count
+  - name: nonce
+  request_spec:
+    fixture: tests/fixtures/exchanges/yobit/request_specs/get_recent_fills.json
+  official_doc: https://www.yobit.net/en/api/
+  notes: 'P2 core readback runtime: credential-gated HMAC-SHA512 TAPI POST; requires symbol and context tenant/account ids. Response fixture: tests/fixtures/exchanges/yobit/trade_history_success.json. No write support is promoted.'

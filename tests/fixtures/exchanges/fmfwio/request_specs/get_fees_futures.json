@@ -1,0 +1,26 @@
+{
+  "exchange": "fmfwio",
+  "operation": "get_fees",
+  "product": "futures",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/3/futures/fee",
+  "auth": "signed",
+  "credential_scope": "read_only",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "prefix",
+      "value": "HS256 "
+    }
+  },
+  "body": "",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "fmfwio/get_fees_futures_hs256",
+  "official_source": "GET /api/3/futures/fee returns personal Futures trading commission rates for all contracts on the FMFW.io profile."
+}

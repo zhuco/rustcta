@@ -1,0 +1,27 @@
+{
+  "exchange": "paymium",
+  "operation": "query_order",
+  "request_spec_only": false,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/user/orders/{uuid}",
+  "auth": "hmac",
+  "credential_scope": "read_only",
+  "runtime": "env_gated_PAYMIUM_PRIVATE_REST_ENABLED",
+  "requires": [
+    "PAYMIUM_PRIVATE_REST_ENABLED",
+    "PAYMIUM_API_KEY",
+    "PAYMIUM_API_SECRET",
+    "exchange_order_id"
+  ],
+  "headers_shape": [
+    "Api-Key",
+    "Api-Nonce",
+    "Api-Signature"
+  ],
+  "body_or_query_shape": {
+    "uuid": "fixture-order-uuid"
+  },
+  "source_boundary": "Paymium BTC/EUR query_order is read-only runtime when the private REST env gate and credentials are configured; client-order-id lookup and trading mutations remain offline.",
+  "response_fixture": "tests/fixtures/exchanges/paymium/order_success.json"
+}

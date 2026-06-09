@@ -19,19 +19,15 @@ pub struct BittradeGatewayConfig {
 
 impl Default for BittradeGatewayConfig {
     fn default() -> Self {
-        let api_key = std::env::var("BITTRADE_API_KEY")
-            .or_else(|_| std::env::var("RUSTCTA_BITTRADE_API_KEY"))
-            .ok();
-        let api_secret = std::env::var("BITTRADE_API_SECRET")
-            .or_else(|_| std::env::var("RUSTCTA_BITTRADE_API_SECRET"))
-            .ok();
+        let api_key = non_empty_env("BITTRADE_API_KEY");
+        let api_secret = non_empty_env("BITTRADE_API_SECRET");
         Self {
             rest_base_url: DEFAULT_REST_BASE_URL.to_string(),
             public_websocket_url: DEFAULT_PUBLIC_WS_URL.to_string(),
             private_websocket_url: DEFAULT_PRIVATE_WS_URL.to_string(),
             api_key,
             api_secret,
-            enabled_private_rest: false,
+            enabled_private_rest: env_bool("BITTRADE_PRIVATE_REST_ENABLED").unwrap_or(false),
             enabled_public_streams: true,
             enabled_private_streams: false,
             request_timeout_ms: DEFAULT_REQUEST_TIMEOUT_MS,
@@ -51,5 +47,21 @@ impl BittradeGatewayConfig {
                 .api_secret
                 .as_ref()
                 .is_some_and(|value| !value.trim().is_empty())
+    }
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(format!("RUSTCTA_{key}"))
+        .or_else(|_| std::env::var(key))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_bool(key: &str) -> Option<bool> {
+    match non_empty_env(key)?.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }

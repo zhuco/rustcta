@@ -1,16 +1,17 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
-    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamCapabilities,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, BatchAtomicity,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchExecutionMode,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
+    CredentialScope, EndpointAuth, EndpointCapability, EndpointTransport, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamCapabilities, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -99,10 +100,12 @@ impl ExchangeClient for CoinmateGatewayAdapter {
     }
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
+        let private_read_enabled =
+            self.config.enabled_private_rest && self.config.private_auth_available();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -115,9 +118,9 @@ impl ExchangeClient for CoinmateGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -132,6 +135,7 @@ impl ExchangeClient for CoinmateGatewayAdapter {
         capabilities.max_order_book_depth = None;
         capabilities.order_book = rustcta_exchange_api::OrderBookCapability::snapshot_only(None);
         capabilities.max_recent_fill_limit = Some(1000);
+        apply_coinmate_capabilities_v2(&mut capabilities);
         capabilities
     }
 
@@ -209,6 +213,7 @@ impl ExchangeClient for CoinmateGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
+        private::coinmate_amend_order_live_guard(&request)?;
         self.unsupported("coinmate.replace_order_offline_request_spec_only")
     }
 
@@ -258,7 +263,7 @@ impl ExchangeClient for CoinmateGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("coinmate.query_order_offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -266,7 +271,7 @@ impl ExchangeClient for CoinmateGatewayAdapter {
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("coinmate.open_orders_offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -274,7 +279,7 @@ impl ExchangeClient for CoinmateGatewayAdapter {
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("coinmate.recent_fills_offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(
@@ -296,4 +301,83 @@ fn validation_error(error: impl std::fmt::Display) -> ExchangeApiError {
     ExchangeApiError::InvalidRequest {
         message: error.to_string(),
     }
+}
+
+fn apply_coinmate_capabilities_v2(capabilities: &mut ExchangeClientCapabilities) {
+    let amend_guard = CapabilitySupport::unsupported(
+        "coinmate replace-limit amend is fixture-backed offline; shared amend request lacks side/new price and live writes need serialized nonce, dry-run guard, and reconciliation",
+    );
+    capabilities.capabilities_v2.private_rest = if capabilities.supports_private_rest {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported(
+            "coinmate private REST readbacks require COINMATE_PRIVATE_REST_ENABLED plus client id/public key/private key; writes remain disabled",
+        )
+    };
+    capabilities.capabilities_v2.batch_place_orders =
+        BatchCapability::unsupported("coinmate has no native batch place endpoint");
+    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+        support: CapabilitySupport::unsupported(
+            "coinmate cancelAllOpenOrders is cancel-all only, not list batch cancel",
+        ),
+        mode: BatchExecutionMode::Unsupported,
+        atomicity: BatchAtomicity::Unknown,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: false,
+        supports_partial_failure: false,
+    };
+    capabilities.capabilities_v2.cancel_all_orders = CapabilitySupport::unsupported(
+        "coinmate cancelAllOpenOrders request spec exists but live private write runtime is disabled",
+    );
+    capabilities.capabilities_v2.endpoints = vec![
+        EndpointCapability {
+            operation: "coinmate.amend_order".to_string(),
+            support: amend_guard.clone(),
+            market_types: vec![MarketType::Spot],
+            transport: EndpointTransport::Rest,
+            method: Some("POST".to_string()),
+            path: Some("/replaceByBuyLimit|/replaceBySellLimit".to_string()),
+            auth: EndpointAuth::Hmac,
+            credential_scopes: vec![CredentialScope::Trade],
+            rate_limit_bucket: Some("coinmate_private".to_string()),
+            weight: Some(1),
+            supports_testnet: false,
+        },
+        EndpointCapability {
+            operation: "coinmate.batch_place_orders".to_string(),
+            support: capabilities
+                .capabilities_v2
+                .batch_place_orders
+                .support
+                .clone(),
+            market_types: vec![MarketType::Spot],
+            transport: EndpointTransport::Rest,
+            method: None,
+            path: None,
+            auth: EndpointAuth::None,
+            credential_scopes: vec![CredentialScope::Trade],
+            rate_limit_bucket: Some("coinmate_private".to_string()),
+            weight: Some(0),
+            supports_testnet: false,
+        },
+        EndpointCapability {
+            operation: "coinmate.batch_cancel_orders".to_string(),
+            support: capabilities
+                .capabilities_v2
+                .batch_cancel_orders
+                .support
+                .clone(),
+            market_types: vec![MarketType::Spot],
+            transport: EndpointTransport::Rest,
+            method: None,
+            path: None,
+            auth: EndpointAuth::None,
+            credential_scopes: vec![CredentialScope::Trade],
+            rate_limit_bucket: Some("coinmate_private".to_string()),
+            weight: Some(0),
+            supports_testnet: false,
+        },
+    ];
 }

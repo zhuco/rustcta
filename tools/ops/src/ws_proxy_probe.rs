@@ -106,7 +106,7 @@ struct HttpProxy {
     source: &'static str,
 }
 
-async fn connect_websocket<R>(
+pub(crate) async fn connect_websocket<R>(
     request: R,
 ) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Response), Error>
 where
@@ -490,7 +490,7 @@ async fn kucoin_spot_case() -> Result<ProbeCase> {
     })
 }
 
-fn summarize_message(message: Message) -> String {
+pub(crate) fn summarize_message(message: Message) -> String {
     match message {
         Message::Text(text) => summarize_text("text", text),
         Message::Binary(bytes) => summarize_binary(bytes),

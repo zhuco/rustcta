@@ -11,6 +11,42 @@ use super::signing::cex_ws_signature;
 use super::CexGatewayAdapter;
 use crate::adapters::ensure_exchange_api_schema;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CexPublicOrderBookWsPolicy {
+    pub snapshot_event: &'static str,
+    pub increment_event: &'static str,
+    pub depth: u32,
+    pub sequence_field: &'static str,
+    pub continuity: &'static str,
+    pub checksum: Option<&'static str>,
+    pub update_semantics: &'static str,
+    pub rest_snapshot_endpoint: &'static str,
+    pub resync: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CexPublicWsSubscriptionSpec {
+    pub url: String,
+    pub event: &'static str,
+    pub pair: String,
+    pub subscribe_payload: Value,
+    pub unsubscribe_payload: Value,
+}
+
+pub fn cex_public_order_book_ws_policy() -> CexPublicOrderBookWsPolicy {
+    CexPublicOrderBookWsPolicy {
+        snapshot_event: "order_book_subscribe",
+        increment_event: "order_book_increment",
+        depth: 25,
+        sequence_field: "seqId",
+        continuity: "next order_book_increment seqId must equal previous seqId + 1 after the order_book_subscribe snapshot",
+        checksum: None,
+        update_semantics: "absolute quantity at changed price levels; quantity 0 removes the level in the local book",
+        rest_snapshot_endpoint: "GET /order_book/{symbol1}/{symbol2}/",
+        resync: "reconnect, resubscribe, fetch REST order book snapshot, and resume from the new seqId after a seqId gap/regression or disconnect",
+    }
+}
+
 impl CexGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -46,6 +82,24 @@ impl CexGatewayAdapter {
             operation: "cex.private_streams_unverified",
         })
     }
+}
+
+pub fn cex_public_orderbook_subscription_spec(
+    subscription: &PublicStreamSubscription,
+    ws_url: &str,
+    oid: &str,
+) -> ExchangeApiResult<CexPublicWsSubscriptionSpec> {
+    ensure_exchange_api_schema(subscription.schema_version)?;
+    let pair = cex_pair_string(&subscription.symbol.exchange_symbol.symbol)?;
+    let subscribe_payload = cex_public_subscribe_payload(subscription, oid)?;
+    let unsubscribe_payload = cex_public_unsubscribe_payload(subscription, oid)?;
+    Ok(CexPublicWsSubscriptionSpec {
+        url: ws_url.to_string(),
+        event: cex_public_event(&subscription.kind)?,
+        pair,
+        subscribe_payload,
+        unsubscribe_payload,
+    })
 }
 
 pub fn cex_ws_auth_payload(

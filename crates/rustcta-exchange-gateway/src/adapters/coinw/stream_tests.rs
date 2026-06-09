@@ -7,11 +7,13 @@ use rustcta_types::{AccountId, MarketType};
 use serde_json::json;
 
 use super::streams::{
-    coinw_ping_payload, coinw_private_subscribe_payload, coinw_public_subscribe_payload,
-    coinw_stream_reconnect_policy, CoinwPrivateStreamMessage, CoinwPublicStreamMessage,
-    CoinwWsSessionEvent,
+    coinw_ping_payload, coinw_private_subscribe_payload, coinw_public_order_book_ws_policy,
+    coinw_public_subscribe_payload, coinw_stream_reconnect_policy, CoinwPrivateStreamMessage,
+    CoinwPublicStreamMessage, CoinwWsSessionEvent,
 };
-use super::test_support::{context, exchange_id, perp_symbol_scope, spot_symbol_scope};
+use super::test_support::{
+    context, exchange_id, perp_symbol_scope, spot_pair_code_scope, spot_symbol_scope,
+};
 use super::{CoinwGatewayAdapter, CoinwGatewayConfig};
 use crate::streams::StreamSupervisorAction;
 
@@ -36,6 +38,33 @@ fn coinw_stream_payload_should_map_spot_public_channels() {
     assert_eq!(payload["event"], "subscribe");
     assert_eq!(payload["args"], "spot/level2_20:BTC-USDT");
 
+    let pair_code_book = PublicStreamSubscription {
+        symbol: spot_pair_code_scope(),
+        ..book.clone()
+    };
+    let payload = coinw_public_subscribe_payload(&pair_code_book).expect("pair code book payload");
+    assert_eq!(payload["event"], "sub");
+    assert_eq!(payload["params"]["biz"], "exchange");
+    assert_eq!(payload["params"]["type"], "depth_snapshot");
+    assert_eq!(payload["params"]["pairCode"], "78");
+
+    let pair_code_delta = PublicStreamSubscription {
+        kind: PublicStreamKind::OrderBookDelta,
+        ..pair_code_book
+    };
+    let payload =
+        coinw_public_subscribe_payload(&pair_code_delta).expect("pair code delta payload");
+    assert_eq!(payload["event"], "sub");
+    assert_eq!(payload["params"]["biz"], "exchange");
+    assert_eq!(payload["params"]["type"], "depth");
+    assert_eq!(payload["params"]["pairCode"], "78");
+
+    let unsupported_symbol_delta = PublicStreamSubscription {
+        kind: PublicStreamKind::OrderBookDelta,
+        ..book.clone()
+    };
+    assert!(coinw_public_subscribe_payload(&unsupported_symbol_delta).is_err());
+
     let candles = PublicStreamSubscription {
         kind: PublicStreamKind::Candles {
             interval: "1m".to_string(),
@@ -44,6 +73,27 @@ fn coinw_stream_payload_should_map_spot_public_channels() {
     };
     let payload = coinw_public_subscribe_payload(&candles).expect("candle payload");
     assert_eq!(payload["args"], "spot/candle-1m:BTC-USDT");
+}
+
+#[test]
+fn coinw_public_order_book_ws_policy_should_describe_depth_sequence_and_risk() {
+    let policy = coinw_public_order_book_ws_policy();
+    assert_eq!(
+        policy.spot_method1_snapshot_channel,
+        "spot/level2_20:{symbol}"
+    );
+    assert_eq!(policy.spot_method1_snapshot_depth, 20);
+    assert_eq!(policy.spot_method2_snapshot_type, "depth_snapshot");
+    assert_eq!(policy.spot_method2_snapshot_depth, 100);
+    assert_eq!(policy.spot_method2_incremental_type, "depth");
+    assert_eq!(policy.spot_sequence_field, "seq");
+    assert_eq!(policy.spot_incremental_first_sequence_field, "startSeq");
+    assert_eq!(policy.spot_incremental_last_sequence_field, "endSeq");
+    assert_eq!(policy.futures_depth_type, "depth");
+    assert_eq!(policy.futures_depth, 100);
+    assert_eq!(policy.futures_sequence_field, None);
+    assert_eq!(policy.checksum, None);
+    assert!(policy.risk.contains("no sequence or checksum"));
 }
 
 #[test]
@@ -85,6 +135,74 @@ fn coinw_stream_payload_should_map_private_channels() {
         .expect("futures private");
     assert_eq!(payload["params"]["biz"], "futures");
     assert_eq!(payload["params"]["type"], "position");
+}
+
+#[test]
+fn coinw_public_stream_parser_should_read_spot_snapshot_seq_fixture() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/coinw/ws/spot_depth_snapshot.json"
+    ))
+    .expect("fixture");
+    let message = super::streams::parse_coinw_public_stream_message(
+        &exchange_id(),
+        spot_symbol_scope(),
+        &fixture,
+    )
+    .expect("spot snapshot");
+    match message {
+        CoinwPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.order_book.sequence, Some(704538922));
+            assert_eq!(book.order_book.bids[0].price, 94702.32);
+            assert_eq!(book.order_book.asks[0].quantity, 0.7071);
+            assert!(book.order_book.exchange_timestamp.is_some());
+        }
+        other => panic!("unexpected message: {other:?}"),
+    }
+}
+
+#[test]
+fn coinw_public_stream_parser_should_read_spot_incremental_start_and_end_seq_fixture() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/coinw/ws/spot_depth_incremental.json"
+    ))
+    .expect("fixture");
+    let message = super::streams::parse_coinw_public_stream_message(
+        &exchange_id(),
+        spot_symbol_scope(),
+        &fixture,
+    )
+    .expect("spot delta");
+    match message {
+        CoinwPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.order_book.sequence, Some(4999544973));
+            assert_eq!(book.order_book.bids[0].price, 94730.63);
+            assert_eq!(book.order_book.asks[0].price, 94733.65);
+        }
+        other => panic!("unexpected message: {other:?}"),
+    }
+}
+
+#[test]
+fn coinw_public_stream_parser_should_read_futures_100_depth_fixture_without_sequence() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/coinw/ws/futures_depth_100.json"
+    ))
+    .expect("fixture");
+    let message = super::streams::parse_coinw_public_stream_message(
+        &exchange_id(),
+        perp_symbol_scope(),
+        &fixture,
+    )
+    .expect("futures depth");
+    match message {
+        CoinwPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.order_book.sequence, None);
+            assert_eq!(book.order_book.bids[0].price, 95640.2);
+            assert_eq!(book.order_book.asks[0].quantity, 0.807);
+            assert!(book.order_book.exchange_timestamp.is_some());
+        }
+        other => panic!("unexpected message: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -185,6 +303,32 @@ fn coinw_public_ws_session_should_handle_initial_requests_heartbeat_and_books() 
         }
         other => panic!("unexpected stream event: {other:?}"),
     }
+}
+
+#[test]
+fn coinw_public_ws_session_should_use_method2_url_for_spot_pair_code_depth() {
+    let subscription = PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("public-session-method2"),
+        symbol: spot_pair_code_scope(),
+        kind: PublicStreamKind::OrderBookDelta,
+    };
+    let session = CoinwGatewayAdapter::default_public()
+        .expect("adapter")
+        .public_ws_session(subscription)
+        .expect("session");
+    assert_eq!(session.url, "wss://ws.futurescw.com");
+    assert_eq!(
+        session.initial_requests(),
+        vec![json!({
+            "event": "sub",
+            "params": {
+                "biz": "exchange",
+                "type": "depth",
+                "pairCode": "78",
+            },
+        })]
+    );
 }
 
 #[test]

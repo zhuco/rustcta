@@ -8,6 +8,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::{bitso_authorization_header, bitso_hmac_signature, bitso_signature_payload};
+
 #[derive(Clone)]
 pub struct BitsoRest {
     exchange_id: ExchangeId,
@@ -64,6 +66,44 @@ impl BitsoRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        if api_key.trim().is_empty() || api_secret.trim().is_empty() {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "bitso.private_rest_missing_credentials",
+            });
+        }
+        let request_path = build_path(endpoint, params);
+        let url = format!(
+            "{}{}",
+            self.rest_base_url.trim_end_matches('/'),
+            request_path
+        );
+        let signing_path = signing_path(&self.rest_base_url, &request_path);
+        let nonce = Utc::now().timestamp_millis();
+        let payload = bitso_signature_payload(nonce, "GET", &signing_path, "");
+        let signature = bitso_hmac_signature(api_secret, &payload)?;
+        let response = self
+            .http
+            .get(url)
+            .header(
+                "Authorization",
+                bitso_authorization_header(api_key, nonce, &signature),
+            )
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }
@@ -123,4 +163,46 @@ pub fn signed_request_spec(method: &str, path: &str, body: Value) -> Value {
         },
         "body": body
     })
+}
+
+pub fn build_path(endpoint: &str, params: &HashMap<String, String>) -> String {
+    let endpoint = if endpoint.starts_with('/') {
+        endpoint.to_string()
+    } else {
+        format!("/{endpoint}")
+    };
+    if params.is_empty() {
+        endpoint
+    } else {
+        format!("{endpoint}?{}", encode_params(params))
+    }
+}
+
+fn signing_path(rest_base_url: &str, request_path: &str) -> String {
+    let base_path = url::Url::parse(rest_base_url)
+        .ok()
+        .map(|url| url.path().trim_end_matches('/').to_string())
+        .filter(|path| !path.is_empty() && path != "/")
+        .unwrap_or_default();
+    if base_path.is_empty() {
+        request_path.to_string()
+    } else {
+        format!("{base_path}{request_path}")
+    }
+}
+
+fn encode_params(params: &HashMap<String, String>) -> String {
+    let mut pairs = params.iter().collect::<Vec<_>>();
+    pairs.sort_by(|left, right| left.0.cmp(right.0));
+    pairs
+        .into_iter()
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&")
 }

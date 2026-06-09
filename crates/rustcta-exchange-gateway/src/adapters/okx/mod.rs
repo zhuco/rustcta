@@ -1,13 +1,14 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -23,6 +24,7 @@ mod public;
 #[cfg(test)]
 mod public_tests;
 mod signing;
+mod streams;
 #[cfg(test)]
 mod test_support;
 mod toolchain;
@@ -86,6 +88,8 @@ impl OkxGatewayAdapter {
     fn ensure_market_type(&self, market_type: MarketType) -> ExchangeApiResult<()> {
         if market_type != MarketType::Spot
             && !(market_type == MarketType::Perpetual && self.exchange_id.as_str() == "okx")
+            && !(market_type == MarketType::Futures && self.exchange_id.as_str() == "okx")
+            && !(market_type == MarketType::Option && self.exchange_id.as_str() == "okx")
         {
             return Err(ExchangeApiError::Unsupported {
                 operation: self.config.unsupported_market_type_operation,
@@ -166,7 +170,12 @@ impl ExchangeClient for OkxGatewayAdapter {
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = if self.exchange_id.as_str() == "okx" {
-            vec![MarketType::Spot, MarketType::Perpetual]
+            vec![
+                MarketType::Spot,
+                MarketType::Perpetual,
+                MarketType::Futures,
+                MarketType::Option,
+            ]
         } else {
             vec![MarketType::Spot]
         };
@@ -175,12 +184,15 @@ impl ExchangeClient for OkxGatewayAdapter {
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_available();
+        capabilities.supports_positions = self.config.private_rest_available();
         capabilities.supports_fees = self.config.private_rest_available();
         capabilities.supports_place_order = self.config.private_rest_available();
         capabilities.supports_cancel_order = self.config.private_rest_available();
         capabilities.supports_query_order = self.config.private_rest_available();
         capabilities.supports_open_orders = self.config.private_rest_available();
         capabilities.supports_recent_fills = self.config.private_rest_available();
+        capabilities.supports_batch_place_order = self.config.private_rest_available();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_available();
         capabilities.supports_cancel_all_orders = self.config.private_rest_available();
         capabilities.supports_quote_market_order = self.config.private_rest_available();
         capabilities.supports_amend_order = self.config.private_rest_available();
@@ -200,12 +212,13 @@ impl ExchangeClient for OkxGatewayAdapter {
         ];
         capabilities.max_order_book_depth = Some(400);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(400));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(400));
         capabilities.max_recent_fill_limit = Some(100);
         toolchain::apply_toolchain_capabilities(
             &mut capabilities,
             self.config.private_rest_available(),
             self.exchange_id.as_str(),
+            self.config.enabled_public_streams,
         );
         capabilities
     }
@@ -216,13 +229,9 @@ impl ExchangeClient for OkxGatewayAdapter {
 
     async fn get_positions(
         &self,
-        _request: PositionsRequest,
+        request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private(self.profile_operation(
-            "okx.get_positions",
-            "okxus.get_positions",
-            "myokx.get_positions",
-        ))
+        self.get_positions_private_rest(request).await
     }
 
     async fn get_symbol_rules(
@@ -271,6 +280,20 @@ impl ExchangeClient for OkxGatewayAdapter {
         self.amend_order_private_rest(request).await
     }
 
+    async fn batch_place_orders(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.batch_place_orders_private_rest(request).await
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.batch_cancel_orders_private_rest(request).await
+    }
+
     async fn cancel_all_orders(
         &self,
         request: rustcta_exchange_api::CancelAllOrdersRequest,
@@ -301,26 +324,16 @@ impl ExchangeClient for OkxGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: self.profile_operation(
-                "okx.subscribe_public_stream",
-                "okxus.subscribe_public_stream",
-                "myokx.subscribe_public_stream",
-            ),
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(
         &self,
-        _subscription: PrivateStreamSubscription,
+        subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        self.unsupported_private(self.profile_operation(
-            "okx.subscribe_private_stream",
-            "okxus.subscribe_private_stream",
-            "myokx.subscribe_private_stream",
-        ))
+        self.subscribe_private_stream_impl(subscription).await
     }
 }
 

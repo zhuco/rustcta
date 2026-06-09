@@ -1,0 +1,23 @@
+{
+  "exchange": "mercado",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/BTC/fees",
+  "auth": "bearer",
+  "credential_scope": "read_only",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "prefix",
+      "value": "Bearer "
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "official_source": "Mercado Bitcoin API v4 documents /api/v4/{asset}/fees returning maker_fee/taker_fee for the authenticated account or asset scope.",
+  "runtime_boundary": "request_spec_only; shared get_fees remains project-unimplemented pending bearer guard, asset-symbol mapping, and maker/taker parser."
+}

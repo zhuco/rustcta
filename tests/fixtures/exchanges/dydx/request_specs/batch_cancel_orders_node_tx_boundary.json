@@ -1,0 +1,33 @@
+{
+  "exchange": "dydx",
+  "operation": "batch_cancel_orders",
+  "status": "project_unimplemented",
+  "transport": "chain_tx",
+  "message_type": "multiple MsgCancelOrder messages",
+  "auth": "wallet_transaction_signature",
+  "requires_node_broadcast": true,
+  "source_boundary_fixture": "tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json",
+  "body": {
+    "chain_id": "<redacted-chain-id>",
+    "address": "<redacted-wallet-address>",
+    "subaccount_number": 0,
+    "cancels": [
+      {
+        "client_id": "<redacted-client-id>",
+        "clob_pair_id": "<redacted-clob-pair-id>",
+        "good_til_block": "<redacted-good-til-block>"
+      }
+    ]
+  },
+  "signing_boundary": "tests/fixtures/exchanges/dydx/signing_vectors/node_write_unsupported.json",
+  "parser_boundary": "tests/fixtures/exchanges/dydx/parser/batch_cancel_orders_tx_response_boundary.json",
+  "trade_enabled": false,
+  "remaining_runtime": [
+    "wallet_transaction_signing",
+    "account_sequence",
+    "batch_tx_builder",
+    "tx_parser",
+    "dry_run_safe_broadcast_guard"
+  ],
+  "expected_error": "dydx.batch_cancel_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation"
+}

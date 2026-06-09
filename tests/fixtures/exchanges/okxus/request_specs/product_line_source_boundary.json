@@ -1,0 +1,69 @@
+{
+  "exchange": "okxus",
+  "profile_of": "okx",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["spot_public_rest"],
+  "official_product_lines": ["margin", "perpetual", "futures", "event_contracts"],
+  "product_line_classification": {
+    "contract_product": {
+      "status": "project_unimplemented",
+      "reason": "US regional derivatives and event-contract scope needs domain, credential, state eligibility, product metadata, lifecycle, and reconciliation audit."
+    },
+    "market_type_non_spot": {
+      "status": "project_unimplemented",
+      "reason": "Perpetual, futures, options, event contracts, and margin are regional non-spot product scopes, not unsupported by default."
+    },
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Margin account-mode semantics require US eligibility, credential scope, risk policy, and balance/position reconciliation audit."
+    },
+    "futures_product": {
+      "status": "project_unimplemented",
+      "reason": "Futures access requires US availability, API product-scope, instrument, lifecycle, position, and settlement audit."
+    },
+    "perpetual_product": {
+      "status": "project_unimplemented",
+      "reason": "Swap/perpetual semantics exist in OKX v5 materials but are not wired for this US regional profile."
+    },
+    "event_contract_product": {
+      "status": "project_unimplemented",
+      "reason": "Event Contracts require US state eligibility, instrument, order lifecycle, settlement, and reconciliation audit."
+    }
+  },
+  "official_gap_fields": {
+    "contract_product": "us_regional_derivatives_and_event_contract_scope",
+    "market_type_non_spot": "okx_v5_non_spot_market_types",
+    "margin_product": "okx_v5_margin_account_mode",
+    "futures_product": "okx_us_futures_event_contract_materials",
+    "perpetual_product": "okx_v5_swap_perpetual_semantics",
+    "event_contract_product": "okx_us_event_contracts"
+  },
+  "official_sources": [
+    {
+      "url": "https://app.okx.com/docs-v5/en/",
+      "evidence": "OKX v5 API documentation exposes non-spot instrument, account, order, and position semantics, but this OKX US adapter only enables spot public REST."
+    },
+    {
+      "url": "https://www.okx.com/en-us/help/event-contracts-faq",
+      "evidence": "OKX US help material describes Event Contracts, which require a separate product-scope and eligibility audit before any gateway runtime is enabled."
+    },
+    {
+      "url": "https://www.okx.com/en-us/help/api-faq",
+      "evidence": "OKX API help material documents API usage for the regional profile, but credential permissions and product availability are not audited in this adapter."
+    }
+  ],
+  "runtime_isolation": "Do not route OKX US margin, perpetual, expiry futures, options, or event-contract traffic through the spot public REST profile until each product line has an audited US domain, credential scope, state eligibility guard, account-mode policy, product metadata parser, private order lifecycle, and reconciliation path.",
+  "required_audit_gaps": [
+    "US domain and host behavior for each non-spot product",
+    "credential scope and API permission audit",
+    "state and account eligibility guard",
+    "account-mode and margin/risk policy mapping",
+    "product metadata and instrument parser fixtures",
+    "private order lifecycle request specs and parsers",
+    "positions, fills, settlement, and account reconciliation"
+  ],
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

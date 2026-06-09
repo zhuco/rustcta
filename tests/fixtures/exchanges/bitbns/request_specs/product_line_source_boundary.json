@@ -1,0 +1,48 @@
+{
+  "exchange": "bitbns",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "offline_private_request_specs"
+  ],
+  "official_product_lines": [
+    "margin_trading_api"
+  ],
+  "product_line_classification": {
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Margin Trading API/source material exists, but private signing, KYC/region eligibility, parsers, lifecycle, and reconciliation are not wired."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "No stable standard futures, perpetual, or options API is verified in the current official/API profile."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "futures",
+    "perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://github.com/bitbns-official/bitbns-api-docs",
+      "evidence": "Legacy Bitbns API material references margin trading surfaces, but this adapter keeps private runtime disabled and only records offline request specs."
+    }
+  ],
+  "runtime_isolation": "Do not route Bitbns margin trading, leverage, margin balances, or margin order lifecycle through the spot scan-only adapter until private signing, KYC/region eligibility, product metadata, parser fixtures, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "private margin API availability and account eligibility",
+    "HMAC signing smoke for product-scoped private endpoints",
+    "margin balances, positions, and risk parser fixtures",
+    "product-scoped order lifecycle and reconciliation"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_stable_standard_futures_api",
+    "perpetual": "unsupported_no_stable_standard_perpetual_api",
+    "options": "unsupported_no_stable_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

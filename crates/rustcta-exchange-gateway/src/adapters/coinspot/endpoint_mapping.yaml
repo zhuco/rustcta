@@ -4,7 +4,7 @@ adapter: rustcta_exchange_gateway::adapters::coinspot
 metadata:
   status: validated
   source: https://www.coinspot.com.au/v2/api
-  notes: "Task 20 AUD spot mapping. Trading REST is credential-gated; side-specific cancel/query APIs remain unsupported."
+  notes: "Task 20 AUD spot mapping. Trading REST is credential-gated; side-specific cancel/query APIs are explicit unsupported shared-runtime boundaries until CancelOrderRequest/QueryOrderRequest can carry side/order-context safely."
 market_types: [spot]
 products: [spot]
 rest:
@@ -23,7 +23,19 @@ reconciliation:
   private_stream_fallback: rest
   readbacks: [get_open_orders, get_recent_fills]
   unknown_order_policy: unsupported_query_order_side_specific
+websocket:
+  public:
+    support: unsupported
+    reason: "Current official CoinSpot API/V2 scope exposes REST public order snapshots only; no public order book WebSocket is documented."
+    order_book:
+      support: unsupported
+      fallback: rest_open_orders_snapshot
+  private:
+    support: unsupported
+    reason: "No private WebSocket stream is documented in the current trading API scope."
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
   - positions
   - amend_order
   - order_list
@@ -35,6 +47,10 @@ unsupported:
   - public_streams
   - private_streams
   - fiat_deposit_withdrawal_runtime
+  - operation: cancel_order
+    reason: "Official CoinSpot API supports side-specific buy/sell cancellation, but shared cancel_order has no side/order-context field; mapping it generically risks wrong-side cancellation."
+  - operation: query_order
+    reason: "CoinSpot order readback is side/history scoped; shared query_order cannot safely select the native buy/sell path without preserved side/order-context."
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -114,3 +130,89 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/coinspot/request_specs/get_recent_fills.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/my/{buy|sell}/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: unsupported
+    reason: "Offline audit fixture only; native cancel is buy/sell side-specific and shared cancel_order currently lacks safe side context."
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinspot/request_specs/cancel_order_buy.json
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinspot/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinspot.amend_order_unsupported_side_specific_orders
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinspot/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinspot.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinspot/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinspot.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinspot/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinspot.batch_cancel_orders_unsupported_side_specific_cancels
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinspot/cancel-all
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinspot.cancel_all_orders_unsupported_side_specific_cancels

@@ -1,0 +1,33 @@
+{
+  "exchange": "dydx",
+  "operation": "amend_order",
+  "status": "project_unimplemented",
+  "transport": "chain_tx",
+  "message_type": "MsgPlaceOrder replacement",
+  "auth": "wallet_transaction_signature",
+  "requires_node_broadcast": true,
+  "source_boundary_fixture": "tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json",
+  "body": {
+    "chain_id": "<redacted-chain-id>",
+    "address": "<redacted-wallet-address>",
+    "subaccount_number": 0,
+    "client_id": "<redacted-client-id>",
+    "clob_pair_id": "<redacted-clob-pair-id>",
+    "replacement_order": {
+      "side": "BUY",
+      "quantums": "1000000",
+      "subticks": "6500000000",
+      "time_in_force": "GOOD_TIL_BLOCK"
+    }
+  },
+  "signing_boundary": "tests/fixtures/exchanges/dydx/signing_vectors/node_write_unsupported.json",
+  "parser_boundary": "tests/fixtures/exchanges/dydx/parser/amend_order_tx_response_boundary.json",
+  "trade_enabled": false,
+  "remaining_runtime": [
+    "wallet_transaction_signing",
+    "account_sequence",
+    "tx_parser",
+    "dry_run_safe_broadcast_guard"
+  ],
+  "expected_error": "dydx.amend_requires_wallet_signer_account_sequence_subaccount_guard_dry_run_and_indexer_reconciliation"
+}

@@ -31,9 +31,11 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/kucoinfu
 
 官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。KuCoin Futures classic WS 支持 `/contractMarket/level2:{symbol}` increment、`/contractMarket/level2Depth5:{symbol}` 和 `/contractMarket/level2Depth50:{symbol}`；public token endpoint 返回 futures WS server。
 
-increment 是 real-time，5/50 档是 100ms；payload 有 `sequence` 或 `sequenceStart/sequenceEnd`。新 UTA `obu` 也支持 futures BBO real-time、5/50 档 100ms、increment real-time。断档用 REST `/api/v1/level2/snapshot` 缓存回放重建；未见 checksum。
+increment 是 real-time，5/50 档是 100ms；payload 有 `sequence` 或 `sequenceStart/sequenceEnd`。新 UTA `obu` 也支持 futures BBO real-time、5/50 档 100ms、increment real-time。断档用 REST `/api/v1/level2/snapshot` 缓存回放重建；未见 checksum。YAML 已结构化记录 classic `/contractMarket/level2`、`/contractMarket/level2Depth5/50`、UTA `obu` BBO/5/50、100ms 最快推流、1/5/50 档、`sequence/sequenceStart/sequenceEnd` 和 REST snapshot + buffered delta replay 重建边界。
 
 ## Boundaries
+
+交易所不支持现货：该 adapter/profile 只对应 KuCoin Futures API，现货仍由 `kucoin` adapter 承接。
 
 Spot remains in `kucoin`; this adapter advertises `MarketType::Perpetual` only. Gateway order quantity is sent to KuCoin Futures as contract `size`; callers must use contract-size semantics until a shared quantity conversion model exists. Quote-sized market orders, fiat funding operations, transfers, withdrawals, and unverified position/margin-mode mutations are not exposed.
 

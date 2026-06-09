@@ -27,7 +27,8 @@ impl Default for BitbnsGatewayConfig {
             private_rest_base_url: DEFAULT_PRIVATE_REST_BASE_URL.to_string(),
             api_key,
             api_secret,
-            enabled_private_rest: false,
+            enabled_private_rest: env_flag("BITBNS_PRIVATE_REST_ENABLED")
+                || env_flag("RUSTCTA_BITBNS_PRIVATE_REST_ENABLED"),
             enabled_public_streams: false,
             request_timeout_ms: DEFAULT_REQUEST_TIMEOUT_MS,
             enabled: true,
@@ -41,4 +42,13 @@ impl BitbnsGatewayConfig {
             && !self.api_key.trim().is_empty()
             && !self.api_secret.trim().is_empty()
     }
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }

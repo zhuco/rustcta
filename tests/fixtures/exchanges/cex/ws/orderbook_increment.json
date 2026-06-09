@@ -1,0 +1,15 @@
+{
+  "e": "order_book_increment",
+  "data": {
+    "timestamp": 1710000001,
+    "bids": [
+      ["17671.00", "0.10"]
+    ],
+    "asks": [
+      ["17688.90", "0.15"]
+    ],
+    "pair": "BTC:USD",
+    "id": 123456,
+    "seqId": 9002
+  }
+}

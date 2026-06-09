@@ -213,7 +213,7 @@ def normalize_market_type(value: Any) -> str:
 
 
 def normalize_operation(value: Any) -> str:
-    op = str(value or "").strip()
+    op = str(value or "").strip().lower()
     if not op:
         return ""
     if "." in op:
@@ -223,6 +223,10 @@ def normalize_operation(value: Any) -> str:
         if op.endswith(suffix):
             op = op[: -len(suffix)]
             op = OP_ALIASES.get(op, op)
+    if op not in OP_ALIASES.values():
+        for standard in sorted((item for _, item in STANDARD_OPS), key=len, reverse=True):
+            if op.endswith(f"_{standard}") or f"_{standard}_" in op:
+                return standard
     return op
 
 
@@ -308,12 +312,14 @@ def support_bucket(item: dict[str, Any]) -> str:
 STATUS_RANK = {
     "-": 0,
     "不支持": 1,
-    "离线": 2,
-    "映射": 3,
-    "REST兜底": 4,
-    "组合": 5,
-    "原生": 6,
-    "运行": 7,
+    "项目未实现": 2,
+    "离线": 3,
+    "映射": 4,
+    "REST兜底": 5,
+    "组合": 6,
+    "原生": 7,
+    "委托": 7,
+    "运行": 8,
 }
 
 
@@ -371,7 +377,37 @@ def endpoint_status_by_op(
             op = normalize_operation(readback)
             if op in status and op in runtime_impls:
                 status[op] = pick_better(status[op], "运行")
+    for op, bucket in operation_boundaries(data).items():
+        if op in status:
+            status[op] = pick_better(status[op], bucket)
     return status
+
+
+def operation_boundaries(data: dict[str, Any]) -> dict[str, str]:
+    unsupported = data.get("unsupported")
+    if not isinstance(unsupported, list):
+        return {}
+    boundaries: dict[str, str] = {}
+    for item in unsupported:
+        if not isinstance(item, dict):
+            continue
+        op = normalize_operation(item.get("operation"))
+        if not op:
+            continue
+        raw_status = str(
+            item.get("status")
+            or item.get("project_status")
+            or item.get("support")
+            or ""
+        ).strip().lower()
+        if raw_status in {"project_unimplemented", "unimplemented", "not_implemented"}:
+            bucket = "项目未实现"
+        elif raw_status in {"delegated", "delegate", "external_adapter"}:
+            bucket = "委托"
+        else:
+            bucket = "不支持"
+        boundaries[op] = pick_better(boundaries.get(op, "-"), bucket)
+    return boundaries
 
 
 def item_supports_balances(item: dict[str, Any]) -> bool:
@@ -426,11 +462,28 @@ def get_nested(data: dict[str, Any], *keys: str) -> Any:
 
 
 def ws_support(data: dict[str, Any], scope: str) -> str:
+    def normalize_ws_support(raw: Any) -> str:
+        if isinstance(raw, dict):
+            raw = raw.get("support") or raw.get("runtime") or ""
+        text = str(raw or "").strip()
+        lowered = text.lower()
+        if not text:
+            return ""
+        if "unsupported" in lowered:
+            return "unsupported"
+        if "native" in lowered or "runtime" in lowered:
+            return "native"
+        if "parser" in lowered:
+            return "parser_only"
+        if "payload" in lowered or "spec" in lowered or "request" in lowered:
+            return "spec_only"
+        return text
+
     value = get_nested(data, "websocket", scope)
     if isinstance(value, dict):
         support = value.get("support")
         if support:
-            return str(support)
+            return normalize_ws_support(support)
         if value.get("supports_subscribe") or value.get("channels"):
             return "declared"
 
@@ -438,9 +491,24 @@ def ws_support(data: dict[str, Any], scope: str) -> str:
     if isinstance(value, dict):
         support = value.get("support")
         if support:
-            return str(support)
+            return normalize_ws_support(support)
         if value.get("channels"):
             return "declared"
+
+    capabilities = data.get("capabilities_v2")
+    if isinstance(capabilities, dict):
+        support = normalize_ws_support(capabilities.get(f"{scope}_ws"))
+        if support:
+            return support
+
+    streams = data.get("streams")
+    if isinstance(streams, dict) and scope == "public":
+        for key in streams:
+            key_text = str(key).lower()
+            if "public" in key_text and any(
+                marker in key_text for marker in ("book", "depth", "bbo")
+            ):
+                return "declared"
 
     operation = f"subscribe_{scope}_stream"
     for item in iter_endpoint_items(data):
@@ -462,21 +530,52 @@ def ws_support(data: dict[str, Any], scope: str) -> str:
 
 def collect_channels(data: dict[str, Any], scope: str = "public") -> list[str]:
     channels: list[str] = []
+
+    def add_channel_value(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if isinstance(key, str) and any(
+                    marker in key.lower() for marker in ("book", "depth", "bbo")
+                ):
+                    channels.append(key)
+                add_channel_value(child)
+            return
+        for item in as_list(value):
+            if isinstance(item, (dict, list, tuple)):
+                add_channel_value(item)
+            elif item is not None:
+                channels.append(str(item))
+
     ws_scope = get_nested(data, "websocket", scope)
     if isinstance(ws_scope, dict):
-        for key in ("channels", "public_channels", "streams"):
-            for item in as_list(ws_scope.get(key)):
-                channels.append(str(item))
+        for key in ("channels", "public_channels", "streams", "topics"):
+            add_channel_value(ws_scope.get(key))
+        order_book = ws_scope.get("order_book")
+        if isinstance(order_book, dict):
+            for key in (
+                "channel",
+                "channels",
+                "snapshot_channel",
+                "delta_channel",
+                "bbo_channel",
+                "depth_channel",
+                "topic",
+                "topics",
+            ):
+                add_channel_value(order_book.get(key))
     stream_scope = get_nested(data, "streams", scope)
     if isinstance(stream_scope, dict):
-        stream_channels = stream_scope.get("channels")
-        if isinstance(stream_channels, dict):
-            for key, value in stream_channels.items():
-                channels.append(str(key))
-                channels.append(str(value))
-        else:
-            for item in as_list(stream_channels):
-                channels.append(str(item))
+        for key in ("channels", "topics", "streams"):
+            add_channel_value(stream_scope.get(key))
+    streams = data.get("streams")
+    if isinstance(streams, dict) and scope == "public":
+        for key, value in streams.items():
+            key_text = str(key).lower()
+            if "public" in key_text and any(
+                marker in key_text for marker in ("book", "depth", "bbo")
+            ):
+                channels.append(str(value.get("channel") or key) if isinstance(value, dict) else str(key))
+                add_channel_value(value)
     for item in iter_endpoint_items(data):
         if str(item.get("transport", "")).lower() not in {"websocket", "ws", "socket_io"}:
             continue
@@ -512,6 +611,44 @@ def extract_intervals_from_text(text: str) -> list[str]:
     return sorted(found, key=lambda value: (len(value), value))
 
 
+def extract_intervals_from_data(data: Any, orderbook_context: bool = False) -> list[str]:
+    found: set[str] = set()
+
+    def add_ms(value: Any) -> None:
+        for item in as_list(value):
+            if isinstance(item, bool) or item is None:
+                continue
+            if isinstance(item, int):
+                found.add(f"{item}ms")
+            elif isinstance(item, str):
+                if item.isdigit():
+                    found.add(f"{item}ms")
+                else:
+                    found.update(match.group(0) for match in INTERVAL_RE.finditer(item))
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            lower_key = str(key).lower()
+            child_context = orderbook_context or any(
+                marker in lower_key for marker in ("book", "depth", "bbo")
+            )
+            if child_context and lower_key in {
+                "interval_ms",
+                "push_interval_ms",
+                "refresh_rate_ms",
+                "snapshot_interval_ms",
+                "delta_interval_ms",
+            }:
+                add_ms(value)
+            if child_context and lower_key in {"interval", "refresh_rate", "refresh_rates"}:
+                add_ms(value)
+            found.update(extract_intervals_from_data(value, child_context))
+    elif isinstance(data, list):
+        for item in data:
+            found.update(extract_intervals_from_data(item, orderbook_context))
+    return sorted(found, key=lambda value: (len(value), value))
+
+
 def extract_depths(channels: list[str]) -> list[str]:
     found: set[str] = set()
     for channel in channels:
@@ -531,6 +668,51 @@ def extract_depths_from_text(text: str) -> list[str]:
             found.add("1")
         for match in DEPTH_RE.finditer(line):
             found.add(match.group(1))
+        if any(marker in lower for marker in ("supported_depth", "depths", "levels", "档")):
+            for match in re.finditer(r"\b\d{1,4}\b(?!\s*(?:ms|s|m)\b)", line, re.IGNORECASE):
+                found.add(match.group(0))
+    return sorted(found, key=lambda value: int(value))
+
+
+def extract_depths_from_data(data: Any, orderbook_context: bool = False) -> list[str]:
+    found: set[str] = set()
+
+    def add_depth(value: Any) -> None:
+        for item in as_list(value):
+            if isinstance(item, bool) or item is None:
+                continue
+            if isinstance(item, int):
+                found.add(str(item))
+            elif isinstance(item, str):
+                if item.isdigit():
+                    found.add(item)
+                else:
+                    for match in DEPTH_RE.finditer(item):
+                        found.add(match.group(1))
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            lower_key = str(key).lower()
+            child_context = orderbook_context or any(
+                marker in lower_key for marker in ("book", "depth", "bbo")
+            )
+            if child_context and lower_key in {
+                "depth",
+                "depths",
+                "level",
+                "levels",
+                "limit",
+                "limits",
+                "supported_depth",
+                "supported_depths",
+                "snapshot_depth",
+                "checksum_depth",
+            }:
+                add_depth(value)
+            found.update(extract_depths_from_data(value, child_context))
+    elif isinstance(data, list):
+        for item in data:
+            found.update(extract_depths_from_data(item, orderbook_context))
     return sorted(found, key=lambda value: int(value))
 
 
@@ -579,18 +761,78 @@ def ws_latency_tier(public_support: str, fastest_ms: str, l1_bbo: bool) -> str:
     return "慢速盘口/需评估"
 
 
-def ws_gap(public_support: str, orderbook_channels: list[str], intervals: list[str], depths: list[str]) -> str:
+def has_recorded_no_fixed_interval(text: str) -> bool:
+    lowered = text.lower()
+    markers = (
+        "no fixed",
+        "not publish a fixed",
+        "does not publish a fixed",
+        "官方未给固定",
+        "未给固定 ms",
+        "无固定 ms",
+        "无固定毫秒",
+        "event-driven",
+        "real-time",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def has_recorded_no_depth_boundary(text: str) -> bool:
+    lowered = text.lower()
+    markers = (
+        "no fixed depth",
+        "no depth selector",
+        "depth selector is documented",
+        "depth: unspecified",
+        "depth unspecified",
+        "unspecified depth",
+        "未给固定 depth",
+        "未给固定档位",
+        "无固定 depth",
+        "无固定档位",
+        "未给可选档位",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def has_recorded_no_stable_orderbook_channel(text: str) -> bool:
+    lowered = text.lower()
+    markers = (
+        "orderbook channel unverified",
+        "order book channel unverified",
+        "orderbook channel: unverified",
+        "no stable orderbook channel",
+        "no stable order book channel",
+        "not enable runtime",
+        "runtime disabled",
+        "不启用 runtime",
+        "未启用 runtime",
+        "未给订单簿 channel",
+        "订单簿 channel 未核验",
+        "未核验订单簿 channel",
+        "未见稳定 ws 规格",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def ws_gap(
+    public_support: str,
+    orderbook_channels: list[str],
+    intervals: list[str],
+    depths: list[str],
+    detail_text: str,
+) -> str:
     support = public_support.lower()
     if "unsupported" in support:
         return "公共WS不支持/未接入"
     if public_support == "未声明":
         return "公共WS未声明"
     gaps: list[str] = []
-    if not orderbook_channels:
+    if not orderbook_channels and not has_recorded_no_stable_orderbook_channel(detail_text):
         gaps.append("缺订单簿channel")
-    if not intervals:
+    if not intervals and not has_recorded_no_fixed_interval(detail_text):
         gaps.append("缺推流间隔")
-    if not depths:
+    if not depths and not has_recorded_no_depth_boundary(detail_text):
         gaps.append("缺档位")
     return "；".join(gaps) if gaps else "已记录核心细项"
 
@@ -618,10 +860,76 @@ def market_types(data: dict[str, Any], endpoint_items: list[dict[str, Any]]) -> 
     return sorted(set(item for item in values if item not in ignored))
 
 
+def product_line_boundaries(data: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+    unsupported = data.get("unsupported")
+    if not isinstance(unsupported, list):
+        return {}, []
+
+    spot_ops = {"spot_product", "spot_market", "spot"}
+    contract_ops = {
+        "contract_product",
+        "contract_market",
+        "contracts",
+        "futures_perpetual_options",
+        "futures_perpetual_option",
+    }
+    product_gap_ops = {
+        "margin_product",
+        "leveraged_product",
+        "perps_third_party_product",
+        "option_product",
+        "options_product",
+        "delivery_product",
+        "delivery_futures_product",
+        "delivery_contract_product",
+        "non_usdt_contract_product",
+        "inverse_contract_product",
+        "coin_m_contract_product",
+        "coin_m_product",
+        "coin_futures_product",
+        "usdc_futures_product",
+    }
+    boundaries: dict[str, str] = {}
+    project_gaps: list[str] = []
+
+    def boundary_status(item: dict[str, Any]) -> str:
+        raw = str(
+            item.get("status")
+            or item.get("project_status")
+            or item.get("support")
+            or ""
+        ).strip().lower()
+        if raw in {"project_unimplemented", "unimplemented", "not_implemented"}:
+            return "项目未实现"
+        if raw in {"delegated", "delegate", "external_adapter"}:
+            return "委托"
+        return "不支持"
+
+    for item in unsupported:
+        if not isinstance(item, dict):
+            continue
+        operation = str(item.get("operation") or "").strip().lower()
+        status = boundary_status(item)
+        if operation in spot_ops:
+            boundaries["spot"] = status
+        if operation in contract_ops:
+            boundaries["contract"] = status
+        if (
+            status == "项目未实现"
+            and (
+                operation in product_gap_ops
+                or operation.endswith("_product")
+                or operation.startswith("market_type_")
+            )
+        ):
+            project_gaps.append(operation)
+    return boundaries, sorted(set(project_gaps))
+
+
 def compact_status_counts(rows: list[dict[str, Any]], op: str) -> str:
     counts = Counter(row[op] for row in rows)
     parts = []
-    for key in ("运行", "原生", "组合", "REST兜底", "映射", "离线", "不支持", "-"):
+    for key in ("运行", "原生", "委托", "组合", "REST兜底", "映射", "离线", "项目未实现", "不支持", "-"):
         if counts.get(key):
             parts.append(f"{key}:{counts[key]}")
     return "，".join(parts)
@@ -648,11 +956,19 @@ def row_for_mapping(repo_root: Path, path: Path) -> dict[str, Any]:
         ]
     )
     intervals = sorted(
-        set(extract_intervals(orderbook_channels) + extract_intervals_from_text(detail_text)),
+        set(
+            extract_intervals(orderbook_channels)
+            + extract_intervals_from_text(detail_text)
+            + extract_intervals_from_data(data)
+        ),
         key=lambda value: (len(value), value),
     )
     depths = sorted(
-        set(extract_depths(orderbook_channels) + extract_depths_from_text(detail_text)),
+        set(
+            extract_depths(orderbook_channels)
+            + extract_depths_from_text(detail_text)
+            + extract_depths_from_data(data)
+        ),
         key=lambda value: int(value),
     )
     fastest_ms = fastest_interval_ms(intervals)
@@ -660,18 +976,24 @@ def row_for_mapping(repo_root: Path, path: Path) -> dict[str, Any]:
     public_ws = ws_support(data, "public")
     private_ws = ws_support(data, "private")
     has_contract = any(item in {"perpetual", "futures", "option"} for item in mts)
+    product_boundaries, project_gaps = product_line_boundaries(data)
+    spot_project = "声明" if "spot" in mts else product_boundaries.get("spot", "未声明")
+    contract_project = (
+        "声明" if has_contract else product_boundaries.get("contract", "未声明")
+    )
     row: dict[str, Any] = {
         "exchange": exchange,
         "mapping": rel(path, repo_root),
         "doc": rel(doc_path, repo_root) if doc_path.exists() else "",
         "market_types": ",".join(mts),
-        "spot_project": "声明" if "spot" in mts else "未声明",
-        "contract_project": "声明" if has_contract else "未声明",
+        "spot_project": spot_project,
+        "contract_project": contract_project,
         "official_gap_check": "；".join(
             item
             for item in [
-                "需核验现货" if "spot" not in mts else "",
-                "需核验/确认交易所不支持合约" if not has_contract else "",
+                "需核验现货" if spot_project == "未声明" else "",
+                "需核验/确认交易所不支持合约" if contract_project == "未声明" else "",
+                "项目未实现 " + ",".join(project_gaps) if project_gaps else "",
             ]
             if item
         ),
@@ -685,7 +1007,7 @@ def row_for_mapping(repo_root: Path, path: Path) -> dict[str, Any]:
         "ws_fastest_interval_ms": fastest_ms,
         "ws_l1_bbo_evidence": "是" if l1_bbo else "否",
         "ws_latency_tier": ws_latency_tier(public_ws, fastest_ms, l1_bbo),
-        "ws_gap": ws_gap(public_ws, orderbook_channels, intervals, depths),
+        "ws_gap": ws_gap(public_ws, orderbook_channels, intervals, depths, detail_text),
     }
     row.update(op_status)
     return row
@@ -767,6 +1089,8 @@ def generate_markdown(rows: list[dict[str, Any]], status_date: str) -> str:
             "- `映射`：mapping 有正常 endpoint，但未显式标 support。",
             "- `离线`：request spec、parser、payload 或 fixture 级别，不能直接视作实盘运行。",
             "- `组合` / `REST兜底`：需要组合接口或 REST reconciliation。",
+            "- `项目未实现`：官方或项目证据存在，但当前 adapter 尚未接入共享 runtime。",
+            "- `委托`：能力由另一个 adapter/profile 承接。",
             "- `不支持`：mapping 明确 unsupported 或使用 `/unsupported/...` 边界。",
             "- `-`：当前 mapping 没有该操作证据。",
             "- `WS延迟等级`：只根据当前项目 mapping/adapter 文档中的数字间隔和 L1/BBO 证据生成，不代表官方完整能力；官方 10ms 能力见 [WebSocket 极速盘口能力汇总](WebSocket极速盘口能力汇总.md)。",

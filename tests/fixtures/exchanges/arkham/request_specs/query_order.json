@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/orders/<redacted:order_id>",
+  "query": {},
+  "auth": "arkham_hmac_sha256_base64",
+  "headers": {
+    "Accept": "application/json",
+    "Arkham-Api-Key": "<redacted:api_key>",
+    "Arkham-Expires": "<unix-microseconds-expiry>",
+    "Arkham-Signature": "<redacted:signature>",
+    "Arkham-Broker-Id": "1001"
+  },
+  "request_spec_only": false,
+  "runtime": "guarded_private_rest",
+  "credential_scope": "read_only"
+}

@@ -12,7 +12,7 @@ use rustcta_tools_ops::{
     CrossArbAccountAuditSafetyArgs, CrossArbFeeAuditSafetyArgs, CrossArbOrderAdminSafetyArgs,
     CrossArbWsOpportunityProbeSafetyArgs, ExchangeOrderCanarySafetyArgs,
     FundingArbObserveSafetyArgs, GateioBitgetSpotSymbolsArgs, HyperliquidSelfTestPlanArgs,
-    TrendReportArgs, WsProxyProbeArgs,
+    PrivateWsProbeArgs, TrendReportArgs, WsConfigProbeArgs, WsProxyProbeArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -83,6 +83,8 @@ enum ReporterCommand {
 #[derive(Debug, Subcommand)]
 enum ProbeCommand {
     WsProxy(WsProxyProbeArgs),
+    WsConfig(WsConfigProbeArgs),
+    PrivateWs(PrivateWsProbeArgs),
     HyperliquidSelfTest(HyperliquidSelfTestPlanArgs),
     FundingArbObserve(FundingArbObserveSafetyArgs),
     CrossArbWsOpportunity(CrossArbWsOpportunityProbeSafetyArgs),
@@ -178,6 +180,20 @@ async fn run_reporter(command: ReporterCommand) -> Result<()> {
 async fn run_probe(command: ProbeCommand) -> Result<()> {
     match command {
         ProbeCommand::WsProxy(args) => run_ws_proxy_probe(args).await?,
+        ProbeCommand::WsConfig(args) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&rustcta_tools_ops::run_ws_config_probe(args).await?)?
+            );
+        }
+        ProbeCommand::PrivateWs(args) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &rustcta_tools_ops::run_private_ws_probe(args).await?
+                )?
+            );
+        }
         ProbeCommand::HyperliquidSelfTest(args) => {
             println!("{}", hyperliquid_self_test_safety_plan(args)?);
         }

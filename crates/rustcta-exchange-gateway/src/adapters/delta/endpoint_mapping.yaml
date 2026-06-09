@@ -71,7 +71,31 @@ batch:
 websocket:
   public:
     support: native
-    channels: [l2_orderbook, all_trades, v2/ticker, candlestick_1m]
+    url: wss://public-socket.india.delta.exchange
+    channels: [ob_l1, ob_l2, ob_updates, l2_orderbook, l2_updates, all_trades, v2/ticker, candlestick_1m]
+    orderbook:
+      endpoint: wss://public-socket.india.delta.exchange
+      legacy_aliases:
+        l2_orderbook: ob_l2
+        l2_updates: ob_updates
+      channels:
+        - name: ob_l1
+          levels: 1
+          push_interval_ms: 100
+          message_type: snapshot
+        - name: ob_l2
+          levels: 15
+          push_interval_ms: 500
+          message_type: snapshot
+        - name: ob_updates
+          levels: full
+          push_interval_ms: 100
+          message_type: snapshot_then_incremental_update
+      sequence_field: seq
+      sequence_policy: seq_must_increment_by_1
+      checksum: crc32
+      checksum_field: cs
+      resync: resubscribe_then_rebuild_from_snapshot
     heartbeat:
       request: '{"type":"ping"}'
       accepts: ['{"type":"pong"}']
@@ -91,6 +115,19 @@ endpoints:
     rate_limit_bucket: public_rest
     weight: 1
     request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/products.json
+  - operation: get_fees
+    product: option
+    market_types: [option, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /v2/products
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
     response_parser:
       fixture: tests/fixtures/exchanges/delta/products.json
   - operation: get_order_book
@@ -194,6 +231,71 @@ endpoints:
     request_spec_required: true
     response_parser:
       fixture: tests/fixtures/exchanges/delta/fills.json
+  - operation: amend_order
+    product: mixed
+    market_types: [option, perpetual, futures]
+    transport: rest
+    method: PUT
+    path: /v2/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/delta/request_specs/amend_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/amend_ack.json
+    native_batch: false
+    atomicity: non_atomic
+    support: native
+    notes: "Shared amend_order runtime is enabled for quantity edits through PUT /v2/orders. Delta price edit is not exposed by the current shared AmendOrderRequest shape."
+  - operation: place_order_list
+    product: mixed
+    market_types: [option, perpetual, futures]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/delta/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: delta.order_list_not_in_shared_model
+    notes: "OCO/OTO order-list semantics are not exposed through the current Delta shared gateway surface."
+  - operation: batch_place_orders
+    product: mixed
+    market_types: [option, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /v2/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: "Composed sequentially from standard place_order calls; partial failure requires REST reconciliation."
+  - operation: batch_cancel_orders
+    product: mixed
+    market_types: [option, perpetual, futures]
+    transport: rest
+    method: DELETE
+    path: /v2/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: "Composed sequentially from standard cancel_order calls; partial failure requires REST reconciliation."
   - operation: adapter_specific_option_chain
     product: option
     transport: rest
@@ -217,6 +319,14 @@ endpoints:
     request_spec_required: false
     notes: "Adapter-specific helper until shared funding model is added."
 unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Delta spot product line exists alongside derivatives, but this adapter scope is Delta futures, options, and perpetual derivatives from /v2/products and derivative private endpoints only; remaining Spot runtime work is spot product filters/books/tickers public specs, spot wallet/account private readback, spot place/cancel/query/open/fill lifecycle, and spot-specific reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/delta/request_specs/product_line_source_boundary.json
+    current_scope: "Delta futures/options/perpetual derivatives from /v2/products and derivative private endpoints."
+    runtime_gap: "Spot product filters, spot books/tickers, spot wallet/account reads, spot order lifecycle, and spot parser coverage are not wired."
+    required_endpoints: [spot_products, spot_order_book, spot_ticker, spot_wallet, spot_place_order, spot_cancel_order, spot_open_orders, spot_fills]
   - transfers
   - withdrawals
   - portfolio_margin_mutation

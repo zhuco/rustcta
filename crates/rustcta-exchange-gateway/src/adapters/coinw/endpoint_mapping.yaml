@@ -12,10 +12,11 @@ market_types:
 - linear_perp
 base_urls:
   rest: https://api.coinw.com
-  spot_public_ws: wss://ws.futurescw.com/spot
-  spot_private_ws: wss://ws.futurescw.com/spot
-  futures_public_ws: wss://ws.futurescw.com/websocket
-  futures_private_ws: wss://ws.futurescw.com/websocket
+  spot_public_ws_method1: wss://ws.futurescw.info?token={public_token}
+  spot_public_ws_method2: wss://ws.futurescw.com
+  spot_private_ws: wss://ws.futurescw.com
+  futures_public_ws: wss://ws.futurescw.com/perpum
+  futures_private_ws: wss://ws.futurescw.com/perpum
 auth:
   spot: sorted params + secret_key MD5 uppercase
   futures: base64 HMAC-SHA256 timestamp + method + path/body
@@ -63,10 +64,65 @@ reconciliation:
   disabled_symbol_required_before_live_dry_run: true
   max_notional_required_before_live_dry_run: true
 websocket:
-  support: request-spec/parser/session helpers; shared supervisor/live validation
-    remains required
+  support: native public parser/session helpers; private request-spec/parser/session helpers;
+    shared supervisor/live validation remains required
   heartbeat: ping/pong helpers
   private_auth: signed private subscription specs
+  public:
+    support: native
+    subscription_mode: json_subscribe
+    urls:
+      spot_method1: wss://ws.futurescw.info?token={public_token}
+      spot_method2: wss://ws.futurescw.com
+      futures: wss://ws.futurescw.com/perpum
+    channels: [spot/level2_20, depth_snapshot, depth]
+    order_book:
+      channels: [spot/level2_20, depth_snapshot, depth]
+      depths: [20, 100]
+      interval: "no fixed ms documented for CoinW spot/futures public depth pushes"
+      sequence_fields: [seq, startSeq, endSeq]
+      checksum: unsupported
+    orderbook:
+      spot:
+        snapshot:
+          - method: method1
+            channel: spot/level2_20:{symbol}
+            depth: 20
+            sequence_field: seq
+            timestamp_field: time
+          - method: method2
+            biz: exchange
+            type: depth_snapshot
+            pairCode: numeric_pair_id
+            depth: 100
+            sequence_field: seq
+            timestamp_field: time
+        incremental:
+          method: method2
+          biz: exchange
+          type: depth
+          pairCode: numeric_pair_id
+          sequence_fields: [startSeq, endSeq]
+          level_sequence_index: 2
+          checksum: unsupported
+      futures:
+        biz: futures
+        type: depth
+        pairCode: base_for_usdt_or_full_usdc_pair
+        depth: 100
+        sequence_field: null
+        checksum: unsupported
+        risk: Official CoinW futures depth WS response documents 100 levels and ts
+          but no sequence/checksum field; continuity must be treated as snapshot/resubscribe-only.
+      fixtures:
+        - tests/fixtures/exchanges/coinw/ws/spot_depth_snapshot.json
+        - tests/fixtures/exchanges/coinw/ws/spot_depth_incremental.json
+        - tests/fixtures/exchanges/coinw/ws/futures_depth_100.json
+      implementation:
+        - crates/rustcta-exchange-gateway/src/adapters/coinw/streams.rs
+        - crates/rustcta-exchange-gateway/src/adapters/coinw/stream_tests.rs
+      resync: REST order book snapshot after reconnect, missing spot seq/endSeq continuity,
+        or futures stream gap suspicion.
 endpoints:
 - operation: get_symbol_rules
   product: spot
@@ -131,6 +187,7 @@ endpoints:
 - operation: get_balances
   product: spot
   transport: rest
+  support: native
   method: POST
   path: /api/v1/private?command=returnCompleteBalances
   auth: hmac
@@ -140,6 +197,7 @@ endpoints:
   request_spec:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/request_specs/get_balances_spot.json
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
@@ -147,6 +205,7 @@ endpoints:
 - operation: get_balances_perp
   product: linear_perp
   transport: rest
+  support: native
   method: GET
   path: /v1/perpum/account/getUserAssets
   auth: hmac
@@ -156,6 +215,7 @@ endpoints:
   request_spec:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/request_specs/get_balances_futures.json
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
@@ -163,6 +223,7 @@ endpoints:
 - operation: get_positions
   product: linear_perp
   transport: rest
+  support: native
   method: GET
   path: /v1/perpum/positions
   auth: hmac
@@ -172,6 +233,7 @@ endpoints:
   request_spec:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/request_specs/get_positions_futures.json
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
@@ -185,13 +247,18 @@ endpoints:
   rate_limit_bucket: coinw_futures_private
   weight: 1
   request_spec_required: true
+  support: native
   request_spec:
+    fixture: tests/fixtures/exchanges/coinw/request_specs/get_fees_futures.json
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
   response_parser:
+    parser: rustcta_exchange_gateway::adapters::coinw::private_parser::parse_fee_snapshots
+    fixture: tests/fixtures/exchanges/coinw/perp_fees_success.json
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: place_order
+  support: native
   product: spot
   transport: rest
   method: POST
@@ -207,6 +274,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: place_order_perp
+  support: native
   product: linear_perp
   transport: rest
   method: POST
@@ -236,7 +304,53 @@ endpoints:
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: amend_order
+  product: mixed
+  market_types: [spot, linear_perp]
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/coinw/amend-order
+  auth: unsupported
+  rate_limit_bucket: coinw_spot_private
+  weight: 0
+  request_spec_required: false
+  support: unsupported
+  native_batch: false
+  atomicity: unsupported
+  reason: coinw.amend_order_unsupported
+  notes: CoinW adapter rejects standard amend_order; use cancel/replace at caller level.
+- operation: place_order_list
+  product: mixed
+  market_types: [spot, linear_perp]
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/coinw/order-list
+  auth: unsupported
+  rate_limit_bucket: coinw_spot_private
+  weight: 0
+  request_spec_required: false
+  support: unsupported
+  native_batch: false
+  atomicity: unsupported
+  reason: coinw.order_list_oco_oto_unsupported
+  notes: CoinW adapter has no standard OCO/OTO order-list mapping.
+- operation: batch_place_orders
+  product: mixed
+  market_types: [spot, linear_perp]
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=doTrade | /v1/perpum/order
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  support: composed
+  native_batch: false
+  atomicity: non_atomic
+  max_items: 20
+  notes: Gateway sends standard single place_order calls sequentially for Spot and Perp.
 - operation: cancel_order
+  support: native
   product: spot
   transport: rest
   method: POST
@@ -252,6 +366,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: cancel_order_perp
+  support: native
   product: linear_perp
   transport: rest
   method: DELETE
@@ -267,10 +382,11 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: batch_cancel_orders
-  product: linear_perp
+  product: mixed
+  market_types: [spot, linear_perp]
   transport: rest
   method: DELETE
-  path: /v1/perpum/batchOrders
+  path: /api/v1/private?command=cancelOrder | /v1/perpum/batchOrders
   auth: hmac
   rate_limit_bucket: coinw_futures_private
   weight: 1
@@ -281,9 +397,13 @@ endpoints:
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
-  native_batch: false
+  support: composed
+  native_batch: true
   atomicity: partial
+  max_items: 20
+  notes: Spot cancel is composed sequentially; Perp cancel uses native /v1/perpum/batchOrders per position type.
 - operation: query_order
+  support: native
   product: spot
   transport: rest
   method: POST
@@ -299,6 +419,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: query_order_perp
+  support: native
   product: linear_perp
   transport: rest
   method: GET
@@ -314,6 +435,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: get_open_orders
+  support: native
   product: spot
   transport: rest
   method: POST
@@ -329,6 +451,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: get_open_orders_perp
+  support: native
   product: linear_perp
   transport: rest
   method: GET
@@ -344,6 +467,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: get_recent_fills
+  support: native
   product: spot
   transport: rest
   method: POST
@@ -359,6 +483,7 @@ endpoints:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
 - operation: get_recent_fills_perp
+  support: native
   product: linear_perp
   transport: rest
   method: GET
@@ -373,3 +498,67 @@ endpoints:
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+streams:
+- operation: public_spot_order_book_snapshot_method1
+  product: spot
+  channel: spot/level2_20:{symbol}
+  transport: websocket
+  url: wss://ws.futurescw.info?token={public_token}
+  subscription_mode: json_subscribe
+  push_interval_ms: null
+  depth: 20
+  sequence_field: seq
+  checksum: unsupported
+  parser_fixture: tests/fixtures/exchanges/coinw/ws/spot_depth_snapshot.json
+  resync:
+    mode: rest_snapshot_after_reconnect_or_seq_gap
+    endpoint_operation: get_order_book
+- operation: public_spot_order_book_snapshot_method2
+  product: spot
+  channel: depth_snapshot
+  transport: websocket
+  url: wss://ws.futurescw.com
+  subscription_mode: json_subscribe
+  push_interval_ms: null
+  depth: 100
+  sequence_field: seq
+  checksum: unsupported
+  parser_fixture: tests/fixtures/exchanges/coinw/ws/spot_depth_snapshot.json
+  notes: Requires numeric CoinW pairCode from market summary; runtime currently keeps
+    method1 symbol-based subscription for generic SymbolScope compatibility.
+  resync:
+    mode: rest_snapshot_after_reconnect_or_seq_gap
+    endpoint_operation: get_order_book
+- operation: public_spot_order_book_incremental
+  product: spot
+  channel: depth
+  transport: websocket
+  url: wss://ws.futurescw.com
+  subscription_mode: json_subscribe
+  push_interval_ms: null
+  depth: incremental
+  sequence_fields: [startSeq, endSeq]
+  level_sequence_index: 2
+  checksum: unsupported
+  parser_fixture: tests/fixtures/exchanges/coinw/ws/spot_depth_incremental.json
+  notes: Requires numeric CoinW pairCode from market summary; zero quantity levels
+    are delete markers.
+  resync:
+    mode: rest_snapshot_then_replay_incremental
+    endpoint_operation: get_order_book
+- operation: public_futures_order_book_depth
+  product: linear_perp
+  channel: depth
+  transport: websocket
+  url: wss://ws.futurescw.com/perpum
+  subscription_mode: json_subscribe
+  push_interval_ms: null
+  depth: 100
+  sequence_field: null
+  checksum: unsupported
+  parser_fixture: tests/fixtures/exchanges/coinw/ws/futures_depth_100.json
+  risk: Official response fields list asks/bids/n/ts but no sequence or checksum;
+    treat reconnect or suspected loss as requiring fresh REST/WS snapshot.
+  resync:
+    mode: rest_snapshot_after_reconnect_or_gap_suspicion
+    endpoint_operation: get_order_book_perp

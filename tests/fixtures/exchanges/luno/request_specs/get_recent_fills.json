@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/1/listtrades",
+  "auth": "http_basic_api_key",
+  "headers": {
+    "Authorization": "Basic <redacted>",
+    "Accept": "application/json"
+  },
+  "query": {
+    "pair": "XBTZAR",
+    "order_id": "BXMC2CJ7HNB88U4",
+    "limit": "100"
+  }
+}

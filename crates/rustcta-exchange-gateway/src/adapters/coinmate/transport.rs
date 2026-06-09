@@ -8,6 +8,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::private::CoinmatePrivateRequestSpec;
+
 #[derive(Clone)]
 pub struct CoinmateRest {
     exchange_id: ExchangeId,
@@ -64,6 +66,27 @@ impl CoinmateRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_post(
+        &self,
+        spec: &CoinmatePrivateRequestSpec,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                spec.path
+            ))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .form(&spec.body)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

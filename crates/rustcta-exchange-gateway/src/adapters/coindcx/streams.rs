@@ -20,6 +20,9 @@ use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisor
 const COINDCX_WS_PING_INTERVAL_MS: i64 = 25_000;
 const COINDCX_WS_PONG_TIMEOUT_MS: i64 = 35_000;
 const COINDCX_WS_STALE_MESSAGE_MS: i64 = 45_000;
+pub(super) const COINDCX_OFFICIAL_SPOT_ORDERBOOK_EXAMPLE_CHANNEL: &str = "B-BTC_USDT@orderbook@20";
+pub(super) const COINDCX_OFFICIAL_SPOT_ORDERBOOK_EXAMPLE_DEPTH: u16 = 20;
+pub(super) const COINDCX_PROJECT_ORDERBOOK_DEPTH: u16 = 50;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoinDcxPublicStreamMessage {
@@ -45,6 +48,47 @@ pub enum CoinDcxWsSessionEvent {
     Private(CoinDcxPrivateStreamMessage),
     Stream(Vec<ExchangeStreamEvent>),
     Outbound(Value),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CoinDcxPublicOrderBookWsPolicy {
+    pub transport: &'static str,
+    pub subscribe_event: &'static str,
+    pub update_event: &'static str,
+    pub official_spot_example_channel: &'static str,
+    pub official_spot_example_depth: u16,
+    pub project_depth: u16,
+    pub fixed_interval_ms: Option<u64>,
+    pub sequence_fields: &'static [&'static str],
+    pub checksum: Option<&'static str>,
+    pub rest_snapshot_operation: &'static str,
+    pub resync_strategy: &'static str,
+}
+
+impl CoinDcxPublicOrderBookWsPolicy {
+    pub fn as_json(&self) -> Value {
+        json!({
+            "transport": self.transport,
+            "subscribe_event": self.subscribe_event,
+            "update_event": self.update_event,
+            "depth": {
+                "official_spot_example": {
+                    "channel": self.official_spot_example_channel,
+                    "depth": self.official_spot_example_depth,
+                },
+                "project_default": self.project_depth,
+                "project_spot_channel_template": "{symbol}@orderbook@50",
+                "project_futures_channel_template": "{instrument}@orderbook@50-futures",
+            },
+            "fixed_interval_ms": self.fixed_interval_ms,
+            "sequence_fields": self.sequence_fields,
+            "checksum": self.checksum,
+            "resync": {
+                "operation": self.rest_snapshot_operation,
+                "strategy": self.resync_strategy,
+            },
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -338,6 +382,69 @@ pub fn coindcx_private_stream_capabilities() -> PrivateStreamCapabilities {
     }
 }
 
+pub(super) fn coindcx_public_orderbook_ws_policy() -> CoinDcxPublicOrderBookWsPolicy {
+    CoinDcxPublicOrderBookWsPolicy {
+        transport: "socket_io",
+        subscribe_event: "join",
+        update_event: "depth-update",
+        official_spot_example_channel: COINDCX_OFFICIAL_SPOT_ORDERBOOK_EXAMPLE_CHANNEL,
+        official_spot_example_depth: COINDCX_OFFICIAL_SPOT_ORDERBOOK_EXAMPLE_DEPTH,
+        project_depth: COINDCX_PROJECT_ORDERBOOK_DEPTH,
+        fixed_interval_ms: None,
+        sequence_fields: &[],
+        checksum: None,
+        rest_snapshot_operation: "get_order_book",
+        resync_strategy: "fetch REST snapshot and resubscribe after reconnect, stale stream, parse failure, or any suspected gap because the public depth stream has no documented sequence/checksum",
+    }
+}
+
+pub(super) fn coindcx_public_orderbook_channel(
+    market_type: MarketType,
+    symbol: &str,
+    depth: u16,
+) -> ExchangeApiResult<String> {
+    match market_type {
+        MarketType::Spot => {
+            if !matches!(
+                depth,
+                COINDCX_OFFICIAL_SPOT_ORDERBOOK_EXAMPLE_DEPTH | COINDCX_PROJECT_ORDERBOOK_DEPTH
+            ) {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "coindcx.public_spot_orderbook_depth",
+                });
+            }
+            let symbol = symbol.trim().replace('/', "_").to_ascii_uppercase();
+            Ok(format!("{symbol}@orderbook@{depth}"))
+        }
+        MarketType::Perpetual => {
+            if depth != COINDCX_PROJECT_ORDERBOOK_DEPTH {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "coindcx.public_futures_orderbook_depth",
+                });
+            }
+            Ok(format!(
+                "{}@orderbook@{depth}-futures",
+                coindcx_futures_symbol(symbol)
+            ))
+        }
+        _ => Err(ExchangeApiError::Unsupported {
+            operation: "coindcx.public_orderbook_market_type",
+        }),
+    }
+}
+
+pub(super) fn coindcx_public_orderbook_join_payload(
+    market_type: MarketType,
+    symbol: &str,
+    depth: u16,
+) -> ExchangeApiResult<Value> {
+    Ok(json!({
+        "event": "join",
+        "channelName": coindcx_public_orderbook_channel(market_type, symbol, depth)?,
+        "transport": "socket.io",
+    }))
+}
+
 fn coindcx_public_subscribe_payload(
     subscription: &PublicStreamSubscription,
 ) -> ExchangeApiResult<Value> {
@@ -348,11 +455,11 @@ fn coindcx_public_subscribe_payload(
     };
     let channel = match &subscription.kind {
         PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta => {
-            if subscription.symbol.market_type == MarketType::Perpetual {
-                format!("{symbol}@orderbook@50-futures")
-            } else {
-                format!("{symbol}@orderbook@50")
-            }
+            return coindcx_public_orderbook_join_payload(
+                subscription.symbol.market_type,
+                &subscription.symbol.exchange_symbol.symbol,
+                COINDCX_PROJECT_ORDERBOOK_DEPTH,
+            );
         }
         PublicStreamKind::Trades => {
             if subscription.symbol.market_type == MarketType::Perpetual {
@@ -436,12 +543,22 @@ fn parse_coindcx_public_stream_message(
     }
     let event = socket_event_name(value).unwrap_or_default();
     let payload = socket_event_payload(value).unwrap_or(value);
-    if event.contains("orderbook") || payload.get("bids").is_some() || payload.get("asks").is_some()
-    {
+    let has_book_payload = payload.get("bids").is_some()
+        || payload.get("asks").is_some()
+        || payload
+            .get("data")
+            .and_then(|data| data.get("bids"))
+            .is_some()
+        || payload
+            .get("data")
+            .and_then(|data| data.get("asks"))
+            .is_some();
+    if event.contains("orderbook") || event == "depth-update" || has_book_payload {
+        let payload = coindcx_ws_orderbook_payload(payload);
         let book = OrderBookResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(exchange_id.clone(), None),
-            order_book: parse_orderbook_snapshot(exchange_id, symbol, payload)?,
+            order_book: parse_orderbook_snapshot(exchange_id, symbol, &payload)?,
         };
         return Ok(CoinDcxPublicStreamMessage::OrderBook(book));
     }
@@ -558,6 +675,49 @@ fn socket_event_payload(value: &Value) -> Option<&Value> {
         .and_then(|array| array.get(1))
         .or_else(|| value.get("data"))
         .or_else(|| value.get("payload"))
+}
+
+fn coindcx_ws_orderbook_payload(payload: &Value) -> Value {
+    let mut cleaned = payload.clone();
+    if let Some(book) = cleaned.get_mut("data").and_then(Value::as_object_mut) {
+        for side in ["bids", "asks"] {
+            if let Some(levels) = book.get_mut(side) {
+                remove_zero_quantity_levels(levels);
+            }
+        }
+    } else if let Some(book) = cleaned.as_object_mut() {
+        for side in ["bids", "asks"] {
+            if let Some(levels) = book.get_mut(side) {
+                remove_zero_quantity_levels(levels);
+            }
+        }
+    }
+    cleaned
+}
+
+fn remove_zero_quantity_levels(levels: &mut Value) {
+    if let Some(rows) = levels.as_array_mut() {
+        rows.retain(|row| {
+            let quantity = row
+                .as_array()
+                .and_then(|values| values.get(1))
+                .or_else(|| row.get("quantity"))
+                .or_else(|| row.get("qty"))
+                .or_else(|| row.get("volume"))
+                .and_then(quantity_as_f64);
+            !matches!(quantity, Some(value) if value == 0.0)
+        });
+    } else if let Some(map) = levels.as_object_mut() {
+        map.retain(|_, quantity| !matches!(quantity_as_f64(quantity), Some(value) if value == 0.0));
+    }
+}
+
+fn quantity_as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::String(text) => text.parse().ok(),
+        Value::Number(number) => number.as_f64(),
+        _ => None,
+    }
 }
 
 fn stream_label(value: &Value) -> Option<&str> {

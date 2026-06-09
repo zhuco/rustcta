@@ -89,6 +89,19 @@ websocket_runtime:
       trades: trade
       ticker: tick
       candles: kbar
+    order_book:
+      channel: depth
+      supported_depths: [10, 50, 100]
+      default_depth: 100
+      fixed_update_interval_ms: null
+      interval_note: official Spot depth WS docs do not publish a fixed millisecond cadence
+      message_type: snapshot
+      sequence_field: null
+      sequence_gap_detection: unsupported_no_confirmed_sequence_or_update_id
+      checksum: unsupported
+      risk_note: no documented sequence/checksum fields, so REST snapshot fallback is required after reconnect, stale stream, or suspected gap
+      rest_snapshot_endpoint: /v2/depth.do
+      fixture: tests/fixtures/exchanges/lbank/ws/public_spot_depth.json
     heartbeat:
       direction: bidirectional
       ping_payload: '{"action":"ping","ping":"<nonce>"}'

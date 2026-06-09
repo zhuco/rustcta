@@ -1,14 +1,7 @@
 use crate::types::{ControlPanelView, Language};
 
-const TOKEN_KEY: &str = "rustcta_control_api_token";
 const LANGUAGE_KEY: &str = "rustcta_control_ui_language";
 const ACTIVE_VIEW_KEY: &str = "rustcta_control_active_view";
-
-pub(crate) fn load_token() -> String {
-    storage()
-        .and_then(|storage| storage.get_item(TOKEN_KEY).ok().flatten())
-        .unwrap_or_default()
-}
 
 pub(crate) fn load_language() -> Language {
     match storage()
@@ -28,12 +21,6 @@ pub(crate) fn load_active_view() -> ControlPanelView {
                 .and_then(|value| ControlPanelView::from_route_id(&value))
         })
         .unwrap_or_default()
-}
-
-pub(crate) fn save_token(value: &str) {
-    if let Some(storage) = storage() {
-        let _ = storage.set_item(TOKEN_KEY, value);
-    }
 }
 
 pub(crate) fn save_language(language: Language) {

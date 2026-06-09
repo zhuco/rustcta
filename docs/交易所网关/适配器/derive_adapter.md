@@ -11,6 +11,8 @@ Status: Task 8 offline-verifiable adapter for Derive options/perp DeFi scope.
 - Public scope: instrument metadata, order book/ticker/trade channel payloads.
 - Private scope: session/account model, balances/positions/open-orders/order request specs, and offline session-signing fixtures.
 
+Spot 边界写入 `spot_product status: project_unimplemented`：当前只映射 Derive options/perpetual JSON-RPC。补 Spot 前需要 spot instrument filter、spot order book/ticker/trades、spot balances、spot create/cancel/query/open/fills lifecycle 和 parser fixtures；不要和 `derive_chain_perps` profile 混用。
+
 ## Signing And Account Model
 
 Derive private methods use a wallet/subaccount/session-key model. The adapter keeps the model explicit:
@@ -35,6 +37,7 @@ Covered operations:
 - `positions`: JSON-RPC `private/get_positions`.
 - `place_order`: JSON-RPC `private/order`, offline request-spec only.
 - `cancel_order`: JSON-RPC `private/cancel`, offline request-spec only.
+- `amend_order`: JSON-RPC `private/replace`, offline request-spec/signing/source/parser boundary only.
 - `open_orders`: JSON-RPC `private/get_open_orders`.
 
 ## Capability Boundary
@@ -49,15 +52,31 @@ Official public WS includes orderbook/ticker/trades channels at
 `wss://api.derive.xyz/ws`, but the reviewed public docs do not provide a fixed
 millisecond interval, fixed depth parameter, stable sequence field, or checksum
 for orderbook reconstruction. Current project support is native/spec-level; the
-mapping must explicitly record no fixed ms/depth/checksum and use JSON-RPC
-REST/reference orderbook snapshot as the rebuild path. Source batch:
+mapping explicitly records no fixed ms, `depth: unspecified`/no fixed depth,
+sequence/checksum risk, and JSON-RPC REST/reference orderbook snapshot as the
+rebuild path. Source batch:
 [WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+
+| Channel | Status | Cadence/depth | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- |
+| `orderbook` | Native/spec-level public WS | no fixed ms; depth unspecified/no fixed depth | no stable sequence field or checksum documented | Use JSON-RPC `public/get_orderbook` snapshot/reference data, then resubscribe after reconnect, stale stream, parse error or suspected message loss |
 
 Unsupported or deferred:
 
 - Live order placement/cancel.
 - Admin-only cancel-all promotion.
-- Native batch place/cancel.
+- `amend_order` is `project_unimplemented`: Derive documents `private/replace`,
+  and `tests/fixtures/exchanges/derive/request_specs/amend_order_replace.json`
+  pins the offline JSON-RPC request shape. The replace boundary is also backed by
+  `tests/fixtures/exchanges/derive/signing_vectors/session_replace_hmac.json`,
+  `tests/fixtures/exchanges/derive/request_specs/amend_order_replace_source_boundary.json`,
+  and `tests/fixtures/exchanges/derive/parser/amend_order_replace_ack.json`.
+  Shared amend runtime remains disabled because production session/JWT/Stark
+  signing, full replace field mapping from the shared amend request, response
+  reconciliation and live dry-run guard are not implemented.
+- Native batch place/cancel and OCO/OTO/order-list remain explicit unsupported
+  boundaries in `endpoint_mapping.yaml` until a lossless shared mapping is
+  verified.
 - Shared option Greeks/risk model.
 
 ## Validation
@@ -68,3 +87,13 @@ Allowed targeted commands:
 python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/derive/endpoint_mapping.yaml
 cargo test -p rustcta-exchange-gateway derive --lib --message-format short
 ```
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：fee 信息只是 adapter-specific metadata，未归一到 shared fee snapshot。
+
+## P2 Product Line Boundary (2026-06-09)
+
+`spot_product` is an official-source project boundary, not an exchange-unsupported row. Derive spot trading exists in the JSON-RPC API family, while this adapter is scoped to option/perpetual instruments, order book, and private session/account boundaries.
+
+Do not promote Spot runtime from option/perpetual JSON-RPC handling or from `derive_chain_perps`. Promotion requires spot instrument filtering, spot order-book/ticker/trade public parsers, spot balances private specs, spot order lifecycle create/cancel/get-orders/trades private specs, session/JWT/Stark auth, product-scope guards, and reconciliation.

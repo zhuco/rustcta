@@ -14,6 +14,8 @@ pub(super) struct SeenRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) headers: HashMap<String, String>,
+    pub(super) body: String,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -64,6 +66,21 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         .to_string();
     let target = request_line.split_whitespace().nth(1).unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+    let headers = request_text
+        .split("\r\n\r\n")
+        .next()
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    let body = request_text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_default();
     let query = query_text
         .split('&')
         .filter(|pair| !pair.is_empty())
@@ -76,6 +93,8 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         method,
         path: path.to_string(),
         query,
+        headers,
+        body,
     }
 }
 
@@ -108,6 +127,9 @@ pub(super) fn config_with_base_url(rest_base_url: String) -> FmfwioGatewayConfig
     FmfwioGatewayConfig {
         rest_base_url,
         enabled: true,
+        enabled_private_rest: true,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
         ..FmfwioGatewayConfig::default()
     }
 }

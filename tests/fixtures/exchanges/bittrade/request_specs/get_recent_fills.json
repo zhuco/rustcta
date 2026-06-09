@@ -1,0 +1,16 @@
+{
+  "exchange": "bittrade",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/order/matchresults",
+  "auth": "hmac",
+  "query": {
+    "symbol": "btcjpy",
+    "order-id": "59378",
+    "size": "100"
+  },
+  "body": null,
+  "strict_body": true
+}

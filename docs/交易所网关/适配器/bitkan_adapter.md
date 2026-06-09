@@ -54,7 +54,7 @@ adapter.
 | Spot symbol rules | Not verified | `Unsupported("bitkan.symbol_rules_unverified")` |
 | Perpetual symbol rules | Not verified | `Unsupported("bitkan.symbol_rules_unverified")` |
 | Order book snapshot | Not verified | `Unsupported("bitkan.order_book_unverified")` |
-| Balances | Not verified | `Unsupported("bitkan.balances_unverified")` |
+| Balances | Source boundary only | `get_balances` is fixture-backed by `tests/fixtures/exchanges/bitkan/request_specs/get_balances_account_source.json`; live private REST remains disabled until official account/balance docs and signing are verified. |
 | Positions | Not verified | `Unsupported("bitkan.positions_unverified")` |
 | Fee rate | Not verified | `Unsupported("bitkan.fees_unverified")` |
 | Place order | Not verified | `Unsupported("bitkan.place_order_unverified")` |
@@ -115,6 +115,8 @@ Do not implement against website-only paths or undocumented browser traffic.
 
 因此当前写 `交易所不支持当前仓位接口 runtime`。不要把 placeholder base URL、payload helper、网站路径或未文档化浏览器流量提升为 positions runtime。
 
+账户/余额接口写 `项目未实现/离线边界`：交易所账户余额应通过稳定 BitKan-native account/balance API、签名规则和 readback 文档接入。`endpoint_mapping.yaml` 已将 `get_balances` 写成 `source://bitkan/account-balance-api-unverified` spec-only source boundary，并绑定 `tests/fixtures/exchanges/bitkan/request_specs/get_balances_account_source.json`，矩阵应为 `get_balances=离线`；当前 adapter 不执行 live private REST 或未文档化 browser flow。
+
 ## Task 30 Toolchain Status
 
 - Endpoint mapping: `crates/rustcta-exchange-gateway/src/adapters/bitkan/endpoint_mapping.yaml`.
@@ -145,3 +147,7 @@ Source batch:
   passed with existing workspace warnings.
 - `CARGO_TARGET_DIR=target/gateway-clean-check cargo check -p rustcta-gateway --message-format short`
   passed with existing workspace warnings.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：未核到稳定官方 BitKan-native fee/account API。

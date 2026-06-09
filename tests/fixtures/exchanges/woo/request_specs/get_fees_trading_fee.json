@@ -1,0 +1,30 @@
+{
+  "exchange": "woo",
+  "operation": "get_fees",
+  "product": "spot_or_perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v3/trade/tradingFee",
+  "auth": "woo_v3_hmac",
+  "credential_scope": "read_only",
+  "query": {
+    "symbol": "SPOT_BTC_USDT"
+  },
+  "headers": {
+    "x-api-key": {
+      "match": "non_empty"
+    },
+    "x-api-timestamp": {
+      "match": "unix_ms"
+    },
+    "x-api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "official_source": "WOO X v3 trade/tradingFee is the private trading-fee readback source.",
+  "runtime_boundary": "request_spec_only; shared get_fees remains project-unimplemented pending credential guard and maker/taker parser."
+}

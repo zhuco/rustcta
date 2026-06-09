@@ -1,0 +1,6 @@
+{
+  "spotMakerFeeRate": "0.0002",
+  "spotTakerFeeRate": "0.0005",
+  "perpMakerFeeRate": "0.0001",
+  "perpTakerFeeRate": "0.0004"
+}

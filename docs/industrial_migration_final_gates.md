@@ -116,7 +116,7 @@ and read-only surfaces; do not add raw exchange credential write/delete behavior
 6. Start the generic control API:
 
    ```bash
-   RUSTCTA_CONTROL_API_BIND=127.0.0.1:18081 cargo run -p rustcta-control-api-app --bin rustcta-control-api
+   RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091 cargo run -p rustcta-control-api-app --bin rustcta-control-api
    ```
 
 7. Build the web UI:

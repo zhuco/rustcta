@@ -18,6 +18,13 @@ Official product-line follow-up found Biconomy Futures product pages, but the st
 
 官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Biconomy Futures/Perpetual 不能写成 `交易所不支持合约`；当前结论是项目未实现，并且要先补 futures endpoint spec 核验。
 
+2026-06-09 产品线边界收窄：`contract_product` 和 `futures_product`
+绑定 `tests/fixtures/exchanges/biconomy/request_specs/product_line_source_boundary.json`。
+当前 Spot REST/WS runtime 不复用到 Futures/Perpetual；必须先核验稳定 endpoint spec，
+再补 contract metadata、leverage/positions/risk readback 和 futures order parser。
+状态建议：继续保留 `contract_product` / `futures_product = 项目未实现`；官方
+Futures/Perpetual 产品线索不能写成 `不支持`，稳定 endpoint spec 固定前也不能启用 runtime。
+
 REST base URL: `https://www.biconomy.com`
 Public WS: `wss://bei.biconomy.com/ws`
 Private WS: `wss://www.biconomy.com/ws`
@@ -80,3 +87,7 @@ milliseconds, sequence, or checksum is documented. Mapping should add
 depth/precision, full/incremental semantics, and REST snapshot fallback. Source
 batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
+Structured boundary: `depth.subscribe`/`depth.update` is recorded with
+supported depths 5/10/15/20/30/50/100, `is_full`, no fixed ms, no documented
+sequence/checksum, and REST `/api/v1/depth` snapshot fallback.

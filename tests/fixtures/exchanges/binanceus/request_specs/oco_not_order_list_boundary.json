@@ -1,0 +1,32 @@
+{
+  "exchange": "binanceus",
+  "operation": "place_order_list",
+  "boundary": "legacy_oco_not_shared_order_list",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/order/oco",
+  "auth": "hmac",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "side": { "match": "exact", "value": "SELL" },
+    "quantity": { "match": "exact", "value": "0.01000000" },
+    "price": { "match": "exact", "value": "25000.00000000" },
+    "stopPrice": { "match": "exact", "value": "24500.00000000" },
+    "stopLimitPrice": { "match": "exact", "value": "24000.00000000" },
+    "stopLimitTimeInForce": { "match": "exact", "value": "GTC" },
+    "listClientOrderId": { "match": "exact", "value": "cli-oco-list-1" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "timestamp": { "match": "exact", "value": "1710000000000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "trade_enabled": false,
+  "shared_semantics": "unsupported",
+  "reason": "Binance.US OCO is a two-leg contingency order and does not cover the generic shared order-list request model.",
+  "signing_vector": "tests/fixtures/exchanges/binanceus/signing_vectors/oco_not_order_list.json"
+}

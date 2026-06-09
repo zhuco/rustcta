@@ -1,10 +1,12 @@
 use chrono::{DateTime, TimeZone, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    AccountId, CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol,
+    Fill, FillStatus, LiquidityRole, MarketType, OrderBookLevel, OrderBookSnapshot, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion, TenantId,
 };
 use serde_json::Value;
 
@@ -180,6 +182,130 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_private_order_state(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let order = first_order_payload(value).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "BIT.TEAM private order response missing order",
+            value,
+        )
+    })?;
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Spot,
+        canonical_symbol: symbol.canonical_symbol.clone(),
+        exchange_symbol: symbol.exchange_symbol.clone(),
+        client_order_id: first_string(
+            order,
+            &[
+                "clientOrderId",
+                "client_order_id",
+                "clientOrderID",
+                "client_id",
+            ],
+        ),
+        exchange_order_id: first_string(order, &["id", "orderId", "order_id", "exchangeOrderId"]),
+        side: parse_order_side(exchange_id, order)?,
+        position_side: None,
+        order_type: parse_order_type(order),
+        time_in_force: None,
+        status: parse_order_status(order),
+        quantity: string_from_fields(order, &["amount", "quantity", "qty", "origQty"])
+            .unwrap_or_else(|| "0".to_string()),
+        price: string_from_fields(order, &["price", "limit_price", "rate"]),
+        filled_quantity: string_from_fields(order, &["filled", "executedQty", "filledAmount"])
+            .unwrap_or_else(|| "0".to_string()),
+        average_fill_price: string_from_fields(
+            order,
+            &["average", "avgPrice", "averagePrice", "avg_price"],
+        ),
+        reduce_only: false,
+        post_only: false,
+        created_at: first_timestamp(order, &["timestamp", "createdAt", "created_at"]),
+        updated_at: first_timestamp(order, &["updatedAt", "updated_at", "timestamp"])
+            .unwrap_or_else(Utc::now),
+    })
+}
+
+pub fn parse_private_open_orders(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let orders = payload_array(value, &["orders", "data", "result"]).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "BIT.TEAM open orders response missing orders",
+            value,
+        )
+    })?;
+    orders
+        .iter()
+        .map(|order| parse_private_order_state(exchange_id, symbol, order))
+        .collect()
+}
+
+pub fn parse_private_recent_fills(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<Fill>> {
+    let fills = payload_array(value, &["trades", "fills", "data", "result"]).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "BIT.TEAM recent fills response missing fills",
+            value,
+        )
+    })?;
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "BIT.TEAM fills require canonical_symbol".to_string(),
+            })?;
+    fills
+        .iter()
+        .map(|fill| {
+            let price = number_field(exchange_id, fill, &["price", "rate"])?;
+            let quantity = number_field(exchange_id, fill, &["amount", "quantity", "qty"])?;
+            Ok(Fill {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: MarketType::Spot,
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: Some(symbol.exchange_symbol.clone()),
+                order_id: first_string(fill, &["orderId", "order", "order_id"]),
+                client_order_id: first_string(fill, &["clientOrderId", "client_order_id"]),
+                fill_id: first_string(fill, &["id", "tradeId", "trade_id", "fillId"]),
+                side: parse_order_side(exchange_id, fill)?,
+                position_side: PositionSide::None,
+                status: FillStatus::Confirmed,
+                liquidity_role: parse_liquidity_role(fill),
+                price,
+                quantity,
+                quote_quantity: number_from_fields(fill, &["cost", "quoteQuantity", "quote_qty"]),
+                fee_asset: fee_asset(fill),
+                fee_amount: fee_amount(fill),
+                fee_rate: None,
+                realized_pnl: None,
+                filled_at: first_timestamp(fill, &["timestamp", "time", "createdAt"])
+                    .unwrap_or_else(Utc::now),
+                received_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
 pub fn normalize_bitteam_symbol(symbol: &str) -> ExchangeApiResult<String> {
     let trimmed = symbol.trim();
     if trimmed.is_empty() {
@@ -274,6 +400,95 @@ fn value_array<'a>(value: &'a Value, fields: &[&str]) -> Option<&'a Vec<Value>> 
         .find_map(Value::as_array)
 }
 
+fn first_order_payload<'a>(value: &'a Value) -> Option<&'a Value> {
+    let payload = value
+        .get("data")
+        .or_else(|| value.get("result"))
+        .or_else(|| value.get("payload"))
+        .or_else(|| value.get("order"))
+        .unwrap_or(value);
+    if let Some(array) = payload.as_array() {
+        return array.first();
+    }
+    payload
+        .get("orders")
+        .and_then(Value::as_array)
+        .and_then(|orders| orders.first())
+        .or_else(|| payload.get("order"))
+        .or(Some(payload))
+}
+
+fn payload_array<'a>(value: &'a Value, fields: &[&str]) -> Option<&'a Vec<Value>> {
+    let payload = value
+        .get("data")
+        .or_else(|| value.get("result"))
+        .or_else(|| value.get("payload"))
+        .unwrap_or(value);
+    if let Some(array) = payload.as_array() {
+        return Some(array);
+    }
+    fields
+        .iter()
+        .filter_map(|field| payload.get(*field))
+        .find_map(Value::as_array)
+}
+
+fn parse_order_side(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<OrderSide> {
+    match first_string(value, &["side", "type"])
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "buy" | "bid" => Ok(OrderSide::Buy),
+        "sell" | "ask" => Ok(OrderSide::Sell),
+        other => Err(parse_error(
+            exchange_id.clone(),
+            format!("BIT.TEAM unsupported order side {other}"),
+            value,
+        )),
+    }
+}
+
+fn parse_order_type(value: &Value) -> OrderType {
+    match first_string(value, &["orderType", "type"])
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "market" => OrderType::Market,
+        _ => OrderType::Limit,
+    }
+}
+
+fn parse_order_status(value: &Value) -> OrderStatus {
+    match first_string(value, &["status", "state"])
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "new" => OrderStatus::New,
+        "open" | "active" | "working" => OrderStatus::Open,
+        "partial" | "partially_filled" | "partiallyfilled" => OrderStatus::PartiallyFilled,
+        "filled" | "closed" | "done" => OrderStatus::Filled,
+        "cancelled" | "canceled" => OrderStatus::Cancelled,
+        "expired" => OrderStatus::Expired,
+        "rejected" => OrderStatus::Rejected,
+        _ => OrderStatus::Unknown,
+    }
+}
+
+fn parse_liquidity_role(value: &Value) -> LiquidityRole {
+    match first_string(value, &["liquidity", "takerOrMaker", "role"])
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "maker" => LiquidityRole::Maker,
+        "taker" => LiquidityRole::Taker,
+        _ => LiquidityRole::Unknown,
+    }
+}
+
 fn split_pair_symbol(symbol: &str) -> Option<(String, String)> {
     if let Some((base, quote)) = symbol.split_once('_') {
         if !base.is_empty() && !quote.is_empty() {
@@ -350,6 +565,47 @@ fn number_from_value(value: &Value) -> Option<f64> {
         Value::Number(number) => number.as_f64(),
         _ => None,
     }
+}
+
+fn number_from_fields(value: &Value, fields: &[&str]) -> Option<f64> {
+    fields
+        .iter()
+        .find_map(|field| value.get(*field).and_then(number_from_value))
+}
+
+fn number_field(
+    exchange_id: &ExchangeId,
+    value: &Value,
+    fields: &[&str],
+) -> ExchangeApiResult<f64> {
+    number_from_fields(value, fields).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            format!(
+                "BIT.TEAM missing numeric field {}",
+                fields.first().copied().unwrap_or("unknown")
+            ),
+            value,
+        )
+    })
+}
+
+fn fee_amount(value: &Value) -> Option<f64> {
+    number_from_fields(value, &["feeCost", "fee_amount"]).or_else(|| {
+        value
+            .get("fee")
+            .and_then(|fee| fee.get("cost"))
+            .and_then(number_from_value)
+    })
+}
+
+fn fee_asset(value: &Value) -> Option<String> {
+    first_string(value, &["feeAsset", "feeCurrency", "fee_asset"]).or_else(|| {
+        value
+            .get("fee")
+            .and_then(|fee| fee.get("currency"))
+            .and_then(value_as_string)
+    })
 }
 
 fn value_as_string(value: &Value) -> Option<String> {

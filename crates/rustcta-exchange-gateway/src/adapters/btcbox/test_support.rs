@@ -10,6 +10,7 @@ pub(super) struct SeenRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) body: String,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -68,9 +69,15 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
             (key.to_string(), value.to_string())
         })
         .collect();
+    let body = request_text
+        .split("\r\n\r\n")
+        .nth(1)
+        .unwrap_or_default()
+        .to_string();
     SeenRequest {
         method,
         path: path.to_string(),
         query,
+        body,
     }
 }

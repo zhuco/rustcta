@@ -10,7 +10,7 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| adapter 总数 | 125 |
+| adapter 总数 | 126 |
 | 已有明确补全任务的 adapter | 124 |
 | 仍有剩余核验项的 adapter | 0 |
 | workload_score >= 100 的 adapter | 27 |
@@ -23,13 +23,13 @@
 
 | adapter | 产品线 | 核心接口 | 公共 WS | WS延迟等级 | 明确任务 | 剩余核验 | score | 下一步 |
 | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |
-| binance | spot | 8/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 4 | 0 | 303 | 先做已确认 P0 公共订单簿 WS 补全 |
-| bitget | spot | 8/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
-| gateio | spot | 8/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
-| mexc | spot | 8/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
-| okx | spot | 8/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
+| binance | spot,perpetual | 8/8；USD-M batch 已补 | rest_fallback/公共WS订阅已补/REST snapshot 重建 | 10ms/100ms 盘口候选已声明 | 2 | 0 | 200 | 继续补私有 WS 或 Options 边界 |
+| bitget | perpetual,spot | 9/9 | native/缺推流间隔；缺档位 | 缺推流间隔证据 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
+| gateio | perpetual,spot | 9/9 | native/缺档位 | 低延迟盘口候选 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
+| mexc | perpetual,spot | 9/9 | native/已记录核心细项 | 极速L1候选 | 3 | 0 | 203 | 先做已确认 P0 公共订单簿 WS 补全 |
+| okx | spot,perpetual | 8/8 | rest_fallback/Spot+Swap 公共WS订阅已补 | 10ms BBO / 100ms books 已声明 | 2 | 0 | 153 | 继续补 Futures/Options 和 VIP TBT depth 边界 |
 | huobi | perpetual,spot | 8/9 | declared/缺推流间隔；缺档位 | 缺推流间隔证据 | 4 | 0 | 138 | 先做已确认 P0 公共订单簿 WS 补全 |
-| kucoin | spot | 8/8 | native/缺订单簿channel；缺推流间隔 | 缺推流间隔证据 | 4 | 0 | 138 | 先做已确认 P0 公共订单簿 WS 补全 |
+| kucoin | spot | 8/8 | native/已记录核心细项 | 极速L1候选 | 4 | 0 | 138 | 先做已确认 P0 公共订单簿 WS 补全 |
 | binancecoinm | futures,perpetual | 9/9 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 3 | 0 | 128 | 先做已确认 P0 公共订单簿 WS 补全 |
 | binanceus | spot | 8/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 3 | 0 | 128 | 先做已确认 P0 公共订单簿 WS 补全 |
 | cod3x | perpetual | 0/9 | 未声明/公共WS未声明 | 公共WS未接入/未声明 | 7 | 0 | 123 | 暂无已知阻塞项，等待全量复核 |
@@ -38,7 +38,7 @@
 | equation | perpetual | 0/9 | 未声明/公共WS未声明 | 公共WS未接入/未声明 | 7 | 0 | 123 | 暂无已知阻塞项，等待全量复核 |
 | mango_markets | margin,perpetual | 0/9 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 7 | 0 | 123 | 暂无已知阻塞项，等待全量复核 |
 | zeta_markets | perpetual | 2/9 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 7 | 0 | 123 | 暂无已知阻塞项，等待全量复核 |
-| bybit | futures,perpetual,spot | 9/9 | spec_only/缺推流间隔 | 缺推流间隔证据 | 3 | 0 | 113 | 先做已确认 P0 公共订单簿 WS 补全 |
+| bybit | futures,perpetual,spot | 9/9 | native/缺推流间隔 | 缺推流间隔证据 | 3 | 0 | 113 | 先做已确认 P0 公共订单簿 WS 补全 |
 | aark | perpetual | 1/9 | spec_only/缺档位 | 慢速盘口/需评估 | 7 | 0 | 108 | 暂无已知阻塞项，等待全量复核 |
 | aftermath | perpetual | 2/9 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 7 | 0 | 108 | 暂无已知阻塞项，等待全量复核 |
 | bitbns | spot | 2/8 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 7 | 0 | 108 | 暂无已知阻塞项，等待全量复核 |

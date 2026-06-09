@@ -1,0 +1,47 @@
+{
+  "exchange": "aftermath",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "boundary": "sdk_account_balance_source_only",
+  "runtime_enabled": false,
+  "transport": "sdk",
+  "source": {
+    "chain": "sui",
+    "surface": "Aftermath Perpetuals SDK account/account objects",
+    "requires": [
+      "account_cap_id_or_account_id",
+      "wallet_or_account_owner_context"
+    ],
+    "address_shape": "0x-prefixed Sui object id or account id fixture",
+    "does_not_use": [
+      "gateway_api_key",
+      "hmac_secret",
+      "centralized_exchange_private_rest"
+    ]
+  },
+  "decoded_sample": {
+    "account_id": "sui-account-id-fixture",
+    "collateral_asset": "USDC",
+    "available_collateral": "1250.500000",
+    "total_equity": "1321.420000",
+    "maintenance_margin": "101.250000"
+  },
+  "balance_fields": [
+    "collateral_asset",
+    "available_collateral",
+    "total_equity",
+    "maintenance_margin"
+  ],
+  "runtime_gap": [
+    "Sui account-cap ownership validation",
+    "collateral and equity parser",
+    "checkpoint freshness guard",
+    "indexer/RPC reconciliation"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_account_id": false,
+    "live_call_allowed": false
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "exchange": "hitbtc",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/3/spot/order",
+  "auth": "signed",
+  "query": {
+    "symbol": "ETHBTC"
+  },
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6YTBhYzVlYzhjMzEzNWIxMDc2Y2NhZGIxYzRhM2EwNDg2ZDUxYWQ4YjU3NWQ0OWVjY2I0ZTVlMGFhY2Y5YzUzNToxNzEwMDAwMDAwMDAwOjEwMDAw"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "hitbtc/batch_cancel_orders_hs256",
+  "runtime_boundary": "request_spec_only",
+  "atomicity": "bulk_cancel_by_optional_symbol"
+}

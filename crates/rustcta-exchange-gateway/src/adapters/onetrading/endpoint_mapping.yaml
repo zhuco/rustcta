@@ -5,7 +5,7 @@ metadata:
   status: draft
   source: docs/onetrading_adapter.md
   last_reviewed: "2026-06-08"
-  notes: "A-31 One Trading spot adapter. Public REST is parser/transport ready for active SPOT instruments; private REST and WS trading remain offline request-spec only."
+  notes: "A-31 One Trading spot adapter. Public REST is parser/transport ready for active SPOT instruments; query/open/fill private readbacks are credential-gated runtime. Writes, balances, fees and private WS remain offline/request-spec only."
 market_types: [spot]
 products: [spot]
 rest:
@@ -14,7 +14,7 @@ base_urls:
   public_ws: wss://streams.fast.onetrading.com
   private_ws: wss://streams.onetrading.com
 auth:
-  private_rest: Authorization bearer token generated in the One Trading UI with Read or Trade permission.
+  private_rest: Authorization bearer token generated in the One Trading UI with Read or Trade permission; read-only runtime is guarded by ONETRADING_PRIVATE_REST_ENABLED and token.
 rate_limits:
   buckets:
     onetrading_rest:
@@ -38,6 +38,7 @@ pagination:
 reconciliation:
   private_stream_fallback: rest
   readbacks: [query_order, get_open_orders, get_recent_fills, get_balances]
+  private_readbacks: [query_order, get_open_orders, get_recent_fills]
   unknown_order_policy: query_by_exchange_order_id_then_client_id_then_open_orders_then_recent_fills
 batch:
   place_orders: { support: unsupported, reason: onetrading.batch_place_orders_unsupported }
@@ -47,6 +48,32 @@ websocket:
   public:
     support: spec_only
     url: wss://streams.fast.onetrading.com
+    channels: [ORDER_BOOK, BOOK_TICKER]
+    public_channels:
+      - ORDER_BOOK.no_fixed_ms.no_sequence.no_checksum.resync_ORDER_BOOK_SNAPSHOT
+      - BOOK_TICKER.depth1.bbo.no_fixed_ms.no_sequence.no_checksum
+    order_book:
+      snapshot_channel: ORDER_BOOK
+      update_channel: ORDER_BOOK
+      bbo_channel: BOOK_TICKER
+      fixed_update_interval_ms: null
+      interval_note: official docs do not publish a fixed millisecond cadence
+      depth:
+        parameter: null
+        documented_limit: null
+        bbo_depth_per_side: 1
+      sequence:
+        fields: []
+        continuity: unsupported_no_official_sequence
+        risk: no public sequence field documented for ORDER_BOOK/BOOK_TICKER
+      checksum:
+        supported: false
+        field: null
+        risk: no official checksum documented
+      resync:
+        mode: resubscribe_snapshot
+        snapshot_message: ORDER_BOOK_SNAPSHOT
+        strategy: re-subscribe after reconnect, stale stream, or suspected gap to receive a fresh snapshot
     heartbeat: { direction: server_heartbeat_client_ping, interval_ms: 30000, timeout_ms: 45000 }
     resync: rest_order_book_snapshot
     fixtures:
@@ -60,7 +87,34 @@ websocket:
     auth_fixture: tests/fixtures/exchanges/onetrading/ws_private_auth.json
     fallback: rest_reconciliation
 unsupported:
-  - futures_and_perpetuals_in_spot_adapter
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: onetrading_futures_perpetual_instruments
+    source_boundary_fixture: tests/fixtures/exchanges/onetrading/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current One Trading adapter filters instruments to type=SPOT; futures/perpetual instruments, positions and margin must use a separate product profile."
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications, settlement and precision rules]
+      public_market_data: [futures/perpetual order book, futures/perpetual ticker, futures/perpetual trades]
+      private_account: [futures/perpetual balances or margin account, positions, risk or leverage limits, account-effective fees]
+      private_order_lifecycle: [futures/perpetual place order, futures/perpetual cancel order, futures/perpetual query/open orders, futures/perpetual fills]
+    required_auth_and_scope: [bearer token futures/perpetual permission audit, product-scoped dry-run guard, post-write readback reconciliation]
+    unsafe_to_promote_without: [futures/perpetual instrument metadata fixtures, position/margin/risk parser coverage, bearer-token permission validation, order lifecycle request specs and reconciliation]
+    reason: "Official One Trading futures/perpetual surfaces exist, but the current runtime is scoped to Spot instruments and lacks derivatives metadata, positions/margin, account fees and order lifecycle wiring."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: onetrading_futures_perpetual_instruments
+    source_boundary_fixture: tests/fixtures/exchanges/onetrading/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current One Trading adapter continues to request type=SPOT and must not expose non-Spot instruments through the spot order/balance parsers."
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications]
+      private_account: [futures/perpetual balances or margin account, positions, risk or leverage limits, account-effective fees]
+      private_order_lifecycle: [futures/perpetual place/cancel/query/open orders, futures/perpetual fills]
+    unsafe_to_promote_without: [instrument type guard, futures/perpetual parser fixtures, bearer-token permission audit, write/readback reconciliation]
+    reason: "One Trading futures/perpetual instruments are official but not wired for metadata, margin, position, fee or trading runtime."
   - withdrawals
   - deposits
   - private_websocket_live_auth
@@ -128,8 +182,13 @@ endpoints:
     testnet: false
     support: spec_only
     official_doc: https://docs.onetrading.com/rest/trading/balances
+    reason: "One Trading balance request spec is fixture-backed, but shared get_balances runtime remains disabled pending bearer token scope guard, balance response/parser fixture, product eligibility, and reconciliation."
     request_spec:
       fixture: tests/fixtures/exchanges/onetrading/request_specs/get_balances.json
+    response_parser:
+      status: planned
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/get_balances.json
+      source: request_spec_only
   - operation: get_fees
     product: spot
     market_types: [spot]
@@ -162,10 +221,14 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
     official_doc: https://docs.onetrading.com/rest/trading/get-orders
+    reason: "Credential-gated read-only private REST runtime is implemented; fails closed unless ONETRADING_PRIVATE_REST_ENABLED and a bearer token are configured. Writes remain offline."
     request_spec:
       fixture: tests/fixtures/exchanges/onetrading/request_specs/get_open_orders.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/onetrading/open_orders_success.json
+    notes: "P2 core readback runtime only; no write, balance, fee, or private websocket support is promoted."
   - operation: query_order
     product: spot
     market_types: [spot]
@@ -180,10 +243,14 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
     official_doc: https://docs.onetrading.com/rest/trading/get-order-order-id
+    reason: "Credential-gated read-only private REST runtime is implemented for exchange_order_id queries; fails closed unless ONETRADING_PRIVATE_REST_ENABLED and a bearer token are configured."
     request_spec:
       fixture: tests/fixtures/exchanges/onetrading/request_specs/query_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/onetrading/order_success.json
+    notes: "P2 core readback runtime only; client-order-id lookup remains unsupported until fixture-backed request semantics are verified."
   - operation: get_recent_fills
     product: spot
     market_types: [spot]
@@ -198,10 +265,14 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
     official_doc: https://docs.onetrading.com/rest/trading/get-trades
+    reason: "Credential-gated read-only private REST runtime is implemented for symbol/limit fill history; fails closed unless ONETRADING_PRIVATE_REST_ENABLED and a bearer token are configured."
     request_spec:
       fixture: tests/fixtures/exchanges/onetrading/request_specs/get_recent_fills.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/onetrading/recent_fills_success.json
+    notes: "P2 core readback runtime only; cursor and time-window filters remain unsupported until fixture-backed request semantics are verified."
   - operation: place_order
     product: spot
     market_types: [spot]

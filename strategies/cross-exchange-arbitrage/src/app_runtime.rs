@@ -85,6 +85,10 @@ pub struct CrossArbExecutionIntentSummary {
     pub startup_readiness_satisfied: bool,
     pub new_opens_allowed: bool,
     pub blocked_by_startup_gate: bool,
+    pub blocked_by_loss_guard: bool,
+    pub consecutive_loss_closes: u32,
+    pub max_consecutive_losses: u32,
+    pub stopped_by_loss_guard: bool,
     pub open_legs_concurrent_required: bool,
     pub close_legs_concurrent_required: bool,
 }
@@ -109,6 +113,8 @@ pub struct CrossArbAppRuntime {
     async_db_queue: VecDeque<CrossArbDbPriceAuditEvent>,
     async_db_queue_capacity: usize,
     dropped_db_events: usize,
+    consecutive_loss_closes: u32,
+    stopped_by_loss_guard: bool,
 }
 
 impl CrossArbAppRuntime {
@@ -121,6 +127,8 @@ impl CrossArbAppRuntime {
             async_db_queue: VecDeque::new(),
             async_db_queue_capacity: DEFAULT_ASYNC_DB_QUEUE_EVENTS,
             dropped_db_events: 0,
+            consecutive_loss_closes: 0,
+            stopped_by_loss_guard: false,
         }
     }
 
@@ -141,12 +149,14 @@ impl CrossArbAppRuntime {
     ) -> CrossArbRuntimeCycle {
         let mut contract = build_runtime_contract(&self.config, captured_at);
         let price_audit_events = std::mem::take(&mut input.price_audit_events);
+        self.apply_consecutive_loss_guard(&price_audit_events, captured_at);
         let async_db_queue =
             self.enqueue_price_audit_events(price_audit_events, input.db_writer_ready, captured_at);
         self.apply_runtime_state(&mut contract, &input, async_db_queue.clone());
 
         let startup_readiness_satisfied = contract.readiness_gate.all_gates_ready();
-        let submitted_intents = if self.live_orders_enabled && startup_readiness_satisfied {
+        let new_opens_allowed = startup_readiness_satisfied && !self.stopped_by_loss_guard;
+        let submitted_intents = if self.live_orders_enabled && new_opens_allowed {
             input.execution_intents
         } else {
             0
@@ -193,8 +203,12 @@ impl CrossArbAppRuntime {
                 submitted_intents,
                 live_orders_enabled: self.live_orders_enabled,
                 startup_readiness_satisfied,
-                new_opens_allowed: startup_readiness_satisfied,
+                new_opens_allowed,
                 blocked_by_startup_gate: !startup_readiness_satisfied,
+                blocked_by_loss_guard: self.stopped_by_loss_guard,
+                consecutive_loss_closes: self.consecutive_loss_closes,
+                max_consecutive_losses: self.config.max_consecutive_losses.max(1),
+                stopped_by_loss_guard: self.stopped_by_loss_guard,
                 open_legs_concurrent_required: true,
                 close_legs_concurrent_required: true,
             },
@@ -219,6 +233,14 @@ impl CrossArbAppRuntime {
         self.dropped_db_events
     }
 
+    pub fn consecutive_loss_closes(&self) -> u32 {
+        self.consecutive_loss_closes
+    }
+
+    pub fn stopped_by_loss_guard(&self) -> bool {
+        self.stopped_by_loss_guard
+    }
+
     pub fn drain_async_db_queue_batch(
         &mut self,
         max_events: usize,
@@ -239,6 +261,41 @@ impl CrossArbAppRuntime {
             count,
             recorded_at,
         });
+    }
+
+    fn apply_consecutive_loss_guard(
+        &mut self,
+        events: &[CrossArbDbPriceAuditEvent],
+        recorded_at: DateTime<Utc>,
+    ) {
+        let max_consecutive_losses = self.config.max_consecutive_losses.max(1);
+        for event in events {
+            if !event.lifecycle.eq_ignore_ascii_case("close") {
+                continue;
+            }
+            let Some(actual_pnl_usdt) = event.actual_pnl_usdt.as_deref().and_then(parse_pnl) else {
+                continue;
+            };
+            if actual_pnl_usdt < 0.0 {
+                self.consecutive_loss_closes = self.consecutive_loss_closes.saturating_add(1);
+            } else {
+                self.consecutive_loss_closes = 0;
+            }
+
+            if self.consecutive_loss_closes >= max_consecutive_losses && !self.stopped_by_loss_guard
+            {
+                self.stopped_by_loss_guard = true;
+                self.record("risk_auto_stop", 1, recorded_at);
+                self.notifications.push(CrossArbNotification {
+                    notification_kind: "risk_auto_stop",
+                    message: format!(
+                        "cross-exchange arbitrage stopped after {} consecutive losing closed arbitrages",
+                        self.consecutive_loss_closes
+                    ),
+                    emitted_at: recorded_at,
+                });
+            }
+        }
     }
 
     fn enqueue_price_audit_events(
@@ -333,4 +390,12 @@ impl Default for CrossArbAppRuntime {
     fn default() -> Self {
         Self::new(CrossExchangeArbitrageConfig::default())
     }
+}
+
+fn parse_pnl(value: &str) -> Option<f64> {
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
 }

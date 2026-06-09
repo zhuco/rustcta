@@ -1,0 +1,31 @@
+{
+  "operation": "get_positions",
+  "exchange": "zeta_markets",
+  "status": "project_unimplemented",
+  "support": "spec_only",
+  "account_model": "wallet_owned_solana_margin_account",
+  "venue_ceased_operations": true,
+  "source_boundary": {
+    "rpc": "solana_account",
+    "account": "<redacted-margin-account-public-key>",
+    "program": "zeta-v2",
+    "position_source": "legacy margin account open positions",
+    "requires_exchange_api_key": false,
+    "requires_wallet_private_key": false
+  },
+  "decoded_sample": {
+    "market": "SOL-PERP",
+    "base_position_lots": "125",
+    "quote_position_native": "-250000000",
+    "cost_of_trades": "250.0",
+    "opening_orders": ["0", "0"]
+  },
+  "expected_runtime_error": "zeta_markets.positions_require_solana_margin_account_sdk_audit",
+  "remaining_runtime_work": [
+    "legacy SDK or account decoder audit",
+    "public-key scope guard",
+    "perp position lot and quote-native parser",
+    "slot/reorg policy",
+    "shutdown-safe reconciliation boundary"
+  ]
+}

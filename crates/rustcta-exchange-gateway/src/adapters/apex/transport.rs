@@ -7,6 +7,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::{apex_hmac_signature, apex_signing_payload};
+
 #[derive(Clone)]
 pub struct ApexRest {
     exchange_id: ExchangeId,
@@ -52,6 +54,38 @@ impl ApexRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_signed_get(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        auth: &ApexPrivateAuth<'_>,
+    ) -> ExchangeApiResult<Value> {
+        let (url, signed_path) = build_signed_url(&self.rest_base_url, endpoint, params);
+        let timestamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let payload = apex_signing_payload(&timestamp, "GET", &signed_path, "");
+        let signature = apex_hmac_signature(auth.api_secret, &payload)?;
+        let response = self
+            .http
+            .request(Method::GET, url)
+            .header("Accept", "application/json")
+            .header("APEX-SIGNATURE", signature)
+            .header("APEX-TIMESTAMP", timestamp)
+            .header("APEX-API-KEY", auth.api_key)
+            .header("APEX-PASSPHRASE", auth.passphrase)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+}
+
+pub struct ApexPrivateAuth<'a> {
+    pub api_key: &'a str,
+    pub api_secret: &'a str,
+    pub passphrase: &'a str,
 }
 
 pub fn public_get_request_spec(path: &str) -> Value {
@@ -141,4 +175,33 @@ fn build_url(base: &str, endpoint: &str, params: &HashMap<String, String>) -> St
         }
     }
     url
+}
+
+pub(crate) fn signed_path(endpoint: &str, params: &HashMap<String, String>) -> String {
+    if params.is_empty() {
+        return endpoint.to_string();
+    }
+    let mut pairs = params.iter().collect::<Vec<_>>();
+    pairs.sort_by(|left, right| left.0.cmp(right.0));
+    let query = pairs
+        .into_iter()
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{endpoint}?{query}")
+}
+
+fn build_signed_url(
+    base: &str,
+    endpoint: &str,
+    params: &HashMap<String, String>,
+) -> (String, String) {
+    let path = signed_path(endpoint, params);
+    (format!("{}{}", base.trim_end_matches('/'), path), path)
 }

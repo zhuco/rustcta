@@ -1,0 +1,24 @@
+{
+  "exchange": "bigone",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/viewer/trading_fees",
+  "auth": "signed",
+  "credential_scope": "read_only_balance_permission",
+  "query": {
+    "asset_pair_names": "BTC-USDT"
+  },
+  "headers": {
+    "Authorization": {
+      "match": "non_empty"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "official_source": "BigONE viewer/trading_fees returns maker_fee_rate and taker_fee_rate for authenticated user asset pairs.",
+  "runtime_boundary": "guarded_runtime; shared get_fees calls BigONE viewer trading_fees for Spot symbols when private REST credentials and explicit enable flag are configured."
+}

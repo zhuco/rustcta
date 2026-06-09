@@ -23,7 +23,19 @@ reconciliation:
   private_stream_fallback: rest
   readbacks: [query_order, get_open_orders, get_recent_fills]
   unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
+websocket:
+  public:
+    support: unsupported
+    reason: "Current official Indodax PDF/GitHub API scope exposes REST public depth only; no public order book WebSocket is documented."
+    order_book:
+      support: unsupported
+      fallback: rest_depth_snapshot
+  private:
+    support: unsupported
+    reason: "Current Indodax TAPI profile is REST-only and documents no private WebSocket stream."
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
   - positions
   - amend_order
   - order_list
@@ -34,6 +46,10 @@ unsupported:
   - private_streams
   - fiat_payment_runtime
   - deposit_withdrawal_runtime
+  - operation: cancel_order
+    reason: "Official Indodax TAPI cancelOrder requires buy/sell side; shared CancelOrderRequest has no side field, so generic runtime is disabled to avoid wrong-side cancellation."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 Indodax TAPI profile 不暴露稳定 fee runtime。"
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -90,7 +106,7 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/indodax/request_specs/cancel_order.json
     support: unsupported
-    notes: "Indodax cancelOrder requires buy/sell side; generic CancelOrderRequest has no side field."
+    notes: "Indodax cancelOrder requires buy/sell side; generic CancelOrderRequest has no side field, so this stays unsupported despite the fixture-backed request shape."
   - operation: query_order
     product: spot
     transport: rest
@@ -143,7 +159,7 @@ endpoints:
     rate_limit_bucket: indodax_private
     weight: 1
     request_spec_required: true
-    support: composed
+    support: unsupported
     atomicity: non_atomic
     native_batch: false
     max_items: 20

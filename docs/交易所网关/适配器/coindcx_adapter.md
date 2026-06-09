@@ -31,9 +31,19 @@ Task 18 migration artifacts:
 | Cancel all | Spot `/exchange/v1/orders/cancel_all`; Futures `/exchange/v1/derivatives/futures/positions/cancel_all_open_orders` | Symbol-scoped cancel-all |
 | Amend | Spot `/exchange/v1/orders/edit`; Futures `/exchange/v1/derivatives/futures/orders/edit` | Standard quantity amend request body; new client id unsupported |
 | Query/open/fills | Spot status/active/trade-history; Futures active-orders/trades | Standard order/fill parser |
-| Public streams | Socket.IO channels such as `{pair}@orderbook@50`, `{instrument}@orderbook@50-futures`, trades, prices, candles | Session helper emits Socket.IO join payload; order book parser to standard snapshot event; trade/ticker/candle channels are subscribed but have no separate standard event type in `ExchangeStreamEvent` |
+| Public streams | Socket.IO channels such as official Spot `B-BTC_USDT@orderbook@20`, project Spot `{symbol}@orderbook@50`, Futures `{instrument}@orderbook@50-futures`, trades, prices, candles | Session helper emits Socket.IO `join` payload; `depth-update` order book parser emits standard snapshot event; trade/ticker/candle channels are subscribed but have no separate standard event type in `ExchangeStreamEvent` |
 | Private streams | Socket.IO `coindcx` channel with `order-update`, `trade-update`, `balance-update`, `df-position-update` | HMAC auth join payload, heartbeat, order/fill/balance/position event parser |
 | Heartbeat | Socket.IO ping every 25s | `ping` payload helper and heartbeat stream event |
+
+## Public Order Book WebSocket
+
+| Scope | Socket.IO subscribe / update | Depth | Cadence | Sequence / checksum | Recovery |
+| --- | --- | --- | --- | --- | --- |
+| Spot official example | `{"event":"join","channelName":"B-BTC_USDT@orderbook@20"}`; update event `depth-update` | `20` in official sample | No fixed millisecond interval documented | No documented sequence; no checksum | Reconnect, resubscribe, rebuild from REST `get_order_book` snapshot |
+| Spot project boundary | `{"event":"join","channelName":"{symbol}@orderbook@50"}` | Project default/max `50` | No fixed millisecond interval documented | No documented sequence; no checksum | Same REST snapshot rebuild policy |
+| Futures project boundary | `{"event":"join","channelName":"{instrument}@orderbook@50-futures"}` | Project default/max `50` | No fixed millisecond interval documented | No documented sequence; no checksum | Same REST snapshot rebuild policy |
+
+Focused fixtures live under `tests/fixtures/exchanges/coindcx/ws/` and cover the official Spot `@orderbook@20` join, project Spot/Futures `@orderbook@50` joins, and a Socket.IO `42["depth-update", ...]` payload. Because CoinDCX public depth updates do not document a monotonic sequence or checksum, the adapter treats the stream as best-effort delta and requires REST snapshot rebuild after reconnect, stale-message detection, parse failure, or any suspected gap.
 
 ## Capabilities v2 / runtime policy
 
@@ -83,7 +93,7 @@ These are adapter-side planning limits, not exchange header accounting. Producti
 
 CoinDCX streams are Socket.IO style. The adapter exposes subscription/session helpers and parser coverage, but does not pretend the endpoint is a plain JSON WebSocket.
 
-Official public depth examples use Socket.IO `join` with channel names such as `B-BTC_USDT@orderbook@20`; the current project mapping also records spot and futures `@orderbook@50` channels. The reviewed official docs did not expose a fixed millisecond interval, sequence, or checksum for public depth updates, so public stream runtime must rebuild from REST order book snapshots after reconnect or stale-message detection.
+Official public depth examples use Socket.IO `join` with channel names such as `B-BTC_USDT@orderbook@20`; the current project mapping also records Spot `{symbol}@orderbook@50` and Futures `{instrument}@orderbook@50-futures` boundaries. The reviewed official docs did not expose a fixed millisecond interval, sequence, or checksum for public `depth-update` messages, so public stream runtime must rebuild from REST order book snapshots after reconnect or stale-message detection.
 
 Futures batch place and multi-id batch cancel are not exposed because the official API surface only confirmed single order create/cancel plus cancel-all. Futures client order id, standard reduce-only flag, reliable futures post-only, and Binance-style OCO/OTO order lists are explicitly unsupported.
 
@@ -101,3 +111,7 @@ CARGO_TARGET_DIR=target/task18-gateway-tests-final cargo test -p rustcta-exchang
 ```
 
 The parser tests cover success, empty response, error fixture presence and key missing-field failures. Request-spec tests assert generated CoinDCX JSON bodies match fixture expectations. Signing tests assert HMAC-SHA256 hex output against the sanitized fixture vector.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：fee endpoint 未确认，当前只返回零费率占位。

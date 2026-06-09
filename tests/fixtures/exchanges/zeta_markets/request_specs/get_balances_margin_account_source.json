@@ -1,0 +1,23 @@
+{
+  "operation": "get_balances",
+  "exchange": "zeta_markets",
+  "status": "project_unimplemented",
+  "support": "spec_only",
+  "account_model": "wallet_owned_solana_margin_account",
+  "venue_ceased_operations": true,
+  "source_boundary": {
+    "rpc": "solana_account",
+    "account": "<redacted-margin-account-public-key>",
+    "program": "zeta-v2",
+    "requires_exchange_api_key": false,
+    "requires_wallet_private_key": false
+  },
+  "expected_runtime_error": "zeta_markets.balances_require_solana_margin_account_sdk_audit",
+  "remaining_runtime_work": [
+    "legacy SDK or account decoder audit",
+    "public-key scope guard",
+    "asset precision and collateral/equity parser",
+    "slot/reorg policy",
+    "shutdown-safe reconciliation boundary"
+  ]
+}

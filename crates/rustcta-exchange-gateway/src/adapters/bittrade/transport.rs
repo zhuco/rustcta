@@ -6,7 +6,7 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
-use super::signing::canonical_query;
+use super::signing::{canonical_query, signed_params_with_extra};
 
 #[derive(Clone)]
 pub struct BittradeRest {
@@ -46,6 +46,48 @@ impl BittradeRest {
         let response = self
             .http
             .get(build_url(&self.rest_base_url, endpoint, params))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_get(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        if api_key.trim().is_empty() || api_secret.trim().is_empty() {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "bittrade.private_rest_missing_credentials",
+            });
+        }
+        let endpoint = normalize_endpoint(endpoint);
+        let host = host(&self.rest_base_url)?;
+        let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+        let signed_params = signed_params_with_extra(
+            api_key,
+            api_secret,
+            "GET",
+            &host,
+            &endpoint,
+            &timestamp,
+            params
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        )?;
+        let response = self
+            .http
+            .get(build_url_btree(
+                &self.rest_base_url,
+                &endpoint,
+                &signed_params,
+            ))
+            .header(reqwest::header::ACCEPT, "application/json")
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {
@@ -95,12 +137,35 @@ fn build_url(base: &str, endpoint: &str, params: &HashMap<String, String>) -> St
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let query = canonical_query(&query);
+    build_url_btree(base, endpoint, &query)
+}
+
+fn build_url_btree(base: &str, endpoint: &str, params: &BTreeMap<String, String>) -> String {
+    let query = canonical_query(params);
     if query.is_empty() {
         format!("{}{}", base.trim_end_matches('/'), endpoint)
     } else {
         format!("{}{}?{}", base.trim_end_matches('/'), endpoint, query)
     }
+}
+
+fn normalize_endpoint(endpoint: &str) -> String {
+    if endpoint.starts_with('/') {
+        endpoint.to_string()
+    } else {
+        format!("/{endpoint}")
+    }
+}
+
+fn host(base_url: &str) -> ExchangeApiResult<String> {
+    let url = reqwest::Url::parse(base_url).map_err(|error| ExchangeApiError::InvalidRequest {
+        message: format!("invalid BitTrade REST base URL: {error}"),
+    })?;
+    url.host_str()
+        .map(|host| host.to_ascii_lowercase())
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: "BitTrade REST base URL must include host".to_string(),
+        })
 }
 
 fn exchange_error(

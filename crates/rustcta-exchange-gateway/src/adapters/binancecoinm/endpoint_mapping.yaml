@@ -41,11 +41,20 @@ reconciliation:
   retry_policy: retry_rate_limited_and_transient
 batch:
   place_orders:
-    support: unsupported
-    reason: batch place order is not implemented
+    support: native
+    atomicity: partial
+    max_items: 5
+    partial_failure: true
+    same_market_type_required: true
+    supports_client_order_id: true
   cancel_orders:
-    support: unsupported
-    reason: batch cancel order is not implemented
+    support: native
+    atomicity: partial
+    max_items: 10
+    partial_failure: true
+    same_symbol_required: true
+    same_market_type_required: true
+    supports_client_order_id: true
   cancel_all_orders:
     support: native
     atomicity: partial
@@ -53,7 +62,70 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: spec_only
+    url: wss://dstream.binance.com
+    protocol: binance-coin-m-market-streams
+    stream_paths:
+      raw: /ws/{streamName}
+      combined: /stream?streams={streamName1}/{streamName2}
+    channels:
+      - "{symbol}@depth"
+      - "{symbol}@depth@100ms"
+      - "{symbol}@depth@250ms"
+      - "{symbol}@depth@500ms"
+      - "{symbol}@depth5"
+      - "{symbol}@depth5@100ms"
+      - "{symbol}@depth5@500ms"
+      - "{symbol}@depth10"
+      - "{symbol}@depth10@100ms"
+      - "{symbol}@depth10@500ms"
+      - "{symbol}@depth20"
+      - "{symbol}@depth20@100ms"
+      - "{symbol}@depth20@500ms"
+    order_book:
+      channels:
+        - "{symbol}@depth"
+        - "{symbol}@depth@100ms"
+        - "{symbol}@depth@250ms"
+        - "{symbol}@depth@500ms"
+        - "{symbol}@depth5"
+        - "{symbol}@depth5@100ms"
+        - "{symbol}@depth5@500ms"
+        - "{symbol}@depth10"
+        - "{symbol}@depth10@100ms"
+        - "{symbol}@depth10@500ms"
+        - "{symbol}@depth20"
+        - "{symbol}@depth20@100ms"
+        - "{symbol}@depth20@500ms"
+      partial_depth_channels:
+        - "{symbol}@depth5"
+        - "{symbol}@depth5@100ms"
+        - "{symbol}@depth5@500ms"
+        - "{symbol}@depth10"
+        - "{symbol}@depth10@100ms"
+        - "{symbol}@depth10@500ms"
+        - "{symbol}@depth20"
+        - "{symbol}@depth20@100ms"
+        - "{symbol}@depth20@500ms"
+      diff_depth_channels:
+        - "{symbol}@depth"
+        - "{symbol}@depth@100ms"
+        - "{symbol}@depth@250ms"
+        - "{symbol}@depth@500ms"
+      supported_depths: [5, 10, 20]
+      push_intervals_ms: [100, 250, 500]
+      update_event: depthUpdate
+      sequence_fields: [U, u, pu]
+      snapshot_sequence_field: lastUpdateId
+      checksum: unsupported
+      sequence_policy: Binance COIN-M local book replay; rebuild when pu does not equal previous u.
+      snapshot:
+        transport: rest
+        method: GET
+        path: /dapi/v1/depth
+        operation: get_order_book
+      resync_policy: Buffer WS deltas, fetch REST depth snapshot, drop stale u, apply first event covering lastUpdateId, then require pu == previous u.
+    runtime_boundary: Public WS runtime is not opened by this adapter yet; this block records official COIN-M market-stream spec for future wiring.
     heartbeat:
       required: true
       direction: server_ping
@@ -65,6 +137,9 @@ websocket:
     auth: listen_key
     renewal_ms: 1800000
     fallback: rest_reconciliation
+unsupported:
+  - operation: spot_product
+    reason: Binance COIN-M adapter/profile only maps Binance COIN-M derivatives API; spot remains outside this profile.
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -176,6 +251,66 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 4
     request_spec_required: true
+  - operation: batch_place_orders
+    transport: rest
+    product: futures
+    method: POST
+    path: /dapi/v1/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 5
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    max_items: 5
+    support: native
+    testnet: true
+    official_doc: https://developers.binance.com/docs/derivatives/coin-margined-futures/trade/rest-api/Place-Multiple-Orders
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/binancecoinm/request_specs/batch_place_orders.json
+    response_parser:
+      status: implemented
+      parser: parse_order_state_array_with_partial_failure_report
+    reason: Runtime covers HMAC signed query, max-items guard, partial failure report, and missing item readback plan.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: futures
+    method: DELETE
+    path: /dapi/v1/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    max_items: 10
+    support: native
+    testnet: true
+    official_doc: https://developers.binance.com/docs/derivatives/coin-margined-futures/trade/rest-api/Cancel-Multiple-Orders
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/binancecoinm/request_specs/batch_cancel_orders.json
+    response_parser:
+      status: implemented
+      parser: parse_order_state_array_with_partial_failure_report
+    reason: Runtime covers HMAC signed query, same-symbol/max-items guard, partial failure report, and missing item readback plan.
+  - operation: place_order_list
+    transport: rest
+    product: futures
+    method: POST
+    path: /unsupported/binancecoinm/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: binancecoinm.order_list_not_applicable_to_coin_m_profile
   - operation: query_order
     transport: rest
     product: futures

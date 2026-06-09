@@ -1,0 +1,24 @@
+{
+  "exchange": "bitbns",
+  "operation": "query_order",
+  "request_spec_only": false,
+  "runtime_enabled": true,
+  "runtime_guard": "BITBNS_PRIVATE_REST_ENABLED plus BITBNS_API_KEY/BITBNS_API_SECRET or RUSTCTA-prefixed equivalents",
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/api/trade/v1/orderStatus/{symbol}",
+  "auth": "hmac",
+  "credential_scope": "read_only",
+  "headers_shape": [
+    "X-BITBNS-APIKEY",
+    "X-BITBNS-PAYLOAD",
+    "X-BITBNS-SIGNATURE"
+  ],
+  "body_or_query_shape": {
+    "symbol": "BTC",
+    "timeStamp_nonce": "1700000000000",
+    "body": "{\"entry_id\":\"12345\"}"
+  },
+  "response_fixture": "tests/fixtures/exchanges/bitbns/order_status_success.json",
+  "source_boundary": "Bitbns query_order is credential-gated read-only runtime; writes remain offline pending KYC/region guard, reconciliation, and live dry-run controls."
+}

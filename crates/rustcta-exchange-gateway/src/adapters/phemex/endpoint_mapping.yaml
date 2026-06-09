@@ -39,6 +39,51 @@ websocket:
     channels: [orderbook.subscribe, orderbook_p.subscribe, trade.subscribe, trade_p.subscribe, kline.subscribe, kline_p.subscribe, spot_market24h.subscribe, perp_market24h_pack_p.subscribe]
     heartbeat: { mode: server_ping, interval_ms: 15000, timeout_ms: 30000 }
     resync: { mode: rest_snapshot, endpoint_operation: perp_order_book }
+    order_book:
+      products: [spot, perpetual]
+      market_types: [spot, perpetual]
+      url: wss://ws.phemex.com
+      protocol: websocket_json_rpc
+      methods:
+        spot: orderbook.subscribe
+        perpetual: orderbook_p.subscribe
+      subscribe:
+        fast_payload:
+          method: orderbook_p.subscribe
+          params: ["{symbol}", false, 30]
+        aggregated_payload:
+          method: orderbook_p.subscribe
+          params: ["{symbol}", true, 30]
+        depth_param_position: 2
+        supported_depths: [0, 1, 5, 10, 30]
+        default_depth: 30
+        depth_zero_semantics: full_book
+      intervals:
+        fast_update_ms: 20
+        aggregated_update_ms: 120
+        full_depth_update_ms: 100
+        snapshot_self_check_ms: 60000
+      sequence:
+        field: sequence
+        message_type_field: type
+        snapshot_value: snapshot
+        incremental_value: incremental
+        continuity: strictly_increasing
+        gap_detection: sequence_gap_or_regression
+        delete_quantity: 0
+      checksum:
+        supported: false
+        field: null
+        risk: "Official orderbook stream docs do not declare checksum; rely on sequence and periodic snapshot self-check."
+      resync:
+        mode: rest_or_ws_snapshot_rebuild
+        rest_endpoints:
+          spot: /md/orderbook
+          perpetual: /md/v2/orderbook
+        triggers: [connect, reconnect, sequence_gap, sequence_regression, stale_stream, parse_error, failed_60s_snapshot_self_check, suspected_message_loss]
+      fixtures:
+        snapshot: tests/fixtures/exchanges/phemex/ws_public_orderbook_snapshot.json
+        incremental: tests/fixtures/exchanges/phemex/ws_public_orderbook_incremental.json
   private:
     support: native_when_credentials_configured
     channels: [wo.subscribe, aop_p.subscribe, ras_p.subscribe]

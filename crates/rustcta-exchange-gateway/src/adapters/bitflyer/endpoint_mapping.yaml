@@ -88,6 +88,43 @@ websocket:
       direction: server_ping
       response: pong
     resync: rest_order_book_snapshot
+    order_book:
+      channel_family: lightning_board
+      channels:
+        - "orderbook:lightning_board_snapshot_{product_code}"
+        - "orderbook:lightning_board_{product_code}"
+        - lightning_board_snapshot_{product_code}
+        - lightning_board_{product_code}
+      product: spot
+      market_types: [spot, margin]
+      protocol: json_rpc_2
+      request:
+        subscribe_method: subscribe
+        unsubscribe_method: unsubscribe
+        params_field: channel
+        snapshot_channel: lightning_board_snapshot_{product_code}
+        delta_channel: lightning_board_{product_code}
+      update_interval:
+        fixed_update_interval_ms: null
+        note: "Official Realtime API docs do not publish a fixed millisecond order book cadence."
+      depth:
+        parameter: null
+        max_depth_per_side: null
+        note: "depth: unspecified; no fixed depth selector is documented for lightning_board_snapshot/lightning_board."
+      sequence:
+        fields: []
+        continuity: unsupported_no_official_sequence
+        gap_detection: reconnect_or_stale_stream_only
+      checksum:
+        supported: false
+        field: null
+        risk: "No official checksum field; checksum mismatch detection is unavailable."
+      resync:
+        rest_snapshot:
+          method: GET
+          path: /v1/getboard
+          query: product_code
+        strategy: "Rebuild from REST GET /v1/getboard and resubscribe to lightning_board_snapshot_{product_code} plus lightning_board_{product_code} after disconnect, stale stream or suspected message loss."
   private:
     support: native
     url: wss://ws.lightstream.bitflyer.com/json-rpc
@@ -99,6 +136,31 @@ unsupported:
     reason: "JPY deposits, withdrawals, bank transfers and ledger writes are outside gateway runtime scope."
   - operation: standard_futures_perpetual
     reason: "Lightning FX/CFD product codes are not modeled as standard futures/perpetual contracts."
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [crypto_cfd, fx]
+    boundary: project_unimplemented_product_line
+    official_gap: bitflyer_crypto_cfd_fx_product_codes
+    source_boundary_fixture: tests/fixtures/exchanges/bitflyer/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current adapter keeps Spot and Lightning FX product-code handling separate; do not advertise FX_BTC_JPY as a standard futures/perpetual runtime."
+    required_endpoints:
+      market_metadata: [Crypto CFD/FX product_code catalog, contract sizing and settlement model, margin mode and leverage constraints]
+      public_market_data: [Crypto CFD/FX order book, Crypto CFD/FX ticker, Crypto CFD/FX executions]
+      private_account: [collateral or margin state, positions, risk or leverage limits]
+      private_order_lifecycle: [Crypto CFD/FX place order, Crypto CFD/FX cancel order, Crypto CFD/FX query/open orders, Crypto CFD/FX fills]
+    unsafe_to_promote_without: [adapter-specific CFD contract model, position/margin/risk parser coverage, product-scoped order lifecycle reconciliation, clear mapping that FX_BTC_JPY is not generic futures/perpetual]
+    reason: "Crypto CFD/FX requires a separate unified contract-product design; do not classify it as exchange-unsupported."
+  - operation: cfd_fx_product
+    status: project_unimplemented
+    product_lines: [crypto_cfd, fx]
+    boundary: project_unimplemented_product_line
+    official_gap: bitflyer_crypto_cfd_fx_product_codes
+    source_boundary_fixture: tests/fixtures/exchanges/bitflyer/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [Crypto CFD/FX product_code catalog, contract sizing and settlement model]
+      private_account: [collateral or margin state, positions, risk or leverage limits]
+      private_order_lifecycle: [Crypto CFD/FX place/cancel/query/open orders, Crypto CFD/FX fills]
+    reason: "Official bitFlyer material describes Crypto CFD/FX product codes, but the current gateway only exposes adapter-specific margin/spot boundaries and lacks a unified CFD contract model."
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -152,8 +214,13 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/get_balances.json
     response_parser:
+      status: planned
       fixture: tests/fixtures/exchanges/bitflyer/balances_success.json
+    notes: Private getbalance endpoint and response fixture exist, but shared balance parser/runtime promotion is still pending; runtime returns bitflyer.get_balances.rest_parser_pending.
   - operation: get_fees
     product: spot
     transport: rest
@@ -164,7 +231,15 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/get_fees_tradingcommission.json
+    response_parser:
+      status: planned
+      fixture: tests/fixtures/exchanges/bitflyer/tradingcommission_success.json
+    notes: Private commission endpoint is documented but shared maker/taker normalization and product-scope guard are not implemented; runtime remains offline.
   - operation: place_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -187,6 +262,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_order
+    support: spec_only
     product: spot
     transport: rest
     method: DELETE
@@ -209,6 +285,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_all_orders
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -218,7 +295,67 @@ endpoints:
     rate_limit_bucket: private_order
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: planned
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/core_trading_source_boundary.json
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/bitflyer/batch_place_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order placement.
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /composed/bitflyer/batch_cancel_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order cancel.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /unsupported/bitflyer/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bitflyer.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/bitflyer/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bitflyer.order_list_unsupported
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -228,9 +365,13 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/query_order.json
     response_parser:
       fixture: tests/fixtures/exchanges/bitflyer/order_state_success.json
+    notes: "Runtime guarded by private REST enablement, HMAC credentials, symbol, and order identifier."
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -240,7 +381,13 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/get_open_orders.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/order_state_success.json
+    notes: "Runtime guarded by private REST enablement, HMAC credentials, symbol, and active-order filter."
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -250,5 +397,8 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/get_recent_fills.json
     response_parser:
       fixture: tests/fixtures/exchanges/bitflyer/fills_success.json
+    notes: "Runtime guarded by private REST enablement, HMAC credentials, symbol, and context account."

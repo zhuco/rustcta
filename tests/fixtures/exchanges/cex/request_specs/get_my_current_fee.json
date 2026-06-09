@@ -1,0 +1,18 @@
+{
+  "exchange": "cex",
+  "operation": "cex.get_fees.get_my_current_fee",
+  "product": "spot",
+  "method": "POST",
+  "path": "/get_my_current_fee",
+  "transport": "rest",
+  "auth": "hmac",
+  "credential_scope": "read_only",
+  "body": {
+    "pairs": [
+      "BTC-USD",
+      "ETH-USD"
+    ]
+  },
+  "profile_guard": "CEX.IO Spot Trading profile only; requires Read permission.",
+  "unsupported_boundary": "Shared get_fees runtime is project-unimplemented; this fixture records the official request source."
+}

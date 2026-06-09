@@ -1,0 +1,18 @@
+{
+  "orders": [
+    {
+      "order_index": "lighter-order-1001",
+      "client_order_id": "lighter-client-1001",
+      "market_id": 0,
+      "side": "BUY",
+      "order_type": "LIMIT",
+      "time_in_force": "GTC",
+      "status": "OPEN",
+      "quantity": "1.25",
+      "filled_quantity": "0.50",
+      "price": "2064.55",
+      "reduce_only": false,
+      "post_only": true
+    }
+  ]
+}

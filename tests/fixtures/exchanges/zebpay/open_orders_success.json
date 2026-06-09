@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "data": [
+    {
+      "id": "12345",
+      "trade_pair": "BTC-INR",
+      "side": "bid",
+      "status": "pending",
+      "quantity": "0.01000000",
+      "filled_quantity": "0.00250000",
+      "price": "7000000",
+      "created_at": "2026-06-08T12:00:00Z"
+    },
+    {
+      "id": "12346",
+      "trade_pair": "BTC-INR",
+      "side": "ask",
+      "status": "pending",
+      "quantity": "0.02000000",
+      "filled_quantity": "0",
+      "price": "7100000",
+      "created_at": "2026-06-08T12:01:00Z"
+    }
+  ]
+}

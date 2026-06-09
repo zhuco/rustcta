@@ -1,18 +1,22 @@
 schema_version: 1
 exchange: zebpay
 adapter: ZebpayGatewayAdapter
-status_date: "2026-06-08"
+status_date: '2026-06-08'
 metadata:
   status: draft
   source: docs/zebpay_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: A-39 regional spot scan-only adapter. Public REST is implemented for market list and order book snapshots; private REST is request-spec-only and disabled.
-market_types: [spot]
-products: [spot]
+  last_reviewed: '2026-06-08'
+  notes: A-39 regional spot adapter. Public REST is implemented for market list and order book snapshots; private order/fill
+    readbacks are guarded runtime, while writes, balances, and fees remain offline.
+market_types:
+- spot
+products:
+- spot
 base_urls:
   rest: https://www.zebapi.com
 auth:
-  private_rest: Bearer access token with client_id, timestamp, and RequestId headers; token acquisition and KYC onboarding are request-spec-only.
+  private_rest: Bearer access token with client_id, timestamp, and RequestId headers; guarded readbacks require explicit
+    private REST enable flag plus client_id/client_secret/access_token.
 rate_limits:
   zebpay_public:
     scope: ip
@@ -25,181 +29,361 @@ rate_limits:
     limit: unknown
     notes: Private endpoints require API onboarding, KYC, and bearer-token lifecycle validation.
 pagination:
-  open_orders: { mode: page_limit, max_limit: 500, request_spec_only: true }
-  fills: { mode: order_id, max_limit: null, request_spec_only: true }
+  open_orders:
+    mode: page_limit
+    max_limit: 500
+    request_spec_only: true
+  fills:
+    mode: order_id
+    max_limit: null
+    request_spec_only: false
 reconciliation:
-  private_state: rest_request_spec_only
-  readbacks: [get_open_orders, get_recent_fills]
-  notes: Private runtime is disabled; after promotion use /orders and /orders/{order_id}/fills for REST reconciliation.
+  private_state: guarded_private_rest_readbacks
+  read_guard: ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token
+  readbacks:
+  - query_order
+  - get_open_orders
+  - get_recent_fills
+  notes: Query/open/fill readbacks use guarded private REST; write endpoints and account/fee runtime remain offline.
 batch:
-  place: { support: unsupported, reason: zebpay.batch_place_orders_unverified }
-  cancel: { support: unsupported, reason: zebpay.batch_cancel_orders_unverified }
+  place:
+    support: unsupported
+    reason: zebpay.batch_place_orders_unverified
+  cancel:
+    support: unsupported
+    reason: zebpay.batch_cancel_orders_unverified
 websocket:
   public:
     support: unsupported
     reason: zebpay.public_streams_unverified
-    heartbeat: { mode: unsupported }
+    heartbeat:
+      mode: unsupported
     fallback: REST snapshots over /market/{trade_pair}/book and /market/{trade_pair}/book_long.
   private:
     support: unsupported
     reason: zebpay.private_streams_unverified
-    auth_renewal: { mode: unsupported }
-    fallback: Request-spec-only REST readbacks over /orders and /orders/{order_id}/fills.
+    auth_renewal:
+      mode: unsupported
+    fallback: Guarded REST readbacks over /orders and /orders/{order_id}/fills when private REST is explicitly enabled.
+unsupported:
+- operation: contract_product
+  status: project_unimplemented
+  product_lines:
+  - futures
+  - perpetual
+  boundary: project_unimplemented_product_line
+  official_gap: zebpay_api_services_spot_and_futures
+  source_boundary_fixture: tests/fixtures/exchanges/zebpay/request_specs/product_line_source_boundary.json
+  runtime_isolation: Current ZebPay adapter is spot scan-only plus private request specs; futures/perpetual API access needs
+    onboarding, product scope and separate runtime validation.
+  required_endpoints:
+    market_metadata:
+    - futures_perpetual_instruments
+    - contract_specifications
+    public_market_data:
+    - futures_perpetual_order_book
+    - futures_perpetual_ticker
+    - futures_perpetual_trades
+    private_account:
+    - futures_perpetual_margin_account
+    - positions
+    - risk_or_leverage_limits
+    private_order_lifecycle:
+    - place_order
+    - cancel_order
+    - query_order
+    - open_orders
+    - fills
+  unsafe_to_promote_without:
+  - ZebPay futures/perpetual API onboarding approval
+  - product-scoped bearer token dry-run guard
+  - post-write query/open/fills reconciliation
+  reason: Official ZebPay Futures/Perpetual API surfaces exist but are not wired by the current spot adapter.
+- operation: futures_product
+  status: project_unimplemented
+  product_lines:
+  - futures
+  - perpetual
+  boundary: project_unimplemented_product_line
+  official_gap: zebpay_api_services_spot_and_futures
+  source_boundary_fixture: tests/fixtures/exchanges/zebpay/request_specs/product_line_source_boundary.json
+  required_endpoints:
+    market_metadata:
+    - futures_perpetual_instruments
+    - contract_specifications
+    public_market_data:
+    - futures_perpetual_order_book
+    - futures_perpetual_ticker
+    - futures_perpetual_trades
+    private_account:
+    - futures_perpetual_margin_account
+    - positions
+    - risk_or_leverage_limits
+    private_order_lifecycle:
+    - place_order
+    - cancel_order
+    - query_order
+    - open_orders
+    - fills
+  unsafe_to_promote_without:
+  - ZebPay futures/perpetual API onboarding approval
+  - product-scoped bearer token dry-run guard
+  - post-write query/open/fills reconciliation
+  reason: ZebPay public API service material covers spot/futures access, but futures/perpetual runtime is not wired in this
+    spot adapter.
+- operation: get_balances
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/zebpay/request_specs/get_balances.json
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending bearer token read-only auth, wallet balance parser, and onboarding/region guard.
+- operation: get_fees
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/zebpay/request_specs/get_fees_tradefees.json
+  reason: ZebPay /tradefees/{trade_pair} is mapped as an offline request-spec boundary, but shared get_fees runtime remains
+    project-unimplemented pending bearer/signature auth guard, parser, onboarding, and region guard.
 endpoints:
-  - operation: get_symbol_rules
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /market
-    auth: none
-    rate_limit_bucket: zebpay_public
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://docs.zebpay.com/
-  - operation: get_order_book
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /market/{trade_pair}/book
-    auth: none
-    rate_limit_bucket: zebpay_public
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://docs.zebpay.com/
-  - operation: get_order_book_long
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /market/{trade_pair}/book_long
-    auth: none
-    rate_limit_bucket: zebpay_public
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://docs.zebpay.com/
-  - operation: get_balances
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /wallet/balance
-    auth: bearer
-    credential_scopes: [read_only]
-    rate_limit_bucket: zebpay_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: zebpay.balances_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/zebpay/request_specs/get_balances.json
-    official_doc: https://docs.zebpay.com/
-  - operation: place_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /orders
-    auth: bearer
-    credential_scopes: [trade]
-    rate_limit_bucket: zebpay_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: zebpay.place_order_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/zebpay/request_specs/place_order_limit_buy.json
-    official_doc: https://docs.zebpay.com/
-  - operation: cancel_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: DELETE
-    path: /orders/{order_id}
-    auth: bearer
-    credential_scopes: [trade]
-    rate_limit_bucket: zebpay_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: zebpay.cancel_order_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/zebpay/request_specs/cancel_order.json
-    official_doc: https://docs.zebpay.com/
-  - operation: cancel_all_orders
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: DELETE
-    path: /orders/CancelAll
-    auth: bearer
-    credential_scopes: [trade]
-    rate_limit_bucket: zebpay_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: unknown
-    testnet: false
-    support: unsupported
-    reason: zebpay.cancel_all_orders_request_spec_only
-    official_doc: https://docs.zebpay.com/
-  - operation: get_open_orders
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /orders
-    auth: bearer
-    credential_scopes: [read_only]
-    rate_limit_bucket: zebpay_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: zebpay.open_orders_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/zebpay/request_specs/get_open_orders.json
-    official_doc: https://docs.zebpay.com/
-  - operation: get_recent_fills
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /orders/{order_id}/fills
-    auth: bearer
-    credential_scopes: [read_only]
-    rate_limit_bucket: zebpay_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: zebpay.recent_fills_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/zebpay/request_specs/get_recent_fills.json
-    official_doc: https://docs.zebpay.com/
+- operation: get_symbol_rules
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /market
+  auth: none
+  rate_limit_bucket: zebpay_public
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://docs.zebpay.com/
+- operation: get_order_book
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /market/{trade_pair}/book
+  auth: none
+  rate_limit_bucket: zebpay_public
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://docs.zebpay.com/
+- operation: get_order_book_long
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /market/{trade_pair}/book_long
+  auth: none
+  rate_limit_bucket: zebpay_public
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://docs.zebpay.com/
+- operation: get_balances
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /wallet/balance
+  auth: bearer
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending bearer token read-only auth, wallet balance parser, and onboarding/region guard.
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/get_balances.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/get_balances.json
+    source: response_sample
+  notes: 'P3 balance boundary: wallet balance request spec and sanitized response sample are pinned offline; runtime still
+    returns zebpay.balances_request_spec_only.'
+  official_doc: https://docs.zebpay.com/
+- operation: get_fees
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /tradefees/{trade_pair}
+  auth: bearer
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: ZebPay tradefees request shape is fixture-backed, but shared get_fees runtime remains disabled pending auth/onboarding
+    guard and maker/taker parser.
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/get_fees_tradefees.json
+  official_doc: https://apidocs.zebpay.com/
+- operation: place_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /orders
+  auth: bearer
+  credential_scopes:
+  - trade
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: ZebPay spot private core trading is fixture-backed offline; runtime stays disabled pending bearer-token onboarding,
+    region/profile guard, parsers, reconciliation, and live dry-run controls.
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/place_order_limit_buy.json
+  official_doc: https://docs.zebpay.com/
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: DELETE
+  path: /orders/{order_id}
+  auth: bearer
+  credential_scopes:
+  - trade
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: ZebPay spot private core trading is fixture-backed offline; runtime stays disabled pending bearer-token onboarding,
+    region/profile guard, parsers, reconciliation, and live dry-run controls.
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/cancel_order.json
+  official_doc: https://docs.zebpay.com/
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_all_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: DELETE
+  path: /orders/CancelAll
+  auth: bearer
+  credential_scopes:
+  - trade
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: unknown
+  testnet: false
+  support: spec_only
+  reason: ZebPay spot private core trading is fixture-backed offline; runtime stays disabled pending bearer-token onboarding,
+    region/profile guard, parsers, reconciliation, and live dry-run controls.
+  official_doc: https://docs.zebpay.com/
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/cancel_all_orders.json
+- operation: get_open_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /orders
+  auth: bearer
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: ZebPay open-orders private REST readback is guarded runtime behind ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token; writes remain offline.
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/get_open_orders.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/zebpay/open_orders_success.json
+  official_doc: https://docs.zebpay.com/
+  notes: 'P2 core readback runtime only: request/source fixture is pinned and runtime fails closed without the explicit private REST guard and credentials. Write endpoints remain offline.'
+- operation: get_recent_fills
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /orders/{order_id}/fills
+  auth: bearer
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: ZebPay order fills private REST readback is guarded runtime behind ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token; writes remain offline.
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/get_recent_fills.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/zebpay/recent_fills_success.json
+  official_doc: https://docs.zebpay.com/
+  notes: 'P2 core readback runtime only: request/source fixture is pinned and runtime fails closed without the explicit private REST guard and credentials. Write endpoints remain offline.'
+- operation: query_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /orders
+  auth: bearer
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: zebpay_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: ZebPay query-order private REST readback is guarded runtime behind ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token; writes remain offline.
+  official_doc: https://docs.zebpay.com/
+  request_spec:
+    fixture: tests/fixtures/exchanges/zebpay/request_specs/query_order.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/zebpay/order_success.json
+  notes: 'P2 core readback runtime only: request/source fixture is pinned and runtime fails closed without the explicit private REST guard and credentials. Write endpoints remain offline.'

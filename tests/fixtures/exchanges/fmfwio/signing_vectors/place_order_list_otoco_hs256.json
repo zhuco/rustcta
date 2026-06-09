@@ -1,0 +1,13 @@
+{
+  "exchange": "fmfwio",
+  "name": "place_order_list_otoco_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/api/3/spot/order/list",
+  "payload": "POST/api/3/spot/order/list{\"contingency_type\":\"oneTriggerOneCancelOther\",\"orders\":[{\"client_order_id\":\"cli-fmfwio-otoco-primary\",\"post_only\":false,\"price\":\"0.046016\",\"quantity\":\"0.063\",\"side\":\"buy\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-fmfwio-otoco-tp\",\"post_only\":false,\"price\":\"0.050000\",\"quantity\":\"0.063\",\"side\":\"sell\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-fmfwio-otoco-sl\",\"post_only\":false,\"quantity\":\"0.063\",\"side\":\"sell\",\"stop_price\":\"0.044050\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"stopMarket\"}]}171000000000010000",
+  "expected_signature": "9dcdd094ab118274f614335b3d08cb2298af7ac1fb858909a41cc5d44facd934",
+  "payload_format": "raw_payload",
+  "body": "{\"contingency_type\":\"oneTriggerOneCancelOther\",\"orders\":[{\"client_order_id\":\"cli-fmfwio-otoco-primary\",\"post_only\":false,\"price\":\"0.046016\",\"quantity\":\"0.063\",\"side\":\"buy\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-fmfwio-otoco-tp\",\"post_only\":false,\"price\":\"0.050000\",\"quantity\":\"0.063\",\"side\":\"sell\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-fmfwio-otoco-sl\",\"post_only\":false,\"quantity\":\"0.063\",\"side\":\"sell\",\"stop_price\":\"0.044050\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"stopMarket\"}]}"
+}

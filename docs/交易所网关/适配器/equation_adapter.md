@@ -17,7 +17,7 @@ Product lines:
 Runtime boundary:
 - Product: `MarketType::Perpetual`
 - Chain: Arbitrum One, chain id `42161`
-- Public WS: 交易所不支持公共 WS 行情（当前 audit-only adapter 口径）；官方资料未给稳定 exchange-gateway 公共订单簿 WS
+- Public WS: 交易所不支持公共 WS 行情（当前 audit-only adapter 口径）；官方资料未给稳定 exchange-gateway 公共订单簿 WS，YAML records `websocket.public.support: unsupported`
 - Public REST: unsupported unverified
 - Private reads: unsupported unverified
 - Orders/cancels/batch: unsupported unverified
@@ -33,9 +33,15 @@ Position official detail:
 - 写法：`交易所不支持当前仓位接口 runtime`。
 - 原因：当前 adapter 是 audit-only EVM protocol profile，不启用稳定 private account/position runtime。
 
+账户/余额接口写 `项目未实现/离线边界`：EVM wallet/indexer 可读取抵押品、权益或协议账户状态，`endpoint_mapping.yaml` 已将 `get_balances` 写成 `indexer://equation/arbitrum/wallet-collateral` spec-only source boundary，并绑定 `tests/fixtures/exchanges/equation/request_specs/get_balances_account_source.json`。矩阵应为 `get_balances=离线`；当前 audit profile 未接入 shared runtime、parser、reorg handling 或 reconciliation。
+
 Validation:
 - `python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/equation/endpoint_mapping.yaml`
 - `cargo test -p rustcta-exchange-gateway equation --lib`
 - `cargo test -p rustcta-gateway equation --lib`
 
 Do not run `cargo build` for this task.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：audit-only EVM protocol profile，无稳定 gateway fee runtime。

@@ -1,0 +1,29 @@
+{
+  "exchange": "fmfwio",
+  "operation": "amend_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "PATCH",
+  "path": "/api/3/spot/order/cli-fmfwio-1",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6ZTgxNzNhNDAwNGFjYzJiZWMwZjU5NTVlZmRjZmU2ZTA4OTBmZWM1M2NmMTdmMjEwNWM2MzRjZWY3MjhiOWQyYjoxNzEwMDAwMDAwMDAwOjEwMDAw"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": "new_client_order_id=cli-fmfwio-1-r1&price=0.046020&quantity=0.050",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "fmfwio/amend_order_replace_hs256",
+  "runtime_boundary": "request_spec_only"
+}

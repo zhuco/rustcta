@@ -1,4 +1,17 @@
-{
-  "type": "orderbookdepth",
-  "symbols": ["BTC_KRW"]
-}
+[
+  {
+    "ticket": "rustcta"
+  },
+  {
+    "type": "orderbook",
+    "codes": [
+      "KRW-BTC"
+    ],
+    "is_only_snapshot": false,
+    "is_only_realtime": true,
+    "level": 0
+  },
+  {
+    "format": "DEFAULT"
+  }
+]

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    AccountId, AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
@@ -9,8 +9,8 @@ use rustcta_exchange_api::{
     OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
     PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamCapabilities,
     PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, RequestContext,
+    SymbolRulesRequest, SymbolRulesResponse, TenantId, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -69,6 +69,60 @@ impl MercadoGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn ensure_private_rest(&self, operation: &'static str) -> ExchangeApiResult<()> {
+        if !self.config.private_rest_available() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        Ok(())
+    }
+
+    fn private_account_id(&self, operation: &'static str) -> ExchangeApiResult<&str> {
+        self.ensure_private_rest(operation)?;
+        self.config
+            .account_id
+            .as_deref()
+            .filter(|account_id| !account_id.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })
+    }
+
+    async fn send_bearer_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &std::collections::HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_bearer_get(
+                endpoint,
+                params,
+                self.config.bearer_token.as_deref().unwrap_or_default(),
+            )
+            .await
+    }
+
+    fn context_account(
+        &self,
+        context: &RequestContext,
+    ) -> ExchangeApiResult<(TenantId, AccountId)> {
+        let tenant_id =
+            context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "mercado private REST readback requires context.tenant_id".to_string(),
+                })?;
+        let account_id =
+            context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "mercado private REST readback requires context.account_id"
+                        .to_string(),
+                })?;
+        Ok((tenant_id, account_id))
+    }
 }
 
 #[async_trait]
@@ -99,7 +153,8 @@ impl ExchangeClient for MercadoGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        let private_rest_available = self.config.private_rest_available();
+        capabilities.supports_private_rest = private_rest_available;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -112,9 +167,9 @@ impl ExchangeClient for MercadoGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_rest_available;
+        capabilities.supports_open_orders = private_rest_available;
+        capabilities.supports_recent_fills = private_rest_available;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -254,7 +309,7 @@ impl ExchangeClient for MercadoGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("mercado.query_order_private_read_not_promoted")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -262,7 +317,7 @@ impl ExchangeClient for MercadoGatewayAdapter {
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("mercado.open_orders_private_read_not_promoted")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -270,7 +325,7 @@ impl ExchangeClient for MercadoGatewayAdapter {
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("mercado.recent_fills_private_read_not_promoted")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

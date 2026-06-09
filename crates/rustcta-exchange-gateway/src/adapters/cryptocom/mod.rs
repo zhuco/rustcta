@@ -228,8 +228,7 @@ impl ExchangeClient for CryptoComGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(50);
-        capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
+        capabilities.order_book = rustcta_exchange_api::OrderBookCapability::strict_delta(Some(50));
         capabilities.max_recent_fill_limit = Some(100);
         capabilities.refresh_v2_from_legacy_flags();
         let private = self.config.private_rest_enabled();

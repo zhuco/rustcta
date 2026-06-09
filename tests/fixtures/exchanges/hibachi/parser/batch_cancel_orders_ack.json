@@ -1,0 +1,34 @@
+{
+  "orders": [
+    {
+      "orderId": 579183763093760010,
+      "clientOrderId": "hibachi-batch-cancel-1",
+      "symbol": "BTC/USDT-P",
+      "side": "BID",
+      "orderType": {
+        "type": "LIMIT"
+      },
+      "totalQuantity": "1",
+      "availableQuantity": "1",
+      "price": "10",
+      "status": "CANCELLED",
+      "creationTime": 1714701600000,
+      "finishTime": 1714701602000
+    },
+    {
+      "orderId": 579183763093760011,
+      "clientOrderId": "hibachi-batch-cancel-2",
+      "symbol": "BTC/USDT-P",
+      "side": "ASK",
+      "orderType": {
+        "type": "LIMIT"
+      },
+      "totalQuantity": "0.5",
+      "availableQuantity": "0.5",
+      "price": "12",
+      "status": "CANCELLED",
+      "creationTime": 1714701600000,
+      "finishTime": 1714701602000
+    }
+  ]
+}

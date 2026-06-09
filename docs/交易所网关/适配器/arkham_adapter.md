@@ -30,7 +30,7 @@ mapped as trading capabilities.
 | --- | --- |
 | Product line | Spot and USDT perpetual |
 | Public REST | `GET /public/pairs` and `GET /public/book` parser/transport |
-| Private REST | balances, positions, fees, order, cancel, cancel-all, open orders and fills are offline request-spec only |
+| Private REST | guarded read-only order query, open orders and fills runtime; balances, positions, fees and writes remain offline request-spec only |
 | WebSocket | public subscribe/unsubscribe/auth/heartbeat fixtures; live private WS disabled |
 | Endpoint mapping | `crates/rustcta-exchange-gateway/src/adapters/arkham/endpoint_mapping.yaml` |
 | Fixtures | `tests/fixtures/exchanges/arkham/` |
@@ -54,10 +54,12 @@ covers the offline vector.
 ## Runtime Boundary
 
 Public REST can fetch symbol rules and order book snapshots when enabled.
-Private REST methods intentionally return explicit `Unsupported` errors in
-this task. The request specs document the native fields without enabling live
-order mutation. Private WebSocket is kept behind REST reconciliation until a
-separate live-dry-run validation verifies auth, channels and replay behavior.
+Private REST readbacks for query order, open orders and recent fills fail closed
+unless `ARKHAM_PRIVATE_REST_ENABLED`/`RUSTCTA_ARKHAM_PRIVATE_REST_ENABLED` and
+API credentials are configured. The request specs document the native fields
+without enabling live order mutation. Private WebSocket is kept behind REST
+reconciliation until a separate live-dry-run validation verifies auth, channels
+and replay behavior.
 
 Unsupported:
 
@@ -72,8 +74,11 @@ Unsupported:
 Arkham Exchange official material confirms a RESTful HTTP API and a Websocket
 API with WebSocket request limits, but the publicly accessible pages reviewed in
 this batch did not expose stable order-book channel, interval, depth,
-sequence/checksum, or subscribe payload details. Keep public WS as spec-only and
-require the full Exchange API reference before runtime promotion. Source batch:
+sequence/checksum, or subscribe payload details. The mapping therefore records
+`orderbook_channel: unverified`, no fixed interval published, depth:
+unspecified / 未给固定档位, and `project_unimplemented` runtime boundary. Do not
+enable runtime before the full official Arkham Exchange WS reference is
+captured. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
 
 ## Validation

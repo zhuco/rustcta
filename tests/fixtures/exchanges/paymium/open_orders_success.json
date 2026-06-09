@@ -1,0 +1,28 @@
+{
+  "orders": [
+    {
+      "uuid": "fixture-order-uuid",
+      "type": "LimitOrder",
+      "currency": "EUR",
+      "direction": "buy",
+      "price": "50000.00",
+      "amount": "0.01000000",
+      "traded_btc": "0.00400000",
+      "state": "active",
+      "created_at": "2026-06-01T12:00:00Z",
+      "updated_at": "2026-06-01T12:01:00Z"
+    },
+    {
+      "uuid": "closed-order-uuid",
+      "type": "LimitOrder",
+      "currency": "EUR",
+      "direction": "sell",
+      "price": "51000.00",
+      "amount": "0.00500000",
+      "traded_btc": "0.00500000",
+      "state": "executed",
+      "created_at": "2026-06-01T13:00:00Z",
+      "updated_at": "2026-06-01T13:02:00Z"
+    }
+  ]
+}

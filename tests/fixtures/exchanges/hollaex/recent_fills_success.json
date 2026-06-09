@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": "trade-fixture-1",
+      "order_id": "order-fixture-1",
+      "symbol": "xht-usdt",
+      "side": "sell",
+      "size": "0.04",
+      "price": "1.25",
+      "fee": "0.001",
+      "fee_coin": "usdt",
+      "liquidity": "taker",
+      "created_at": "2024-03-09T16:00:02.000Z",
+      "meta": {
+        "client_order_id": "fixture-client-id"
+      }
+    }
+  ]
+}

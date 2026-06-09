@@ -1,0 +1,43 @@
+{
+  "exchange": "bsx",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "spec_only",
+  "method": "DELETE",
+  "path": "/source/bsx/batch-cancel-orders-boundary",
+  "auth": "signed",
+  "headers": {
+    "BSX-KEY": "test-api-key",
+    "BSX-SIGNATURE": "0xredacted_session_or_eip712_signature",
+    "BSX-TIMESTAMP": "1700000000000000000",
+    "BSX-ACCOUNT": "0xredacted_account"
+  },
+  "body_contains": {
+    "product_id": "BTC-PERP",
+    "orders": [
+      {
+        "order_id": "bsx-order-2001",
+        "client_order_id": "cancel-client-1"
+      },
+      {
+        "order_id": "bsx-order-2002",
+        "client_order_id": "cancel-client-2"
+      }
+    ],
+    "safe_cancel_shape": "selected_cancel_list_only_no_cancel_all_fallback"
+  },
+  "strict_headers": false,
+  "strict_body": false,
+  "trade_enabled": false,
+  "source_boundary_fixture": "tests/fixtures/exchanges/bsx/request_specs/batch_cancel_orders_source_boundary.json",
+  "parser_fixture": "tests/fixtures/exchanges/bsx/parser/batch_cancel_orders_ack.json",
+  "partial_failure_model": "per-item success/failure report with query/open-orders reconciliation for rejected, omitted or ambiguous items",
+  "expected_error": "bsx.batch_cancel_orders_spec_only_no_safe_cancel_shape_session_reconciliation_guard",
+  "remaining_runtime_work": [
+    "select a non-overcancel cancel-list request shape instead of cancel-all fallback",
+    "wire BSX account headers and EIP-712/session signing",
+    "wire sequence and live dry-run guard",
+    "wire account order-state and partial-failure reconciliation"
+  ]
+}

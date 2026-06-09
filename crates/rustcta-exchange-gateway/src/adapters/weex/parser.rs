@@ -130,6 +130,10 @@ pub fn parse_orderbook_snapshot(
     )
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
+    snapshot.sequence = data
+        .get("u")
+        .or_else(|| data.get("lastUpdateId"))
+        .and_then(value_as_u64);
     snapshot.exchange_timestamp = data
         .get("ts")
         .or_else(|| data.get("T"))
@@ -249,6 +253,10 @@ pub(super) fn string_or_number(value: Option<&Value>) -> Option<String> {
 
 pub(super) fn value_as_i64(value: &Value) -> Option<i64> {
     value.as_i64().or_else(|| value.as_str()?.parse().ok())
+}
+
+pub(super) fn value_as_u64(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_str()?.parse().ok())
 }
 
 pub(super) fn decimal_as_f64(value: Option<&Value>) -> Option<f64> {

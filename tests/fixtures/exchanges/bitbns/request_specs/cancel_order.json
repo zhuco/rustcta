@@ -1,0 +1,27 @@
+{
+  "exchange": "bitbns",
+  "operation": "cancel_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/api/trade/v1/cancelOrder/{symbol}",
+  "auth": "hmac",
+  "credential_scope": "trade",
+  "headers_shape": [
+    "X-BITBNS-APIKEY",
+    "X-BITBNS-PAYLOAD",
+    "X-BITBNS-SIGNATURE"
+  ],
+  "body_or_query_shape": {
+    "symbol": "BTC",
+    "timeStamp_nonce": "1700000000000",
+    "body": {
+      "order_id": "12345",
+      "side": "buy",
+      "quantity": "0.01",
+      "rate": "64000"
+    }
+  },
+  "source_boundary": "Bitbns private core trading is source-boundary/request-spec offline; runtime stays disabled pending HMAC-SHA512 signing promotion, KYC/region guard, parsers, reconciliation, and live dry-run controls.",
+  "expected_error_until_promoted": "bitbns.cancel_order_request_spec_only"
+}

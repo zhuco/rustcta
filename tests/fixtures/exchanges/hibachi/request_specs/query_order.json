@@ -1,0 +1,18 @@
+{
+  "exchange": "hibachi",
+  "operation": "query_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/trade/order",
+  "auth": "api_key",
+  "query": {
+    "accountId": { "match": "exact", "value": "42" },
+    "orderId": { "match": "exact", "value": "579183763093760000" }
+  },
+  "headers": {
+    "Authorization": { "match": "non_empty" }
+  },
+  "strict_query": true,
+  "forbid_header_values_containing": ["real", "secret"]
+}

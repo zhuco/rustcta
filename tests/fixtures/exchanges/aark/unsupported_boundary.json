@@ -6,8 +6,48 @@
     "aark.order_book_requires_orderly_account_signed_request",
     "aark.balances_require_orderly_account_audit",
     "aark.place_order_requires_orderly_ed25519_account_audit",
+    "aark.amend_order_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+    "aark.batch_place_orders_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+    "aark.order_list_unverified_orderly_semantics",
+    "aark.batch_cancel_orders_unverified_orderly_semantics",
     "aark.private_streams_require_orderly_account_auth"
   ],
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "project_unimplemented",
+      "runtime_error": "aark.amend_order_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+      "request_spec_fixture": "tests/fixtures/exchanges/aark/request_specs/amend_order_signed_write.json",
+      "parser_fixture": "tests/fixtures/exchanges/aark/parser/amend_order_ack.json",
+      "remaining_runtime_work": [
+        "Aark/Orderly account onboarding audit",
+        "audited Ed25519 signer wiring",
+        "trade permission scope guard",
+        "post-write query/open/fills reconciliation",
+        "live dry-run guard"
+      ]
+    },
+    "batch_place_orders": {
+      "status": "project_unimplemented",
+      "runtime_error": "aark.batch_place_orders_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+      "request_spec_fixture": "tests/fixtures/exchanges/aark/request_specs/batch_place_orders_signed_write.json",
+      "parser_fixture": "tests/fixtures/exchanges/aark/parser/batch_place_orders_ack.json",
+      "remaining_runtime_work": [
+        "Aark/Orderly account onboarding audit",
+        "audited Ed25519 signer wiring",
+        "trade permission scope guard",
+        "partial-failure and missing-item reconciliation",
+        "live dry-run guard"
+      ]
+    },
+    "place_order_list": {
+      "status": "unsupported",
+      "runtime_error": "aark.order_list_unverified_orderly_semantics"
+    },
+    "batch_cancel_orders": {
+      "status": "unsupported",
+      "runtime_error": "aark.batch_cancel_orders_unverified_orderly_semantics"
+    }
+  },
   "scan_only": true,
   "trade_enabled": false,
   "private_write_enabled": false

@@ -1,0 +1,18 @@
+{
+  "status": "ok",
+  "data": [
+    {
+      "id": 99101,
+      "match-id": 77123,
+      "order-id": 59378,
+      "symbol": "btcjpy",
+      "type": "buy-limit",
+      "source": "api",
+      "price": "3000000.000000000000000000",
+      "filled-amount": "0.004000000000000000",
+      "filled-fees": "12.000000000000000000",
+      "fee-currency": "JPY",
+      "created-at": 1717804860000
+    }
+  ]
+}

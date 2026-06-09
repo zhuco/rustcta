@@ -1,0 +1,52 @@
+{
+  "id": 92001001,
+  "client_order_id": "cli-hitbtc-otoco",
+  "contingency_type": "oneTriggerOneCancelOther",
+  "status": "new",
+  "orders": [
+    {
+      "id": 92001002,
+      "client_order_id": "cli-hitbtc-otoco-primary",
+      "symbol": "ETHBTC",
+      "side": "buy",
+      "status": "new",
+      "type": "limit",
+      "time_in_force": "GTC",
+      "quantity": "0.063",
+      "quantity_cumulative": "0.000",
+      "price": "0.046016",
+      "post_only": false,
+      "created_at": "2024-03-09T16:00:00.000Z",
+      "updated_at": "2024-03-09T16:00:00.000Z"
+    },
+    {
+      "id": 92001003,
+      "client_order_id": "cli-hitbtc-otoco-tp",
+      "symbol": "ETHBTC",
+      "side": "sell",
+      "status": "new",
+      "type": "limit",
+      "time_in_force": "GTC",
+      "quantity": "0.063",
+      "quantity_cumulative": "0.000",
+      "price": "0.050000",
+      "post_only": false,
+      "created_at": "2024-03-09T16:00:00.000Z",
+      "updated_at": "2024-03-09T16:00:00.000Z"
+    },
+    {
+      "id": 92001004,
+      "client_order_id": "cli-hitbtc-otoco-sl",
+      "symbol": "ETHBTC",
+      "side": "sell",
+      "status": "new",
+      "type": "stopMarket",
+      "time_in_force": "GTC",
+      "quantity": "0.063",
+      "quantity_cumulative": "0.000",
+      "post_only": false,
+      "created_at": "2024-03-09T16:00:00.000Z",
+      "updated_at": "2024-03-09T16:00:00.000Z"
+    }
+  ]
+}

@@ -8,6 +8,15 @@ use rustcta_types::{
 };
 use serde_json::Value;
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PositionSourceBoundaryAudit {
+    pub boundary: String,
+    pub required_sources: Vec<String>,
+    pub position_fields: Vec<String>,
+    pub reconciliation_required: Vec<String>,
+}
+
 pub fn parse_symbol_rules(
     exchange_id: &ExchangeId,
     value: &Value,
@@ -62,6 +71,36 @@ pub fn parse_orderbook_snapshot(
         .and_then(value_as_i64)
         .and_then(timestamp_millis);
     Ok(snapshot)
+}
+
+#[cfg(test)]
+pub(super) fn parse_position_source_boundary(
+    exchange_id: &ExchangeId,
+    value: &Value,
+) -> ExchangeApiResult<PositionSourceBoundaryAudit> {
+    require_text(exchange_id, value, "exchange", "aftermath")?;
+    require_text(exchange_id, value, "operation", "get_positions")?;
+    require_bool(exchange_id, value, "runtime_enabled", false)?;
+
+    let fixture_policy = value.get("fixture_policy").ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "Aftermath position source boundary missing fixture_policy",
+            value,
+        )
+    })?;
+    require_bool(exchange_id, fixture_policy, "live_call_allowed", false)?;
+
+    Ok(PositionSourceBoundaryAudit {
+        boundary: required_str(exchange_id, value, "boundary")?.to_string(),
+        required_sources: required_string_array(exchange_id, value, &["source", "requires"])?,
+        position_fields: required_string_array(exchange_id, value, &["position_fields"])?,
+        reconciliation_required: required_string_array(
+            exchange_id,
+            value,
+            &["reconciliation_required"],
+        )?,
+    })
 }
 
 fn parse_market(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
@@ -236,6 +275,94 @@ fn required_str<'a>(
             value,
         )
     })
+}
+
+#[cfg(test)]
+fn require_text(
+    exchange_id: &ExchangeId,
+    value: &Value,
+    field: &str,
+    expected: &str,
+) -> ExchangeApiResult<()> {
+    let actual = required_str(exchange_id, value, field)?;
+    if actual == expected {
+        return Ok(());
+    }
+    Err(parse_error(
+        exchange_id.clone(),
+        format!("Aftermath source boundary {field} expected {expected}, got {actual}"),
+        value,
+    ))
+}
+
+#[cfg(test)]
+fn require_bool(
+    exchange_id: &ExchangeId,
+    value: &Value,
+    field: &str,
+    expected: bool,
+) -> ExchangeApiResult<()> {
+    match value.get(field).and_then(Value::as_bool) {
+        Some(actual) if actual == expected => Ok(()),
+        _ => Err(parse_error(
+            exchange_id.clone(),
+            format!("Aftermath source boundary {field} expected {expected}"),
+            value,
+        )),
+    }
+}
+
+#[cfg(test)]
+fn required_string_array(
+    exchange_id: &ExchangeId,
+    value: &Value,
+    path: &[&str],
+) -> ExchangeApiResult<Vec<String>> {
+    let mut cursor = value;
+    for key in path {
+        cursor = cursor.get(*key).ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                format!("Aftermath source boundary missing {}", path.join(".")),
+                value,
+            )
+        })?;
+    }
+    let values = cursor.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            format!(
+                "Aftermath source boundary {} must be an array",
+                path.join(".")
+            ),
+            cursor,
+        )
+    })?;
+    let parsed = values
+        .iter()
+        .map(|item| item.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                format!(
+                    "Aftermath source boundary {} must contain strings",
+                    path.join(".")
+                ),
+                cursor,
+            )
+        })?;
+    if parsed.is_empty() {
+        return Err(parse_error(
+            exchange_id.clone(),
+            format!(
+                "Aftermath source boundary {} must not be empty",
+                path.join(".")
+            ),
+            cursor,
+        ));
+    }
+    Ok(parsed)
 }
 
 fn parse_error(

@@ -3,10 +3,10 @@ exchange: btcbox
 adapter: rustcta_exchange_gateway::adapters::btcbox
 status_date: "2026-06-08"
 metadata:
-  status: draft
+  status: validated
   source: docs/btcbox_adapter.md
   last_reviewed: "2026-06-08"
-  notes: "A-12 scan-only Japanese Spot adapter. BTCBOX public REST is documented, but service suspension code 901 keeps private/live trading disabled."
+  notes: "Japanese JPY Spot adapter. Public REST plus guarded private readback are wired; live writes stay offline until dry-run/write reconciliation is complete."
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -42,7 +42,7 @@ rate_limits:
       interval: 1s
       limit: 2
 reconciliation:
-  private_state: rest_only_when_future_private_rest_is_verified
+  private_state: rest_only_guarded_readback
   readbacks: [trade_view, trade_list]
   after_ws_gap: unsupported_no_official_ws
 batch:
@@ -115,6 +115,11 @@ endpoints:
     request_spec:
       status: fixture_only
       fixture: tests/fixtures/exchanges/btcbox/request_specs/balance.json
+    reason: "BTCBOX balance request spec is fixture-backed, but shared get_balances runtime remains disabled pending official response fixture, HMAC read-only runtime, balance parser, coin scope guard, and reconciliation."
+    response_parser:
+      status: planned
+      fixture: tests/fixtures/exchanges/btcbox/request_specs/balance.json
+      source: request_spec_only
     notes: "Runtime remains disabled during scan-only phase."
   - operation: get_open_orders
     product: spot
@@ -126,11 +131,15 @@ endpoints:
     rate_limit_bucket: private_trade_list
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     official_doc: https://blog.btcbox.jp/en/archives/8762
     request_spec:
       status: fixture_only
       fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_list.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcbox/trade_list_success.json
+    notes: "Runtime guarded by BTCBOX_PRIVATE_REST_ENABLED, API key/secret, Spot symbol and JPY coin scope. Pagination supports BTCBOX since cursor only; limit/id/token cursor remain unsupported."
   - operation: query_order
     product: spot
     transport: rest
@@ -141,11 +150,15 @@ endpoints:
     rate_limit_bucket: private_trade_view
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     official_doc: https://blog.btcbox.jp/en/archives/8762
     request_spec:
       status: fixture_only
       fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_view.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcbox/trade_view_success.json
+    notes: "Runtime guarded by BTCBOX_PRIVATE_REST_ENABLED, API key/secret, numeric exchange_order_id and JPY coin scope. BTCBOX has no client_order_id query semantics."
   - operation: cancel_order
     product: spot
     transport: rest
@@ -178,7 +191,65 @@ endpoints:
       status: fixture_only
       fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_add_limit.json
     notes: "Offline request construction only; ExchangeClient returns Unsupported."
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcbox/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcbox.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcbox/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcbox.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcbox/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcbox.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcbox/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcbox.batch_cancel_orders_unsupported
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile lists JPY Spot public/private endpoints only and exposes no standard futures/perpetual/options product line."
   - operation: private_rest_runtime
     reason: "Documented private API is left disabled until account/KYC/API-key and service-state validation are handled by a later live-readonly task."
   - operation: websocket
@@ -187,3 +258,5 @@ unsupported:
     reason: "JPY funding, deposits, withdrawals, and wallet operations are out of gateway trading runtime scope."
   - operation: non_jpy_markets
     reason: "Official public docs list JPY Spot pairs only."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前资料未验证到稳定 BTCBOX fee endpoint。"

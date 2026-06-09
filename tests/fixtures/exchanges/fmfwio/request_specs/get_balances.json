@@ -1,0 +1,39 @@
+{
+  "exchange": "fmfwio",
+  "operation": "fmfwio.get_balances",
+  "request_spec_only": false,
+  "trade_enabled": false,
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/3/spot/balance",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "canonical_auth_input": "HS256 base64(api_key:hmac_sha256(method+path+query+body+timestamp+window):timestamp:window)",
+  "credential_scope": "read_only",
+  "response_sample": [
+    {
+      "currency": "BTC",
+      "available": "0.01000000",
+      "reserved": "0.00200000"
+    },
+    {
+      "currency": "USDT",
+      "available": "100.00000000",
+      "reserved": "0.00000000"
+    }
+  ],
+  "runtime_boundary": "credential-gated read-only REST runtime; no funds movement or wallet transfer operation is enabled",
+  "expected_error_without_credentials": "fmfwio.get_balances.private_rest_disabled"
+}

@@ -1,0 +1,24 @@
+{
+  "adapter": "bitflyer",
+  "boundary": "core_trading_source_boundary",
+  "status": "spec_only",
+  "operations": [
+    "cancel_all_orders",
+    "query_order",
+    "get_open_orders",
+    "get_recent_fills"
+  ],
+  "source": {
+    "auth": "signed private REST",
+    "paths": [
+      "POST /v1/me/cancelallchildorders",
+      "GET /v1/me/getchildorders",
+      "GET /v1/me/getexecutions"
+    ]
+  },
+  "runtime_gap": [
+    "write methods remain disabled in adapter runtime",
+    "request builder/parser coverage is incomplete for shared order lifecycle",
+    "dry-run and reconciliation guard missing"
+  ]
+}

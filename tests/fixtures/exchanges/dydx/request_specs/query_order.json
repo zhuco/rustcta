@@ -4,7 +4,7 @@
   "product": "perpetual",
   "transport": "rest",
   "method": "GET",
-  "path": "/orders/order-fixture-1",
+  "path": "/v4/orders/order-fixture-1",
   "auth": "none",
   "strict_query": true
 }

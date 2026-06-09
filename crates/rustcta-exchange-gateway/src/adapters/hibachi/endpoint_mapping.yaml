@@ -1,12 +1,12 @@
 schema_version: 1
 exchange: hibachi
 adapter: HibachiGatewayAdapter
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: draft
   source: docs/hibachi_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: Hibachi perpetual adapter for Task A-22. Public REST is enabled; private read/write and WS runtime remain disabled unless separately validated.
+  last_reviewed: "2026-06-09"
+  notes: Hibachi perpetual adapter for Task A-22. Public REST is enabled; private readbacks are guarded by HIBACHI_PRIVATE_REST_ENABLED plus API key/account id; private writes and WS runtime remain disabled unless separately validated.
 market_types: [perpetual]
 products: [perpetual]
 base_urls:
@@ -31,10 +31,10 @@ reconciliation:
     checksum: unsupported_unverified
   private_state:
     mode: rest_readback_required
-    endpoints: [get_open_orders, recent_fills, query_order]
+    endpoints: [get_open_orders, get_recent_fills, query_order]
 batch:
-  place: { support: unsupported_unverified, reason: hibachi.batch_write_request_spec_only }
-  cancel: { support: unsupported_unverified, reason: hibachi.batch_cancel_request_spec_only }
+  place: { support: spec_only, status: project_unimplemented, reason: hibachi.batch_place_requires_contract_id_signer_nonce_and_dry_run_guard }
+  cancel: { support: spec_only, status: project_unimplemented, reason: hibachi.batch_cancel_requires_batch_signature_parser_and_reconciliation }
 websocket:
   public:
     support: parser_only
@@ -42,11 +42,44 @@ websocket:
     channels:
       orderbook: { channel: "orderbook/{symbol}", support: payload_fixture_only }
       trades: { channel: "trades/{symbol}", support: payload_fixture_only }
+    order_book:
+      channel: "orderbook/{symbol}"
+      fixed_update_interval_ms: null
+      update_interval_boundary: no fixed ms documented
+      depth_boundary: no fixed depth documented for WS orderbook
+      sequence: unsupported_no_official_sequence
+      checksum: unsupported_no_official_checksum
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
+        path: /market/data/orderbook
   private:
     support: unsupported
     account_channel: "wss://api.hibachi.xyz/ws/account?accountId={accountId}"
     trade_channel: "wss://api.hibachi.xyz/ws/trade"
     reason: hibachi.private_stream_runtime_spec_only
+unsupported:
+  - operation: spot_product
+    reason: Hibachi trading documentation covers perpetual contracts, order books, and funding; spot products are not supported by this profile.
+  - operation: get_balances
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/get_balances_account_info.json
+    reason: "Official private account/balance readback exists via /trade/account/info, but shared get_balances runtime is project-unimplemented pending auth smoke, balance/risk parser, and read-only guard."
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/amend_order.json
+    parser_fixture: tests/fixtures/exchanges/hibachi/parser/amend_order_ack.json
+    reason: "Official PATCH /trade/order path exists and request-spec/parser fixtures are present, but shared amend_order runtime is project-unimplemented pending account auth/signing runtime, reconciliation, and live guard."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/batch_place_orders.json
+    parser_fixture: tests/fixtures/exchanges/hibachi/parser/batch_place_orders_ack.json
+    reason: "Official POST /trade/orders batch path exists and request-spec/parser fixtures are present, but shared batch_place_orders runtime is project-unimplemented pending account auth/signing runtime, partial-failure reconciliation, and live guard."
+  - operation: batch_cancel_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/batch_cancel_orders.json
+    parser_fixture: tests/fixtures/exchanges/hibachi/parser/batch_cancel_orders_ack.json
+    reason: "Official DELETE /trade/orders batch cancel path exists and request-spec/parser fixtures are present, but shared batch_cancel_orders runtime is project-unimplemented pending account auth/signing runtime, partial-failure reconciliation, and live guard."
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -64,6 +97,23 @@ endpoints:
     support: native
     official_doc: https://hibachi-docs.redocly.app/marketapi/market
     request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/exchange_info.json
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /market/exchange-info
+    auth: none
+    rate_limit_bucket: hibachi_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://hibachi-docs.redocly.app/marketapi/market
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/exchange_info.json
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/hibachi/tests.rs }
   - operation: get_order_book
     product: perpetual
     market_types: [perpetual]
@@ -128,6 +178,44 @@ endpoints:
     reason: hibachi.private_rest_disabled
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
     request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/account_info_readonly.json
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trade/account/info
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: hibachi_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Guarded read runtime: enabled only with HIBACHI_PRIVATE_REST_ENABLED, API key, and account id; parser fixture covers account-info balances while account WS reconciliation remains a follow-up."
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/get_balances_account_info.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/hibachi/parser/account_info_positions.json }
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trade/account/info
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: hibachi_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Guarded read runtime: enabled only with HIBACHI_PRIVATE_REST_ENABLED, API key, and account id; parser fixture covers account-info positions while account WS reconciliation remains a follow-up."
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/positions_source_boundary.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/hibachi/parser/account_info_positions.json }
   - operation: get_open_orders
     product: perpetual
     market_types: [perpetual]
@@ -142,9 +230,11 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported_unverified
-    reason: hibachi.private_rest_disabled
+    support: native
+    reason: "Guarded read runtime: enabled only with HIBACHI_PRIVATE_REST_ENABLED, API key, and account id; default runtime fails closed with hibachi.private_rest_disabled."
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/get_open_orders.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/hibachi/open_orders.json }
   - operation: query_order
     product: perpetual
     market_types: [perpetual]
@@ -159,10 +249,12 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported_unverified
-    reason: hibachi.private_rest_disabled
+    support: native
+    reason: "Guarded read runtime: enabled only with HIBACHI_PRIVATE_REST_ENABLED, API key, account id, and exchange_order_id; client-order-id lookup remains unsupported."
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
-  - operation: recent_fills
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/query_order.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/hibachi/parser/order_success.json }
+  - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -176,9 +268,11 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported_unverified
-    reason: hibachi.private_rest_disabled
+    support: native
+    reason: "Guarded read runtime: enabled only with HIBACHI_PRIVATE_REST_ENABLED, API key, account id, and symbol; unsupported filters fail closed."
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/get_recent_fills.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/hibachi/parser/account_trades_success.json }
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
@@ -193,7 +287,7 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported_unverified
+    support: spec_only
     reason: hibachi.trade_write_request_spec_only
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
     request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/place_order_limit.json
@@ -211,7 +305,7 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported_unverified
+    support: spec_only
     reason: hibachi.cancel_write_request_spec_only
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
     request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/cancel_order.json
@@ -229,9 +323,12 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported_unverified
-    reason: hibachi.amend_write_request_spec_only
+    support: spec_only
+    reason: hibachi.amend_requires_price_signer_nonce_and_reconciliation
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/amend_order.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hibachi/parser/amend_order_ack.json }
+    notes: "Offline boundary only: signed request and ack parser shapes are pinned, but shared AmendOrderRequest lacks price/full replace fields for Hibachi PATCH; signer nonce handling, readback reconciliation, and live guard are disabled."
   - operation: cancel_all_orders
     product: perpetual
     market_types: [perpetual]
@@ -246,10 +343,11 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported_unverified
+    support: spec_only
     reason: hibachi.cancel_all_request_spec_only
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
     request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/cancel_all_orders.json
+    notes: "Offline boundary only: DELETE /trade/orders cancel-all shape is fixture-pinned; shared runtime/live guard are disabled."
   - operation: batch_orders
     product: perpetual
     market_types: [perpetual]
@@ -264,9 +362,68 @@ endpoints:
     native_batch: true
     atomicity: partial
     testnet: false
-    support: unsupported_unverified
-    reason: hibachi.batch_write_request_spec_only
+    support: spec_only
+    reason: hibachi.batch_place_requires_contract_id_signer_nonce_and_dry_run_guard
     official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/batch_place_orders.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hibachi/parser/batch_place_orders_ack.json }
+    notes: "Offline boundary only: native batch order request and ack parser shapes are fixture-pinned; runtime still lacks contract-id lookup, scaled payload signer, nonce allocator, partial-failure reconciliation, and live dry-run guard."
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /trade/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: spec_only
+    reason: hibachi.batch_place_requires_contract_id_signer_nonce_and_dry_run_guard
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/batch_place_orders.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hibachi/parser/batch_place_orders_ack.json }
+    notes: "Offline boundary only: POST /trade/orders batch-place request and ack parser shapes are fixture-pinned; runtime still lacks contract-id lookup, scaled payload signer, nonce allocator, partial-failure reconciliation, and live dry-run guard."
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /trade/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: spec_only
+    reason: hibachi.batch_cancel_requires_batch_signature_parser_and_reconciliation
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/batch_cancel_orders.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hibachi/parser/batch_cancel_orders_ack.json }
+    notes: "Offline boundary only: DELETE /trade/orders batch-cancel request and ack parser shapes are fixture-pinned; runtime still lacks verified batch signature payload, partial parser/readback reconciliation, nonce handling, and live dry-run guard."
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/hibachi/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: hibachi.order_list_unsupported
 streams:
   - operation: public_orderbook_ws
     product: perpetual

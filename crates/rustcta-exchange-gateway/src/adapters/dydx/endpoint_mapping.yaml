@@ -1,11 +1,11 @@
 schema_version: 1
 exchange: dydx
 adapter: rustcta_exchange_gateway::adapters::dydx
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: validated
   source: docs/dydx_adapter.md
-  last_reviewed: "2026-06-08"
+  last_reviewed: "2026-06-09"
   notes: dYdX v4 perpetual DEX adapter. Public and private read data use Indexer REST/WS; Node transaction signing remains explicit Unsupported.
 market_types: [perpetual]
 products: [perpetual]
@@ -26,15 +26,28 @@ pagination:
   recent_fills: { mode: cursor_or_page, limit_param: limit, max_limit: 100 }
 reconciliation:
   private_state: rest_fallback
-  after_place: Unsupported until Node write signing is implemented.
+  after_place: Project-unimplemented until Node write signing is implemented.
   stream_recovery: Resubscribe v4_subaccounts and reconcile subaccount, positions, orders, and fills through Indexer REST.
 batch:
-  place_orders: { support: unsupported, reason: dydx.batch_place_requires_node_tx_signing }
-  cancel_orders: { support: unsupported, reason: dydx.batch_cancel_requires_node_tx_signing }
+  place_orders: { support: spec_only, status: project_unimplemented, source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json, reason: dydx.batch_place_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation }
+  cancel_orders: { support: spec_only, status: project_unimplemented, source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json, reason: dydx.batch_cancel_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation }
 websocket:
   public:
     support: native
     channels: [v4_orderbook, v4_trades, v4_markets, v4_candles]
+    order_book:
+      channel: v4_orderbook
+      initial_message: REST-equivalent snapshot
+      update_message: price-level update
+      update_mode: event-driven; official docs do not publish a fixed millisecond interval.
+      push_interval_ms: null
+      depth: null
+      depth_boundary: no fixed depth selector published for the WebSocket order book.
+      sequence_fields: [message_id, version, clobPairId]
+      sequence_policy: reconnect_and_resubscribe_for_fresh_initial_snapshot_after_gap
+      checksum: unsupported
+      snapshot: GET /v4/orderbooks/perpetualMarket/{ticker}
+      resync_policy: Reconnect and resubscribe; use the fresh initial snapshot plus REST fallback after gaps or disconnects.
     heartbeat: { mode: server_or_transport_ping, interval_ms: 30000, timeout_ms: 90000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
@@ -42,7 +55,60 @@ websocket:
     channels: [v4_subaccounts]
     auth_renewal: { mode: address_subscription }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official dYdX Solana spot trading material exists separately from v4 perps, but this adapter scope is dYdX v4 perpetual Indexer reads and Node transaction boundaries only; remaining Spot runtime work is Solana spot market discovery, spot order-book/indexer public source, wallet account/private routing, spot order lifecycle transaction builders, fill parsers, slot/reorg handling, and indexer reconciliation."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/dydx/request_specs/product_line_source_boundary.json
+    current_scope: "dYdX v4 perpetual Indexer public/private reads plus Node tx source boundaries."
+    runtime_gap: "Solana spot market discovery, spot order book/indexer source, wallet transaction routing, and spot order/account parsers are not wired."
+    required_sources: [solana_spot_markets, spot_order_book_or_indexer, spot_wallet_account, spot_order_tx_builder, spot_fills]
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: chain_fee_tier_params
+    source_fixture: tests/fixtures/exchanges/dydx/request_specs/get_fees_source_boundary.json
+    reason: "dYdX Chain fee tier parameters are recorded as an offline chain/config source; shared get_fees runtime remains project-unimplemented pending account-tier conversion, chain height guard, and FeeRateSnapshot mapping."
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/amend_order_node_tx_boundary.json
+    parser_fixture: tests/fixtures/exchanges/dydx/parser/amend_order_tx_response_boundary.json
+    source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json
+    reason: "dYdX Chain supports replacing/amending orders, but shared runtime is project-unimplemented pending Node transaction signing, account sequence, tx parser, and dry-run-safe broadcast guard."
+  - operation: place_order_list
+    status: unsupported
+    reason: "Shared OCO/order-list semantics are not verified as a lossless dYdX Chain transaction model."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/batch_place_orders_node_tx_boundary.json
+    parser_fixture: tests/fixtures/exchanges/dydx/parser/batch_place_orders_tx_response_boundary.json
+    source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json
+    reason: "dYdX Chain order placement can be modeled through Node transactions, but shared batch place is project-unimplemented pending signing, parser, and dry-run guard."
+  - operation: batch_cancel_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/batch_cancel_orders_node_tx_boundary.json
+    parser_fixture: tests/fixtures/exchanges/dydx/parser/batch_cancel_orders_tx_response_boundary.json
+    source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json
+    reason: "dYdX Chain order cancellation can be modeled through Node transactions, but shared batch cancel is project-unimplemented pending signing, parser, and dry-run guard."
 endpoints:
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /dydxprotocol/v4/feetiers/perpetual_fee_params
+    auth: none
+    rate_limit_bucket: dydx_indexer
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: chain fee-tier parameter source is fixture-backed only; account-effective tier and height-checked conversion are not in shared runtime."
+    official_doc: https://docs.dydx.community/dydx/modules/governance/governance-adjustable-parameters/fee-tiers
+    request_spec:
+      fixture: tests/fixtures/exchanges/dydx/request_specs/get_fees_source_boundary.json
   - operation: symbol_rules
     product: perpetual
     market_types: [perpetual]
@@ -107,30 +173,125 @@ endpoints:
     transport: rest
     method: POST
     path: node private Place Order transaction
-    auth: unsupported
+    auth: signed
     rate_limit_bucket: dydx_node_private
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unknown
     testnet: true
-    support: unsupported
-    reason: dydx.node_order_signing_requires_wallet_tx_authenticator
+    support: spec_only
+    reason: dydx.node_write_requires_wallet_signer_account_sequence_subaccount_guard_dry_run_and_indexer_reconciliation
   - operation: cancel_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
     path: node private Cancel Order transaction
-    auth: unsupported
+    auth: signed
     rate_limit_bucket: dydx_node_private
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unknown
     testnet: true
+    support: spec_only
+    reason: dydx.node_write_requires_wallet_signer_account_sequence_subaccount_guard_dry_run_and_indexer_reconciliation
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: CHAIN_TX
+    path: node private Replace Order transaction
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: dydx_node_private
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    reason: dydx.amend_requires_wallet_signer_account_sequence_subaccount_guard_dry_run_and_indexer_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/amend_order_node_tx_boundary.json
+    request_spec:
+      fixture: tests/fixtures/exchanges/dydx/request_specs/amend_order_node_tx_boundary.json
+      source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json
+    notes: "Offline boundary only: dYdX Chain replace tx fields are pinned, but wallet signer, account number/sequence, chain id/subaccount guard, tx parser, dry-run-safe broadcast, and Indexer reconciliation are disabled."
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: node private order-list transaction
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: dydx_node_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
     support: unsupported
-    reason: dydx.node_cancel_signing_requires_wallet_tx_authenticator
+    reason: dydx.order_list_shared_oco_semantics_not_verified
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: CHAIN_TX
+    path: node private batch Place Order transaction
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: dydx_node_private
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: dydx.batch_place_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/batch_place_orders_node_tx_boundary.json
+    request_spec:
+      fixture: tests/fixtures/exchanges/dydx/request_specs/batch_place_orders_node_tx_boundary.json
+      source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json
+    notes: "Offline boundary only: batch place tx fields are pinned, but no batch tx builder, wallet signer, account sequence allocator, partial tx parser, dry-run-safe broadcast, or Indexer reconciliation runtime is wired."
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: CHAIN_TX
+    path: node private batch Cancel Order transaction
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: dydx_node_private
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: dydx.batch_cancel_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/batch_cancel_orders_node_tx_boundary.json
+    request_spec:
+      fixture: tests/fixtures/exchanges/dydx/request_specs/batch_cancel_orders_node_tx_boundary.json
+      source_fixture: tests/fixtures/exchanges/dydx/request_specs/advanced_orders_chain_tx_source_boundary.json
+    notes: "Offline boundary only: batch cancel tx fields are pinned, but no batch tx builder, wallet signer, account sequence allocator, partial tx parser, dry-run-safe broadcast, or Indexer reconciliation runtime is wired."
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/orders/{orderId}
+    auth: none
+    rate_limit_bucket: dydx_indexer_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: "Address/subaccount-scoped Indexer order readback by order id. No API key or wallet secret is sent."
+    request_spec_fixture: tests/fixtures/exchanges/dydx/request_specs/query_order.json
   - operation: open_orders
     product: perpetual
     market_types: [perpetual]

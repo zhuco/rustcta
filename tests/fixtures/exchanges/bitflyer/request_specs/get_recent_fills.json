@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v1/me/getexecutions",
+  "query": {
+    "product_code": "BTC_JPY",
+    "child_order_id": "JOR20250327-000000-000001",
+    "count": "50"
+  },
+  "auth": "hmac"
+}

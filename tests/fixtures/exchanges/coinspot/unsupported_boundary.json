@@ -1,0 +1,21 @@
+{
+  "exchange": "coinspot",
+  "market_type": "spot",
+  "advanced_order_runtime": false,
+  "side_specific_native_order_api": true,
+  "unsupported_operations": {
+    "amend_order": "coinspot.edit_order_side_specific",
+    "place_order_list": "coinspot.order_list",
+    "batch_place_orders": "coinspot.batch_place_orders",
+    "batch_cancel_orders": "coinspot.batch_cancel_orders",
+    "cancel_all_orders": "coinspot.cancel_all_orders"
+  },
+  "capability_flags": {
+    "supports_amend_order": false,
+    "supports_order_list": false,
+    "supports_batch_place_order": false,
+    "supports_batch_cancel_order": false,
+    "supports_cancel_all_orders": false
+  },
+  "reason": "CoinSpot native order/cancel/readback APIs are buy/sell side-context dependent, while shared advanced-order requests cannot safely carry the required side/order context."
+}

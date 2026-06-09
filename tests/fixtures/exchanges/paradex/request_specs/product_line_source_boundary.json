@@ -1,0 +1,19 @@
+{
+  "exchange": "paradex",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["option", "perpetual"],
+  "official_product_lines": ["spot", "option", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Paradex Spot Trading and option/perpetual market APIs",
+      "evidence": "Paradex Spot Trading is a separate product line; this adapter maps perpetual/options markets and JWT/Stark private order/account boundaries."
+    }
+  ],
+  "runtime_isolation": "Keep Paradex spot isolated from option/perpetual market filters and Stark order builders until spot account/order semantics are pinned.",
+  "remaining_work": [
+    "filter spot markets and add spot orderbook parser fixtures",
+    "add spot order, open-order, fill and balance request specs",
+    "wire JWT/Stark auth, product-scope guard and REST/WS reconciliation"
+  ]
+}

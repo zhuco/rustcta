@@ -1,0 +1,31 @@
+{
+  "exchange": "bitflyer",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/me/getbalance",
+  "auth": "hmac",
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "non_empty"
+    },
+    "ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "ACCESS-SIGN": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "runtime_boundary": {
+    "status": "offline",
+    "reason": "Private getbalance response fixture exists, but shared balance parser and readback reconciliation are not implemented.",
+    "adapter_error": "bitflyer.get_balances.rest_parser_pending"
+  },
+  "body": null
+}

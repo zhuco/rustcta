@@ -5,7 +5,16 @@
   ],
   "scan_only": false,
   "trade_enabled": false,
-  "private_write_runtime": "unsupported_offline_request_spec_only",
+  "private_write_runtime": "batch_and_cancel_all_runtime_require_explicit_private_rest",
+  "runtime_enabled_with_private_rest": [
+    "batch_place_orders",
+    "batch_cancel_orders",
+    "cancel_all_orders"
+  ],
+  "offline_request_spec_only": [
+    "place_order",
+    "cancel_order"
+  ],
   "unsupported": [
     "perpetual",
     "futures",

@@ -16,5 +16,23 @@
   },
   "signing_vector": "tests/fixtures/exchanges/yobit/signing_vectors/rest_tapi_hmac_sha512.json",
   "credential_scope": "read_only",
+  "response_sample": {
+    "success": 1,
+    "return": {
+      "funds": {
+        "btc": "0.01000000",
+        "usdt": "100.00000000"
+      },
+      "funds_incl_orders": {
+        "btc": "0.01200000",
+        "usdt": "100.00000000"
+      },
+      "funds_in_orders": {
+        "btc": "0.00200000",
+        "usdt": "0.00000000"
+      }
+    }
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns yobit.balances_request_spec_only until TAPI HMAC auth smoke, getInfo parser, and reconciliation are promoted.",
   "expected_error_until_promoted": "yobit.balances_request_spec_only"
 }

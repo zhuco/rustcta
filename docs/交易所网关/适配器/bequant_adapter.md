@@ -65,6 +65,16 @@ Unsupported or deferred:
 
 官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Bequant 官方 v3 API 有 Spot、Margin、Futures account/order/position 以及 trading WebSocket 的 margin/futures 方法。当前 adapter 只声明 Spot，所以 Margin/Futures/Perpetual 必须写 `项目未实现`，不能写成 `交易所不支持合约`。
 
+2026-06-09 产品线边界收窄：`contract_product`、`margin_product` 和
+`futures_product` 绑定
+`tests/fixtures/exchanges/bequant/request_specs/product_line_source_boundary.json`。
+当前 Bequant Spot profile 不隐式复用到 Margin/Futures/Perpetual；补齐前需要
+Bequant-specific endpoint specs、position/margin/risk parser、product-scope guard 和
+private WS/REST reconciliation。
+状态建议：继续保留 `contract_product` / `margin_product` /
+`futures_product = 项目未实现`；官方 Margin/Futures/Perpetual 线索不能写成
+`不支持`，也不能由现有 Spot profile 推断为 derivatives runtime。
+
 ## Rate Limits
 
 The endpoint mapping records the official sliding one-second model: public REST

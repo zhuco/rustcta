@@ -36,7 +36,7 @@ Status: `rustcta-exchange-gateway` Spot + futures REST adapter with WebSocket re
 
 官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。HashKey Global public stream URL 是 `wss://stream-glb.hashkey.com/quote/ws/v1`，depth 订阅 payload 使用 `topic=depth,event=sub`，symbol 可为 spot 或 perpetual。
 
-官方 depth 更新频率为 300ms，最多 200 档；REST `/quote/v1/depth` 的 `limit` max 200 可作为 snapshot fallback。公开页未见 sequence/checksum，心跳建议客户端每 10s ping。
+官方 depth 更新频率为 300ms，最多 200 档；REST `/quote/v1/depth` 的 `limit` max 200 可作为 snapshot fallback。公开页未见 sequence/checksum，矩阵边界记录为 no sequence、no checksum；心跳建议客户端每 10s ping。
 
 ## Authentication
 
@@ -51,11 +51,21 @@ Secrets are only used inside the transport signing path and are not written into
 ## Explicit Boundaries
 
 - Quote-sized Spot market orders are not enabled until HashKey account behavior is live validated.
-- Native batch endpoints, amend order, OCO/OTO order-list APIs, leverage, margin mode and position mode mutations are outside the current shared gateway trait or remain explicit follow-ups.
+- Amend order and OCO/OTO order-list APIs are explicit unsupported boundaries: no official HashKey Global Spot/Futures endpoint has been verified as a lossless shared `amend_order` or `place_order_list` model.
+- Native batch endpoints, leverage, margin mode and position mode mutations are outside the current shared gateway trait or remain explicit follow-ups.
 - Batch place/cancel and cancel-all are composed gateway flows, not atomic native exchange batch requests.
 - Production WebSocket socket supervision and live-dry-run reconciliation still need deployment validation before relying on WS-only private state.
 
 Use REST reconciliation as the source of truth until API keys, permissions, minimum notional rules and live WebSocket behavior have been validated with a read-only preflight followed by live-dry-run.
+
+## Advanced Order Boundary
+
+| Operation | Mapping status | Boundary |
+| --- | --- | --- |
+| `amend_order` | `unsupported` | No verified official HashKey Global Spot/Futures amend endpoint matches the shared amend semantics. |
+| `place_order_list` | `unsupported` | No verified official OCO/OTO/order-list endpoint maps losslessly to the shared order-list model. |
+| `batch_place_orders` | `composed` | Runtime executes sequential single-order placements; partial/non-atomic, not native batch. |
+| `batch_cancel_orders` | `composed` | Runtime executes sequential single-order cancels; partial/non-atomic, not native batch. |
 
 ## Official Position Detail
 

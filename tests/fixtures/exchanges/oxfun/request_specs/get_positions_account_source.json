@@ -1,0 +1,56 @@
+{
+  "exchange": "oxfun",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "boundary": "private_account_positions_source_only",
+  "support": "spec_only",
+  "runtime_enabled": false,
+  "source": {
+    "surfaces": [
+      "OX.FUN private account endpoint",
+      "OX.FUN private positions/account state material",
+      "private WebSocket account and order state"
+    ],
+    "requires": [
+      "account_id_or_user_id",
+      "read_only_api_key_scope",
+      "signed private account request",
+      "position schema audit"
+    ],
+    "does_not_use": [
+      "real_access_key",
+      "real_secret_key",
+      "withdrawal_scope"
+    ]
+  },
+  "request_shape_sample": {
+    "method": "GET",
+    "path": "/v3/positions",
+    "query": {
+      "marketCode": "BTC-USD-SWAP-LIN"
+    },
+    "auth": "hmac_read_only_fixture"
+  },
+  "decoded_sample": {
+    "account_id": "oxfun-account-id-fixture",
+    "market_code": "BTC-USD-SWAP-LIN",
+    "position_size": "0.010000",
+    "entry_price": "65000.0",
+    "mark_price": "65100.0",
+    "unrealized_pnl": "1.0",
+    "margin_mode": "cross"
+  },
+  "runtime_gap": [
+    "read-only auth smoke",
+    "stable positions endpoint verification",
+    "positions parser",
+    "private WS reconciliation",
+    "funding and margin field normalization"
+  ],
+  "fixture_policy": {
+    "contains_api_key": false,
+    "contains_api_secret": false,
+    "contains_real_account_id": false,
+    "live_call_allowed": false
+  }
+}

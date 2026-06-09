@@ -1,0 +1,21 @@
+{
+  "exchange": "bitso",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/fees",
+  "auth": "bitso_hmac_sha256",
+  "headers": {
+    "Authorization": {
+      "match": "non_empty",
+      "shape": "Bitso <key>:<nonce>:<hex_signature>"
+    }
+  },
+  "query": {},
+  "body": null,
+  "strict_query": true,
+  "strict_body": true,
+  "credential_scope": "read_only",
+  "signing_vector": "tests/fixtures/exchanges/bitso/signing_vectors/rest_get_fees.json"
+}

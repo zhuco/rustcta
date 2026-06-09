@@ -3,6 +3,9 @@ exchange: okx
 adapter: rustcta_exchange_gateway::adapters::okx
 market_types:
   - spot
+  - perpetual
+  - futures
+  - options
 rest:
   base_url: https://www.okx.com
   testnet_base_url: https://www.okx.com
@@ -27,6 +30,7 @@ reconciliation:
   private_stream_fallback: rest
   readbacks:
     - get_balances
+    - get_positions
     - query_order
     - get_open_orders
     - get_recent_fills
@@ -34,11 +38,19 @@ reconciliation:
   retry_policy: retry_rate_limited_and_transient
 batch:
   place_orders:
-    support: unsupported
-    reason: batch place order is not implemented
+    support: native
+    endpoint: /api/v5/trade/batch-orders
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    partial_failure: true
   cancel_orders:
-    support: unsupported
-    reason: batch cancel is only used internally by cancel_all_orders
+    support: native
+    endpoint: /api/v5/trade/cancel-batch-orders
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    partial_failure: true
   cancel_all_orders:
     support: composed
     composed_from:
@@ -49,10 +61,50 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: rest_fallback
+    url: wss://ws.okx.com:8443/ws/v5/public
+    subscribe:
+      op: subscribe
+      args: [{ channel: channel_name, instId: instrument_id }]
+    channels:
+      bbo_tbt:
+        channel: bbo-tbt
+        products: [spot, perpetual, futures, options]
+        interval_ms: 10
+        depth: 1
+        sequence: seqId
+        checksum: none
+      books5:
+        channel: books5
+        products: [spot, perpetual, futures, options]
+        interval_ms: 100
+        depth: 5
+        sequence: seqId
+        checksum: none
+      books:
+        channel: books
+        products: [spot, perpetual, futures, options]
+        interval_ms: 100
+        depth: 400
+        sequence: seqId
+        checksum: checksum field not present in shared parser fixture
+      tbt_depth_restricted:
+        channel: books-l2-tbt/books50-l2-tbt
+        products: [spot, perpetual, futures, options]
+        interval_ms: 10
+        depth: [400, 50]
+        support: not_enabled
+        reason: OKX TBT depth channels require VIP or special access and are not enabled in this gateway runtime.
+    sequence:
+      snapshot_field: seqId
+      delta_field: seqId
+      gap_policy: REST /api/v5/market/books snapshot after reconnect or seqId gap
+    fixtures:
+      subscribe_payload: crates/rustcta-exchange-gateway/src/adapters/okx/public_tests.rs
+      parser_books5: tests/fixtures/exchanges/okx/ws/public_books5_snapshot.json
     heartbeat:
       required: true
-      direction: server_ping
+      direction: client_ping
       interval_ms: 25000
       timeout_ms: 30000
     resync: rest_order_book_snapshot
@@ -62,10 +114,76 @@ websocket:
     renewal_ms: null
     relogin_on_reconnect: true
     fallback: rest_reconciliation
+streams:
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: spot
+    channel: public_orderbook_spot
+    support: rest_fallback
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels: [bbo-tbt, books5, books]
+    interval_ms: [10, 100]
+    depth: [1, 5, 400]
+    sequence: seqId
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/okx/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/okx/ws/public_books5_snapshot.json }
+    resync: { endpoint_operation: get_order_book }
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: perpetual
+    channel: public_orderbook_swap
+    support: rest_fallback
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels: [bbo-tbt, books5, books]
+    interval_ms: [10, 100]
+    depth: [1, 5, 400]
+    sequence: seqId
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/okx/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/okx/ws/public_books5_snapshot.json }
+    resync: { endpoint_operation: get_order_book }
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: futures
+    channel: public_orderbook_futures
+    support: rest_fallback
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels: [bbo-tbt, books5, books]
+    interval_ms: [10, 100]
+    depth: [1, 5, 400]
+    sequence: seqId
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/okx/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/okx/ws/public_books5_snapshot.json }
+    resync: { endpoint_operation: get_order_book }
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: options
+    channel: public_orderbook_options
+    support: rest_fallback
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels: [bbo-tbt, books5, books]
+    interval_ms: [10, 100]
+    depth: [1, 5, 400]
+    sequence: seqId
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/okx/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/okx/ws/public_books5_snapshot.json }
+    resync: { endpoint_operation: get_order_book }
 endpoints:
   - operation: get_symbol_rules
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: GET
     path: /api/v5/public/instruments
     auth: none
@@ -74,7 +192,8 @@ endpoints:
     request_spec_required: false
   - operation: get_order_book
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: GET
     path: /api/v5/market/books
     auth: none
@@ -83,7 +202,9 @@ endpoints:
     request_spec_required: false
   - operation: get_balances
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
+    support: native
     method: GET
     path: /api/v5/account/balance
     auth: hmac
@@ -91,9 +212,40 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/okx/request_specs/get_balances.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::okx::types::parse_balances
+      fixture: tests/fixtures/exchanges/okx/balance.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
+  - operation: get_positions
+    transport: rest
+    product: mixed
+    market_types: [perpetual, futures, options]
+    support: native
+    method: GET
+    path: /api/v5/account/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/okx/request_specs/get_positions_futures.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::okx::types::parse_positions
+      fixture: tests/fixtures/exchanges/okx/position.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
   - operation: get_fees
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: GET
     path: /api/v5/account/trade-fee
     auth: hmac
@@ -101,9 +253,21 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/okx/request_specs/get_fees.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::okx::types::parse_fees
+      fixture: tests/fixtures/exchanges/okx/fees_success.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
   - operation: place_order
+    support: native
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: POST
     path: /api/v5/trade/order
     auth: hmac
@@ -122,8 +286,10 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_order
+    support: native
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: POST
     path: /api/v5/trade/cancel-order
     auth: hmac
@@ -131,9 +297,39 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
-  - operation: cancel_all_orders
+  - operation: batch_place_orders
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
+    method: POST
+    path: /api/v5/trade/batch-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    max_items: 20
+  - operation: batch_cancel_orders
+    transport: rest
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
+    method: POST
+    path: /api/v5/trade/cancel-batch-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    max_items: 20
+  - operation: cancel_all_orders
+    support: native
+    transport: rest
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: POST
     path: /api/v5/trade/cancel-batch-orders
     auth: hmac
@@ -143,7 +339,8 @@ endpoints:
     request_spec_required: true
   - operation: amend_order
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: POST
     path: /api/v5/trade/amend-order
     auth: hmac
@@ -152,8 +349,10 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: query_order
+    support: native
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: GET
     path: /api/v5/trade/order
     auth: hmac
@@ -162,8 +361,10 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: GET
     path: /api/v5/trade/orders-pending
     auth: hmac
@@ -172,8 +373,10 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_recent_fills
+    support: native
     transport: rest
-    product: spot
+    product: mixed
+    market_types: [spot, perpetual, futures, options]
     method: GET
     path: /api/v5/trade/fills-history
     auth: hmac

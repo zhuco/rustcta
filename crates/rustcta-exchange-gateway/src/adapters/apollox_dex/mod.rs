@@ -72,6 +72,16 @@ impl ApolloxDexGatewayAdapter {
         }
         Ok(())
     }
+
+    fn private_credentials(&self, operation: &'static str) -> ExchangeApiResult<(String, String)> {
+        if !self.config.private_rest_requested() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        Ok((
+            self.config.api_key.clone().unwrap_or_default(),
+            self.config.api_secret.clone().unwrap_or_default(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -85,7 +95,7 @@ impl GatewayAdapter for ApolloxDexGatewayAdapter {
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
             message: Some(
-                "apollox_dex V1 orderbook perpetual adapter: public REST runtime, private REST request-spec only"
+                "apollox_dex V1 orderbook perpetual adapter: public REST runtime, guarded private REST readbacks"
                     .to_string(),
             ),
         }
@@ -102,7 +112,8 @@ impl ExchangeClient for ApolloxDexGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Perpetual];
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        let private_rest = self.config.private_rest_requested();
+        capabilities.supports_private_rest = private_rest;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -115,10 +126,10 @@ impl ExchangeClient for ApolloxDexGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
-        capabilities.supports_batch_place_order = false;
+        capabilities.supports_query_order = private_rest;
+        capabilities.supports_open_orders = private_rest;
+        capabilities.supports_recent_fills = private_rest;
+        capabilities.supports_batch_place_order = private_rest;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
         capabilities.supports_quote_market_order = false;
@@ -144,9 +155,9 @@ impl ExchangeClient for ApolloxDexGatewayAdapter {
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(1000));
         capabilities.max_recent_fill_limit = None;
-        toolchain::apply_toolchain_capabilities(&mut capabilities);
+        toolchain::apply_toolchain_capabilities(&mut capabilities, private_rest);
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_rest;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
@@ -238,12 +249,7 @@ impl ExchangeClient for ApolloxDexGatewayAdapter {
         &self,
         request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        for order in &request.orders {
-            self.ensure_exchange(&order.symbol.exchange)?;
-            self.ensure_perpetual(order.symbol.market_type)?;
-        }
-        private::unsupported(private::BATCH_PLACE_UNSUPPORTED)
+        self.batch_place_orders_impl(request).await
     }
 
     async fn batch_cancel_orders(
@@ -266,25 +272,21 @@ impl ExchangeClient for ApolloxDexGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_perpetual(request.symbol.market_type)?;
-        private::unsupported(private::QUERY_ORDER_UNSUPPORTED)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        private::unsupported(private::OPEN_ORDERS_UNSUPPORTED)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        private::unsupported(private::RECENT_FILLS_UNSUPPORTED)
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

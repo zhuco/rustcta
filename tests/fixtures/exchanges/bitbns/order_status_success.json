@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "entry_id": 4221,
+      "btc": 0.001,
+      "rate": 306929.01,
+      "time": "2018-09-20T13:54:21.000Z",
+      "type": 0,
+      "status": 0
+    }
+  ],
+  "status": 1,
+  "error": null
+}

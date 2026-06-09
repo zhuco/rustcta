@@ -6,7 +6,7 @@ metadata:
   status: draft
   source: docs/biconomy_adapter.md
   last_reviewed: "2026-06-08"
-  notes: Task 20 long-tail adapter mapping. Spot only; futures/perpetual remains unsupported.
+  notes: Task 20 long-tail adapter mapping. Spot only; futures/perpetual remains project-unimplemented pending endpoint-spec verification.
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -31,6 +31,20 @@ batch:
 websocket:
   public:
     support: spec_only
+    channels: [depth.subscribe, deals.subscribe, state.subscribe, kline.subscribe]
+    order_book:
+      channel: depth.subscribe
+      update_channel: depth.update
+      topic: "depth.subscribe:{symbol}:{depth}:{precision}"
+      depths: [5, 10, 15, 20, 30, 50, 100]
+      precision_selector: true
+      full_snapshot_field: is_full
+      update_mode: full_or_incremental
+      interval: "no fixed ms"
+      sequence: none_documented
+      checksum: none_documented
+      resync: rest_order_book_snapshot
+      notes: "Official docs publish depth.subscribe/depth.update and is_full, but do not publish a fixed push interval, sequence, or checksum."
     heartbeat: { mode: server_ping, interval_ms: 30000, timeout_ms: 45000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
@@ -41,6 +55,32 @@ websocket:
     heartbeat: { mode: server_ping, interval_ms: 30000, timeout_ms: 45000 }
     auth_renewal: { mode: none }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: biconomy_futures_perpetual_product_surfaces
+    source_boundary_fixture: tests/fixtures/exchanges/biconomy/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Biconomy adapter is Spot-style REST/WS only; futures/perpetual product pages or hosts must not be routed through spot account/order parsers."
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications, settlement asset and precision rules]
+      public_market_data: [futures/perpetual order book, futures/perpetual ticker, futures/perpetual trades]
+      private_account: [margin balances, positions, risk limits or leverage settings]
+      private_order_lifecycle: [futures/perpetual place order, futures/perpetual cancel order, futures/perpetual query/open orders, futures/perpetual fills]
+    unsafe_to_promote_without: [stable official futures/perpetual endpoint specs, contract metadata and risk parser fixtures, position readback and order lifecycle parser coverage, write/readback reconciliation]
+    reason: "Official Biconomy Futures/Perpetual surfaces exist, but this spot profile has not wired verified contract endpoints."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: biconomy_futures_perpetual_product_surfaces
+    source_boundary_fixture: tests/fixtures/exchanges/biconomy/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications]
+      private_account: [positions, risk limits or leverage settings]
+      private_order_lifecycle: [futures/perpetual place/cancel/query/open orders, futures/perpetual fills]
+    reason: "Biconomy Futures/Perpetual support needs stable endpoint-spec verification, contract metadata, position/risk readback and trading parser wiring."
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -86,6 +126,22 @@ endpoints:
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/biconomy/private_tests.rs::biconomy_adapter_should_parse_private_readbacks }
     response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/biconomy/private_tests.rs::biconomy_adapter_should_parse_private_readbacks }
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/private/account
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: biconomy_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/biconomy/private_tests.rs::biconomy_adapter_should_parse_private_readbacks }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/biconomy/private_tests.rs::biconomy_adapter_should_parse_private_readbacks }
   - operation: place_order
     product: spot
     transport: rest
@@ -116,6 +172,66 @@ endpoints:
     testnet: false
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/biconomy/private_tests.rs::biconomy_adapter_should_route_order_lifecycle_and_batches }
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/biconomy/batch_place_orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: biconomy_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: composed
+    notes: Gateway-composed sequential single-order placement.
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/biconomy/batch_cancel_orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: biconomy_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: composed
+    notes: Gateway-composed sequential single-order cancel.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /unsupported/biconomy/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: biconomy_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: biconomy.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/biconomy/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: biconomy_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: biconomy.order_list_unsupported
   - operation: query_order
     product: spot
     transport: rest

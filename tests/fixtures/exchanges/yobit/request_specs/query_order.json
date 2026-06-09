@@ -1,6 +1,7 @@
 {
   "operation": "yobit.query_order",
-  "request_spec_only": true,
+  "request_spec_only": false,
+  "runtime": "guarded_read_only",
   "trade_enabled": false,
   "method": "POST",
   "path": "/tapi/",
@@ -16,5 +17,5 @@
     "nonce": "1700000005"
   },
   "credential_scope": "read_only",
-  "expected_error_until_promoted": "yobit.query_order_request_spec_only"
+  "runtime_guard": "YOBIT_PRIVATE_REST_ENABLED plus TAPI key/secret; fails closed with yobit.query_order when disabled"
 }

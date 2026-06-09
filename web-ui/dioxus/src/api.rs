@@ -1,4 +1,4 @@
-use gloo_net::http::Request;
+use gloo_net::http::{Request, RequestBuilder};
 use serde_json::json;
 use serde_json::Value;
 
@@ -40,6 +40,7 @@ const API_STRATEGY_LOGS: &str = "/api/strategy-logs";
 const API_CROSS_ARB_INSTRUMENTS: &str = "/api/cross-arb/instruments";
 const API_CROSS_ARB_MARKET_SNAPSHOTS: &str = "/api/cross-arb/market-snapshots";
 const API_LOCAL_CROSS_ARB_EXCHANGES: &str = "/api/local-agent/cross-arb/exchanges";
+const API_LOCAL_CROSS_ARB_SETTINGS: &str = "/api/local-agent/cross-arb/settings";
 
 pub(crate) struct DashboardFetch {
     pub(crate) data: DashboardData,
@@ -496,17 +497,25 @@ pub(crate) async fn refresh_spot_exchange_control(
 }
 
 pub(crate) async fn fetch_cross_arb_settings(token: &str) -> Result<Value, String> {
-    let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
-    Ok(
-        strategy_snapshot_detail(&snapshots, "cross_exchange_arbitrage", Value::Null)
+    match api_get(API_LOCAL_CROSS_ARB_SETTINGS, token).await {
+        Ok(value) => Ok(value
             .get("settings")
             .cloned()
-            .unwrap_or(Value::Null),
-    )
+            .unwrap_or(value)),
+        Err(_) => {
+            let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
+            Ok(
+                strategy_snapshot_detail(&snapshots, "cross_exchange_arbitrage", Value::Null)
+                    .get("settings")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            )
+        }
+    }
 }
 
 pub(crate) async fn save_cross_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
-    post_local_agent_command(token, "update_cross_arb_settings", body.clone()).await
+    api_post_json(API_LOCAL_CROSS_ARB_SETTINGS, token, body).await
 }
 
 pub(crate) async fn fetch_cross_arb_exchange_config(token: &str) -> Result<Value, String> {
@@ -655,9 +664,7 @@ async fn api_get(path: &str, token: &str) -> Result<Value, String> {
 }
 
 async fn api_get_raw(path: &str, token: &str) -> Result<Value, String> {
-    let bearer = format!("Bearer {token}");
-    let response = Request::get(path)
-        .header("Authorization", &bearer)
+    let response = with_optional_auth(Request::get(path), token)
         .send()
         .await
         .map_err(|error| format!("请求 {path} 失败：{error}"))?;
@@ -668,6 +675,15 @@ async fn api_get_raw(path: &str, token: &str) -> Result<Value, String> {
         .json::<Value>()
         .await
         .map_err(|error| format!("解析 {path} 响应失败：{error}"))
+}
+
+fn with_optional_auth(builder: RequestBuilder, token: &str) -> RequestBuilder {
+    let token = token.trim();
+    if token.is_empty() {
+        builder
+    } else {
+        builder.header("Authorization", &format!("Bearer {token}"))
+    }
 }
 
 fn control_api_payload(value: Value) -> Value {
@@ -681,9 +697,7 @@ fn control_api_payload(value: Value) -> Value {
 }
 
 async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, String> {
-    let bearer = format!("Bearer {token}");
-    let response = Request::post(path)
-        .header("Authorization", &bearer)
+    let response = with_optional_auth(Request::post(path), token)
         .json(body)
         .map_err(|error| format!("编码 {path} 提交内容失败：{error}"))?
         .send()
@@ -699,9 +713,7 @@ async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, S
 }
 
 async fn api_delete(path: &str, token: &str) -> Result<Value, String> {
-    let bearer = format!("Bearer {token}");
-    let response = Request::delete(path)
-        .header("Authorization", &bearer)
+    let response = with_optional_auth(Request::delete(path), token)
         .send()
         .await
         .map_err(|error| format!("提交 {path} 删除失败：{error}"))?;
@@ -716,9 +728,6 @@ async fn api_delete(path: &str, token: &str) -> Result<Value, String> {
 
 async fn api_error_message(path: &str, response: gloo_net::http::Response) -> String {
     let status = response.status();
-    if status == 401 {
-        return format!("{path} 返回 HTTP 401：AUTH_TOKEN_ERROR：认证 Token 缺失、错误或已过期；请使用当前 control-api Token 重新填写左侧 Auth token。");
-    }
     match response.json::<Value>().await {
         Ok(value) => {
             if let Some(error) = value.get("error").and_then(Value::as_str) {

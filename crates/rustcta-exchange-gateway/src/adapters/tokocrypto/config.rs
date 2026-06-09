@@ -25,12 +25,10 @@ pub struct TokocryptoGatewayConfig {
 
 impl Default for TokocryptoGatewayConfig {
     fn default() -> Self {
-        let api_key = std::env::var("TOKOCRYPTO_API_KEY")
-            .or_else(|_| std::env::var("RUSTCTA_TOKOCRYPTO_API_KEY"))
-            .ok();
-        let api_secret = std::env::var("TOKOCRYPTO_API_SECRET")
-            .or_else(|_| std::env::var("RUSTCTA_TOKOCRYPTO_API_SECRET"))
-            .ok();
+        let api_key = non_empty_env("TOKOCRYPTO_API_KEY")
+            .or_else(|| non_empty_env("RUSTCTA_TOKOCRYPTO_API_KEY"));
+        let api_secret = non_empty_env("TOKOCRYPTO_API_SECRET")
+            .or_else(|| non_empty_env("RUSTCTA_TOKOCRYPTO_API_SECRET"));
         Self {
             rest_base_url: DEFAULT_REST_BASE_URL.to_string(),
             market_rest_base_url: DEFAULT_MARKET_REST_BASE_URL.to_string(),
@@ -39,7 +37,9 @@ impl Default for TokocryptoGatewayConfig {
             private_websocket_url: DEFAULT_PRIVATE_WS_URL.to_string(),
             api_key,
             api_secret,
-            enabled_private_rest: false,
+            enabled_private_rest: env_bool("TOKOCRYPTO_PRIVATE_REST_ENABLED")
+                .or_else(|| env_bool("RUSTCTA_TOKOCRYPTO_PRIVATE_REST_ENABLED"))
+                .unwrap_or(false),
             enabled_public_streams: false,
             enabled_private_streams: false,
             request_timeout_ms: DEFAULT_REQUEST_TIMEOUT_MS,
@@ -60,5 +60,21 @@ impl TokocryptoGatewayConfig {
                 .api_secret
                 .as_ref()
                 .is_some_and(|value| !value.trim().is_empty())
+    }
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    let value = non_empty_env(name)?;
+    match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }

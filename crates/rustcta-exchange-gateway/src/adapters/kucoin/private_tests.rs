@@ -18,6 +18,9 @@ fn kucoin_fixture(name: &str) -> serde_json::Value {
         "request_specs/cancel_order.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/kucoin/request_specs/cancel_order.json"
         ),
+        "request_specs/trade_fees.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/kucoin/request_specs/trade_fees.json"
+        ),
         "signing_vectors/private_get_accounts.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/kucoin/signing_vectors/private_get_accounts.json"
         ),
@@ -101,6 +104,12 @@ fn kucoin_request_spec_fixtures_should_cover_private_writes() {
     assert_eq!(cancel["method"], "DELETE");
     assert_eq!(cancel["path"], "/api/v1/hf/orders/2001");
     assert_eq!(cancel["query"]["symbol"], "BTC-USDT");
+
+    let fees = kucoin_fixture("request_specs/trade_fees.json");
+    assert_eq!(fees["operation"], "kucoin.get_fees");
+    assert_eq!(fees["method"], "GET");
+    assert_eq!(fees["path"], "/api/v1/trade-fees");
+    assert_eq!(fees["query"]["symbols"], "BTC-USDT");
 }
 
 #[tokio::test]

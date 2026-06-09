@@ -1,0 +1,19 @@
+{
+  "exchange": "blofin",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "BloFin spot trading and swap OpenAPI",
+      "evidence": "Spot trading is a separate product line; this adapter only verifies BloFin USDT linear perpetual OpenAPI endpoints."
+    }
+  ],
+  "runtime_isolation": "Do not expose BloFin spot through the swap/perpetual adapter until spot instrument, book, account and order semantics are pinned.",
+  "remaining_work": [
+    "pin stable spot instruments, books, tickers and trades specs",
+    "add spot balances, order, open-order and fill fixtures",
+    "wire product-scope parser/runtime guards before promotion"
+  ]
+}

@@ -101,9 +101,10 @@ impl ExchangeClient for Bit2cGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
+        let private_rest_available = self.config.private_rest_enabled();
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_rest_available;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.supports_symbol_rules = true;
@@ -116,8 +117,8 @@ impl ExchangeClient for Bit2cGatewayAdapter {
         capabilities.supports_cancel_all_orders = false;
         capabilities.supports_quote_market_order = false;
         capabilities.supports_amend_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
+        capabilities.supports_query_order = private_rest_available;
+        capabilities.supports_open_orders = private_rest_available;
         capabilities.supports_recent_fills = false;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
@@ -131,9 +132,13 @@ impl ExchangeClient for Bit2cGatewayAdapter {
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(200));
         capabilities.max_recent_fill_limit = None;
         capabilities.refresh_v2_from_legacy_flags();
-        capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-            "Bit2C private REST signing has no official vector and remains request-spec only",
-        );
+        capabilities.capabilities_v2.private_rest = if private_rest_available {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "Bit2C private REST requires enabled_private_rest plus API credentials",
+            )
+        };
         capabilities.capabilities_v2.public_streams =
             CapabilitySupport::unsupported("Bit2C official WebSocket API was not found");
         capabilities.capabilities_v2.private_streams =
@@ -165,10 +170,10 @@ impl ExchangeClient for Bit2cGatewayAdapter {
         capabilities.capabilities_v2.cancel_all_orders =
             CapabilitySupport::unsupported("Bit2C cancel-all is not documented");
         capabilities.capabilities_v2.order_history = HistoryCapability::unsupported(
-            "Bit2C private order history requires unverified private REST signing",
+            "Bit2C order history/fills remain offline pending account-effective parser and reconciliation",
         );
         capabilities.capabilities_v2.fills_history = HistoryCapability::unsupported(
-            "Bit2C private fill history requires unverified private REST signing",
+            "Bit2C fills history remains offline pending account-effective parser and reconciliation",
         );
         capabilities.capabilities_v2.credential_scopes =
             vec![CredentialScope::ReadOnly, CredentialScope::Trade];
@@ -257,14 +262,14 @@ impl ExchangeClient for Bit2cGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.unsupported_query_order(request)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.unsupported_open_orders(request)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(

@@ -1,0 +1,11 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/matcher/orderbook/WAVES/USDN/order-fixture-1",
+  "auth": "none",
+  "strict_query": true,
+  "expected_error_until_promoted": "wavesexchange.query_order_requires_pair_and_order_id_mapping"
+}

@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::private::CexPrivateRequestSpec;
+
 #[derive(Clone)]
 pub struct CexRest {
     exchange_id: ExchangeId,
@@ -50,6 +52,26 @@ impl CexRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_post(
+        &self,
+        spec: &CexPrivateRequestSpec,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                spec.path
+            ))
+            .json(&spec.body)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

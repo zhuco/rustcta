@@ -35,12 +35,85 @@ websocket:
     support: spec_only
     heartbeat: { mode: client_ping_text, interval_ms: 15000, timeout_ms: 30000 }
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
+    order_book:
+      product: spot
+      market_types: [spot]
+      url: wss://ws-manager-compress.bitmart.com/api?protocol=1.1
+      protocol: websocket_json_zlib
+      subscribe:
+        payload:
+          op: subscribe
+          args:
+            - spot/depth/increase100:{symbol}
+        snapshot_request_payload:
+          op: request
+          args:
+            - spot/depth/increase100:{symbol}
+        symbol_format: BASE_QUOTE
+      channels:
+        l1:
+          channel: spot/bookTicker:{symbol}
+          interval_ms: null
+          semantics: "Real-time best bid/ask changes."
+        partial_depth:
+          channels:
+            - { channel: "spot/depth5:{symbol}", depth: 5, interval_ms: 500, semantics: full_depth_snapshot }
+            - { channel: "spot/depth20:{symbol}", depth: 20, interval_ms: 500, semantics: full_depth_snapshot }
+            - { channel: "spot/depth50:{symbol}", depth: 50, interval_ms: 500, semantics: full_depth_snapshot }
+        incremental_depth:
+          channel: spot/depth/increase100:{symbol}
+          depth: 100
+          interval_ms: 100
+          message_types: [snapshot, update]
+          update_quantity_semantics: absolute
+      sequence:
+        field: version
+        contiguous_rule: "Accept update when version == local_version + 1; discard version <= local_version; rebuild when version > local_version + 1."
+        gap_detection: version_gap_or_regression
+      checksum:
+        supported: false
+        field: null
+        risk: "Official Spot depth docs do not document a checksum; continuity relies on version checks."
+      resync:
+        mode: ws_request_or_rest_snapshot_rebuild
+        ws_request: "request spot/depth/increase100:{symbol}"
+        rest_endpoint_operation: order_book
+        rest_endpoint: /spot/v1/symbols/book
+        triggers: [connect, reconnect, version_gap, stale_stream, parse_error, suspected_message_loss]
+      fixtures:
+        snapshot: tests/fixtures/exchanges/bitmart/ws_spot_depth_increase_snapshot.json
+        update: tests/fixtures/exchanges/bitmart/ws_spot_depth_increase_update.json
+        bbo: tests/fixtures/exchanges/bitmart/ws_spot_book_ticker.json
   private:
     support: spec_only
     heartbeat: { mode: client_ping_text, interval_ms: 15000, timeout_ms: 30000 }
     auth_renewal: { mode: relogin }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+unsupported:
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: official_spot_futures_vip_fee_schedule
+    source_fixture: tests/fixtures/exchanges/bitmart/request_specs/get_fees_source_boundary.json
+    reason: "BitMart Spot/Futures VIP fee schedule is now recorded as an offline config source; shared get_fees runtime remains project-unimplemented pending VIP/account-effective tier source, product-scope guard, and FeeRateSnapshot mapping."
 endpoints:
+  - operation: get_fees
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /fee
+    auth: none
+    rate_limit_bucket: bitmart_public_rest
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: official fee table/VIP model is fixture-backed as a source table only, not an account-effective runtime."
+    official_doc: https://www.bitmart.com/en-US/fee
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitmart/request_specs/get_fees_source_boundary.json
   - operation: symbol_rules
     product: spot
     market_types: [spot, perpetual]
@@ -150,6 +223,54 @@ endpoints:
     testnet: false
     support: native
     notes: Official futures endpoint is "Batch Cancel Contract Orders"; Spot batch cancel is not mapped to the shared runtime.
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitmart/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitmart.batch_place_regular_order_unsupported
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PATCH
+    path: /unsupported/bitmart/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitmart.amend_order_unsupported
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitmart/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitmart.order_list_unsupported
   - operation: cancel_all_orders
     product: mixed
     market_types: [spot, perpetual]

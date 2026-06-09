@@ -1,0 +1,64 @@
+{
+  "exchange": "ndax",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_market_data",
+    "offline_private_request_specs"
+  ],
+  "official_product_lines": [
+    "margin_account_semantics"
+  ],
+  "product_line_classification": {
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Margin-like account semantics require eligibility, account mode, leverage/risk, balances/positions/PnL parsers, private lifecycle, and reconciliation."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "Current public/API profile does not expose standard futures, perpetual, or options products."
+    },
+    "perpetual_product": {
+      "status": "unsupported",
+      "reason": "No stable perpetual product line is exposed by the current official/API profile."
+    },
+    "futures_product": {
+      "status": "unsupported",
+      "reason": "No stable futures product line is exposed by the current official/API profile."
+    },
+    "options_product": {
+      "status": "unsupported",
+      "reason": "No stable options product line is exposed by the current official/API profile."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "futures",
+    "perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://docs.ndax.in/v3/private-endpoints/rest-api",
+      "evidence": "Current NDAX private REST material is used only for offline request specs; margin-like account semantics are not audited for shared runtime."
+    },
+    {
+      "url": "https://apidoc.ndax.io/#getinstruments",
+      "evidence": "The current public gateway profile is treated as spot/CAD market-data only and does not expose stable standard futures, perpetual, or options products."
+    }
+  ],
+  "runtime_isolation": "Do not route NDAX margin-like account, leverage, position, or profit/loss semantics through the spot scan-only adapter until account mode, permissions, risk state, private order lifecycle, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "margin account eligibility and account-mode semantics",
+    "margin balance, position, profit/loss, leverage, and risk parser fixtures",
+    "product-scoped private order lifecycle and permission guard",
+    "post-write readback/reconciliation and live dry-run gate"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_standard_futures_api",
+    "perpetual": "unsupported_no_standard_perpetual_api",
+    "options": "unsupported_no_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

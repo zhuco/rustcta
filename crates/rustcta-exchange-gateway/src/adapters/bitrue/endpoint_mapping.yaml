@@ -46,6 +46,22 @@ reconciliation:
 websocket:
   support: request-spec/parser/session helpers; shared supervisor/live validation
     remains required
+  public:
+    support: parser_only
+    url: wss://ws.bitrue.com/market/ws
+    compression: gzip
+    channels: ["market_${symbol}_simple_depth_step0"]
+    order_book:
+      channel: "market_${symbol}_simple_depth_step0"
+      payload_encoding: gzip
+      subscription_event: sub
+      interval: "no fixed ms"
+      depth: unspecified
+      sequence: none_documented
+      checksum: none_documented
+      heartbeat: server_ping_15000ms
+      resync: rest_order_book_snapshot
+      notes: "Official Spot depth docs publish the simple depth step0 channel and gzip payloads, but no fixed push interval or depth selector."
   heartbeat: ping/pong or server ping per adapter stream helpers
   private_auth: listen-key or signed private subscription where supported
   auth_renewal: listen_key_keepalive
@@ -301,6 +317,58 @@ endpoints:
   response_parser:
     status: implemented
     test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: batch_place_orders
+  product: spot
+  transport: rest
+  method: POST
+  path: /composed/bitrue/batch_place_orders
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  support: composed
+  notes: Composed sequential fallback over Spot/USDT-M single-order endpoints.
+- operation: batch_cancel_orders
+  product: spot
+  transport: rest
+  method: POST
+  path: /composed/bitrue/batch_cancel_orders
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  support: composed
+  notes: Composed sequential fallback over Spot/USDT-M single-cancel endpoints.
+- operation: amend_order
+  product: spot
+  transport: rest
+  method: PATCH
+  path: /unsupported/bitrue/amend_order
+  auth: unsupported
+  rate_limit_bucket: bitrue_order_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  support: unsupported
+  reason: bitrue.amend_order_unsupported
+- operation: place_order_list
+  product: spot
+  transport: rest
+  method: POST
+  path: /unsupported/bitrue/order_list
+  auth: unsupported
+  rate_limit_bucket: bitrue_order_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  support: unsupported
+  reason: bitrue.order_list_unsupported
 - operation: get_open_orders_spot
   product: spot
   transport: rest

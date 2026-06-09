@@ -4,10 +4,10 @@ Status date: 2026-06-08
 
 Adapter id: `apex`
 
-Task 7 status: ApeX Omni perpetual-first public REST G1 plus audited private
-read/write request-spec boundaries. Private order placement remains unsupported
-because ApeX order creation requires zkLink/L2 payload signatures in addition
-to API-key HMAC headers.
+Task 7 status: ApeX Omni perpetual-first public REST G1 plus guarded private
+readback runtime for query/open/fills. Private order placement remains
+unsupported because ApeX order creation requires zkLink/L2 payload signatures in
+addition to API-key HMAC headers.
 
 ## Product Lines
 
@@ -16,6 +16,8 @@ to API-key HMAC headers.
 | Omni perpetual | `Perpetual` | Primary Task 7 scope; public symbol-rules/order-book REST implemented. |
 | Spot | n/a | 项目未实现 Spot。ApeX Omni 官方 API 已出现 Spot account/wallet 线索，当前 `apex` adapter 只接 perpetual，不能写成交易所不支持。 |
 | RWA / prediction / transfer / withdrawal | n/a | Unsupported; outside trading runtime scope. |
+
+Spot 边界写入 `spot_product status: project_unimplemented`：当前只接 Omni perpetual symbols/book 和私有 request-spec 边界。补 Spot 前需要 spot symbols/order book、spot account/wallet reads、spot place/cancel/query/open/fills lifecycle、zkLink/L2 signer 适配和 parser fixtures。
 
 REST base URLs:
 
@@ -56,18 +58,18 @@ writes are not promoted.
 Mapping file:
 `crates/rustcta-exchange-gateway/src/adapters/apex/endpoint_mapping.yaml`
 
-Implemented for public REST:
+Implemented for runtime REST:
 
 - `GET /api/v3/symbols`
 - `GET /api/v3/depth`
-
-Covered as private request-spec/signing fixtures:
-
-- `GET /api/v3/account`
-- `GET /api/v3/account-balance`
 - `GET /api/v3/open-orders`
 - `GET /api/v3/order`
 - `GET /api/v3/fills`
+
+Covered as private request-spec/signing fixtures only:
+
+- `GET /api/v3/account`
+- `GET /api/v3/account-balance`
 - `POST /api/v3/delete-order`
 
 `POST /api/v3/order` is documented but unsupported by the adapter until
@@ -85,6 +87,9 @@ P0 core-trading verification confirms ApeX Omni officially supports
 Market orders still require a price or worst-price because the order payload is
 part of the zkLink signature. Therefore current `place_order` is `项目未实现`
 pending a deterministic Rust zkLink/L2 signer, not `交易所不支持下单`.
+核心交易项目未实现/未启用：ApeX 官方支持下单、撤单和订单 readback；当前
+`query_order`、`get_open_orders`、`get_recent_fills` 已接 guarded private REST。
+下单/撤单/cancel-all 仍缺 zkLink/L2 signer 和 dry-run guard，不能写成交易所不支持。
 
 ## WebSocket
 
@@ -101,8 +106,9 @@ Official order book channel is `orderBook{limit}.H.{symbol}` on
 The docs label this as high-frequency but do not give a fixed millisecond
 interval. The feed is snapshot plus delta; official guidance is to apply updates
 in timestamp/ID order and rebuild from snapshot on disorder or gaps. No checksum
-was found. Current project support is native but still needs interval/depth and
-rebuild fields in the mapping. Source batch:
+was found. Current project support is native and mapping records
+`orderBook25`/`orderBook200`, no fixed ms, 25/200 depth, snapshot+delta, and
+snapshot rebuild on disorder or gaps. Source batch:
 [WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 Private WS logs in with an `op = "login"` message whose `args` contains a JSON
@@ -115,6 +121,9 @@ Fixtures live under `tests/fixtures/exchanges/apex/`:
 
 - `symbols_perpetual.json`
 - `depth_btcusdt.json`
+- `order_success.json`
+- `open_orders_success.json`
+- `recent_fills_success.json`
 - `account_positions.json`
 - `request_specs/get_open_orders.json`
 - `request_specs/get_account_balance.json`
@@ -135,9 +144,8 @@ The current adapter is not live-trade-enabled. `place_order` returns
 `Unsupported("apex.place_order_requires_zklink_l2_signature")`. Market orders
 also require a signed price/worst-price field and are unsupported.
 
-Before promotion, add parser tests for configs/depth/account/fills, implement
-mocked transport, validate API-key HMAC against official SDK vectors, and add a
-Rust zkLink/L2 signer with deterministic official vectors.
+Before write promotion, add a Rust zkLink/L2 signer with deterministic official
+vectors and live-trading dry-run guard.
 
 ## Validation
 
@@ -149,3 +157,20 @@ cargo fmt --check --package rustcta-exchange-gateway
 cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway apex --lib --message-format short
 ```
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：未核到可映射成共享 FeeRateSnapshot 的稳定 private fee-tier endpoint。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core trading is guarded runtime for `query_order`, `get_open_orders`, and
+`get_recent_fills` when `APEX_PRIVATE_REST_ENABLED`/`RUSTCTA_APEX_PRIVATE_REST_ENABLED`
+plus API key, API secret, and passphrase are configured. Place/cancel/cancel-all
+remain offline because they are private writes and require deterministic
+zkLink/L2 signer coverage.
+
+## P2 Product Line Boundary (2026-06-09)
+
+`spot_product` is an official-source project boundary, not an exchange-unsupported row. ApeX has spot account/wallet and trading clues, while this adapter is scoped to ApeX Omni perpetual public REST plus private request-spec boundaries.
+
+Do not promote Spot runtime from the perpetual profile. Promotion requires spot symbol and order-book public specs, spot wallet/account/balance private readback, spot place/cancel/query/open/fill lifecycle, zkLink/L2 signing scope, and reconciliation guards.

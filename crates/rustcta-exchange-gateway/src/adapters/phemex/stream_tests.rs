@@ -7,9 +7,11 @@ use serde_json::json;
 
 use super::streams::{
     parse_phemex_private_stream_message, parse_phemex_public_stream_message,
+    phemex_check_sequence_continuity, phemex_order_book_ws_policy, phemex_orderbook_params,
     phemex_private_subscribe_payload, phemex_public_subscribe_payload,
     phemex_risk_account_subscribe_payload, phemex_stream_reconnect_policy, phemex_ws_auth_payload,
-    PhemexPrivateStreamMessage, PhemexPublicStreamMessage, PhemexWsSessionEvent,
+    PhemexPrivateStreamMessage, PhemexPublicStreamMessage, PhemexSequenceContinuity,
+    PhemexWsSessionEvent,
 };
 use super::test_support::{context, exchange_id, perp_symbol_scope, spot_symbol_scope};
 use super::{PhemexGatewayAdapter, PhemexGatewayConfig};
@@ -19,7 +21,7 @@ fn phemex_public_stream_payloads_should_match_official_methods() {
     let spot_book = public_subscription(spot_symbol_scope(), PublicStreamKind::OrderBookDelta);
     let spot_payload = phemex_public_subscribe_payload(&spot_book, 1).expect("spot payload");
     assert_eq!(spot_payload["method"], "orderbook.subscribe");
-    assert_eq!(spot_payload["params"], json!(["sBTCUSDT"]));
+    assert_eq!(spot_payload["params"], json!(["sBTCUSDT", false, 30]));
 
     let perp_candle = public_subscription(
         perp_symbol_scope(),
@@ -35,6 +37,54 @@ fn phemex_public_stream_payloads_should_match_official_methods() {
     let ticker_payload = phemex_public_subscribe_payload(&perp_ticker, 3).expect("ticker payload");
     assert_eq!(ticker_payload["method"], "perp_market24h_pack_p.subscribe");
     assert_eq!(ticker_payload["params"], json!([]));
+}
+
+#[test]
+fn phemex_public_orderbook_policy_should_cover_depth_interval_and_sequence() {
+    let policy = phemex_order_book_ws_policy();
+    assert_eq!(policy.spot_method, "orderbook.subscribe");
+    assert_eq!(policy.perpetual_method, "orderbook_p.subscribe");
+    assert_eq!(policy.supported_depths, &[0, 1, 5, 10, 30]);
+    assert_eq!(policy.default_depth, 30);
+    assert_eq!(policy.fast_interval_ms, 20);
+    assert_eq!(policy.aggregated_interval_ms, 120);
+    assert_eq!(policy.full_depth_interval_ms, 100);
+    assert_eq!(policy.snapshot_self_check_ms, 60_000);
+    assert_eq!(policy.sequence_field, "sequence");
+    assert_eq!(policy.checksum, None);
+    assert!(policy.resync.contains("60s snapshot self-check"));
+
+    assert_eq!(
+        phemex_orderbook_params("BTCUSDT", false, 5).expect("params"),
+        json!(["BTCUSDT", false, 5])
+    );
+    assert_eq!(
+        phemex_orderbook_params("BTCUSDT", false, 0).expect("full depth params"),
+        json!(["BTCUSDT", false, 0])
+    );
+    assert!(phemex_orderbook_params("BTCUSDT", false, 25).is_err());
+
+    assert_eq!(
+        phemex_check_sequence_continuity(None, 10),
+        PhemexSequenceContinuity::First
+    );
+    assert_eq!(
+        phemex_check_sequence_continuity(Some(10), 11),
+        PhemexSequenceContinuity::Continuous
+    );
+    assert_eq!(
+        phemex_check_sequence_continuity(Some(11), 11),
+        PhemexSequenceContinuity::DuplicateOrStale
+    );
+    let gap = phemex_check_sequence_continuity(Some(11), 13);
+    assert_eq!(
+        gap,
+        PhemexSequenceContinuity::Gap {
+            expected: 12,
+            actual: 13
+        }
+    );
+    assert!(gap.requires_resync());
 }
 
 #[test]
@@ -140,6 +190,47 @@ fn phemex_public_stream_parser_should_parse_orderbook_trade_and_ticker() {
             assert_eq!(ticker.funding_rate.as_deref(), Some("0.0001"));
         }
         other => panic!("unexpected message: {other:?}"),
+    }
+}
+
+#[test]
+fn phemex_public_orderbook_fixtures_should_parse_snapshot_incremental_and_delete_level() {
+    let exchange = exchange_id();
+    let snapshot = parse_phemex_public_stream_message(
+        &exchange,
+        MarketType::Perpetual,
+        perp_symbol_scope(),
+        &serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/exchanges/phemex/ws_public_orderbook_snapshot.json"
+        ))
+        .expect("snapshot fixture"),
+    )
+    .expect("snapshot");
+    match snapshot {
+        PhemexPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.sequence, Some(77668172));
+            assert_eq!(book.best_bid().expect("bid").price, 20700.5);
+        }
+        other => panic!("unexpected snapshot message: {other:?}"),
+    }
+
+    let incremental = parse_phemex_public_stream_message(
+        &exchange,
+        MarketType::Perpetual,
+        perp_symbol_scope(),
+        &serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/exchanges/phemex/ws_public_orderbook_incremental.json"
+        ))
+        .expect("incremental fixture"),
+    )
+    .expect("incremental");
+    match incremental {
+        PhemexPublicStreamMessage::OrderBook(book) => {
+            assert_eq!(book.sequence, Some(77668173));
+            assert!(book.asks.is_empty());
+            assert_eq!(book.best_bid().expect("bid").price, 20700.6);
+        }
+        other => panic!("unexpected incremental message: {other:?}"),
     }
 }
 

@@ -1,0 +1,15 @@
+{
+  "id": "ot-order-1",
+  "client_id": "client-1",
+  "instrument_code": "BTC_EUR",
+  "side": "BUY",
+  "type": "LIMIT",
+  "time_in_force": "GOOD_TILL_CANCELLED",
+  "amount": "0.01000000",
+  "price": "64000.00",
+  "filled_amount": "0.00400000",
+  "average_price": "63950.00",
+  "status": "PARTIALLY_FILLED",
+  "time": "2026-06-09T01:02:03Z",
+  "updated_at": "2026-06-09T01:03:04Z"
+}

@@ -56,17 +56,84 @@ websocket:
   public:
     support: native
     url: wss://ws-api.bithumb.com/websocket/v1
+    protocol: websocket_json_array
     heartbeat:
       method: ping
       direction: client_ping
       interval_ms: 30000
       timeout_ms: 90000
     resync: rest_order_book_snapshot
+    order_book:
+      channel: orderbook
+      product: spot
+      market_types: [spot]
+      url: wss://ws-api.bithumb.com/websocket/v1
+      protocol: websocket_json_array
+      request:
+        format: ticket_type_format
+        type: orderbook
+        codes: ["KRW-BTC"]
+        code_format: QUOTE-BASE
+        snapshot_switch: is_only_snapshot
+        realtime_switch: is_only_realtime
+        default_mode:
+          order_book_snapshot: snapshot_only
+          order_book_delta: realtime_only
+        level_field: level
+        default_level: 0
+      depth:
+        field: orderbook_units
+        max_depth: exchange_defined
+        level_aggregation:
+          field: level
+          default: 0
+          semantics: price aggregation unit, not a fixed 5/10/20/50 depth selector
+      interval:
+        fixed_update_interval_ms:
+        note: official orderbook WS docs do not publish a fixed millisecond cadence
+      sequence:
+        field:
+        contiguous: false
+        gap_detection: unsupported_no_official_sequence_or_checksum
+        risk: orderbook payload exposes timestamp/stream_type but no sequence or update id, so missed messages cannot be proven from WS payload alone.
+      checksum:
+        mode: unsupported
+        risk: no official orderbook checksum is documented
+      rebuild:
+        rest_snapshot: GET /v1/orderbook?markets={market}
+        strategy: rest_snapshot_after_reconnect_or_stale_stream
+        notes: fetch REST order book snapshot on connect/reconnect or suspected stale stream, then resubscribe because sequence/checksum validation is unavailable.
+      fixtures:
+        subscribe_realtime: tests/fixtures/exchanges/bithumb/ws/public_orderbook_subscribe.json
+        subscribe_snapshot: tests/fixtures/exchanges/bithumb/ws/public_orderbook_snapshot_subscribe.json
+        snapshot: tests/fixtures/exchanges/bithumb/ws/orderbook_snapshot.json
+        realtime: tests/fixtures/exchanges/bithumb/ws/orderbook_realtime.json
   private:
     support: native_specs_only
     url: wss://ws-api.bithumb.com/websocket/v1/private
     auth: authorization_bearer_jwt
     fallback: rest_reconciliation
+streams:
+  - operation: subscribe_public_stream
+    scope: public
+    channel: orderbook
+    product: spot
+    market_types: [spot]
+    support: native
+    request_spec_required: false
+    subscription_method: websocket_json_array
+    request_type: orderbook
+    snapshot_switch: is_only_snapshot
+    realtime_switch: is_only_realtime
+    default_level: 0
+    level_semantics: price aggregation unit, not fixed depth
+    fixed_update_interval_ms:
+    sequence_fields: []
+    checksum: none
+    resync:
+      endpoint_operation: get_order_book
+      strategy: rest_snapshot_after_reconnect_or_stale_stream
+    fixture: tests/fixtures/exchanges/bithumb/ws/orderbook_realtime.json
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -96,6 +163,12 @@ endpoints:
     rate_limit_bucket: bithumb_rest
     weight: 1
     request_spec_required: true
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/bithumb/request_specs/get_balances.json
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::bithumb::private_parser::parse_balances
+      fixture: tests/fixtures/exchanges/bithumb/balances.json
   - operation: get_fees
     product: spot
     transport: rest
@@ -106,7 +179,16 @@ endpoints:
     rate_limit_bucket: bithumb_rest
     weight: 1
     request_spec_required: true
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/bithumb/request_specs/get_fees_orders_chance.json
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::bithumb::private_parser::parse_fee_snapshot
+      fixture: tests/fixtures/exchanges/bithumb/orders_chance.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bithumb/tests.rs
   - operation: place_order
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -119,6 +201,7 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/bithumb/request_specs/place_order_limit.json
   - operation: cancel_order
+    support: native
     product: spot
     transport: rest
     method: DELETE
@@ -131,6 +214,7 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/bithumb/request_specs/cancel_order.json
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -141,6 +225,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -151,6 +236,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -160,7 +246,65 @@ endpoints:
     rate_limit_bucket: bithumb_rest
     weight: 1
     request_spec_required: true
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bithumb/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bithumb_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bithumb.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bithumb/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bithumb_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bithumb.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bithumb/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bithumb_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bithumb.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bithumb/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bithumb_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bithumb.batch_cancel_orders_unsupported
 unsupported:
+  - operation: contract_product
+    reason: "Current official Open API profile is Spot-only and exposes no standard futures/perpetual/options product line."
   - operation: get_positions
     reason: "Bithumb Spot has no standard derivative position model."
   - operation: amend_order

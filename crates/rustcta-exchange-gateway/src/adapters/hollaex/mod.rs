@@ -99,7 +99,7 @@ impl GatewayAdapter for HollaexGatewayAdapter {
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
             message: Some(
-                "hollaex demo/API spot public REST adapter; private trading is offline request-spec only"
+                "hollaex demo/API spot public REST adapter; private readbacks are credential-gated and writes remain offline"
                     .to_string(),
             ),
         }
@@ -113,10 +113,11 @@ impl ExchangeClient for HollaexGatewayAdapter {
     }
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
+        let private_read_enabled = self.config.private_request_specs_enabled();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -129,9 +130,9 @@ impl ExchangeClient for HollaexGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -147,21 +148,51 @@ impl ExchangeClient for HollaexGatewayAdapter {
         capabilities.order_book = OrderBookCapability::snapshot_only(Some(10));
         capabilities.max_recent_fill_limit = None;
         capabilities.refresh_v2_from_legacy_flags();
-        capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-            "hollaex private REST is delivered as offline request-spec/signing vectors only",
-        );
+        capabilities.capabilities_v2.private_rest = if private_read_enabled {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "hollaex private readbacks require HOLLAEX_PRIVATE_REST_ENABLED plus API key/secret for the official api.hollaex.com profile; writes remain disabled",
+            )
+        };
         capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
             "hollaex WebSocket payloads and parser fixtures are present, but runtime supervisor is not wired",
         );
         capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
             "hollaex private WebSocket auth URL is spec-only; REST reconciliation remains unsupported at runtime",
         );
-        capabilities.capabilities_v2.order_history = HistoryCapability::unsupported(
-            "hollaex order history private REST is not enabled in runtime adapter",
-        );
-        capabilities.capabilities_v2.fills_history = HistoryCapability::unsupported(
-            "hollaex fills history private REST is not enabled in runtime adapter",
-        );
+        capabilities.capabilities_v2.order_history = if private_read_enabled {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: false,
+                supports_until: false,
+                supports_limit: false,
+                supports_cursor: false,
+                supports_from_id: false,
+                max_limit: None,
+                max_window_ms: None,
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "hollaex order readback requires HOLLAEX_PRIVATE_REST_ENABLED plus API key/secret",
+            )
+        };
+        capabilities.capabilities_v2.fills_history = if private_read_enabled {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: false,
+                supports_until: false,
+                supports_limit: true,
+                supports_cursor: false,
+                supports_from_id: false,
+                max_limit: Some(100),
+                max_window_ms: None,
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "hollaex fill readback requires HOLLAEX_PRIVATE_REST_ENABLED plus API key/secret",
+            )
+        };
         capabilities.capabilities_v2.credential_scopes =
             vec![CredentialScope::ReadOnly, CredentialScope::Trade];
         capabilities
@@ -254,23 +285,23 @@ impl ExchangeClient for HollaexGatewayAdapter {
 
     async fn query_order(
         &self,
-        _request: QueryOrderRequest,
+        request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.unsupported("hollaex.query_order_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
-        _request: OpenOrdersRequest,
+        request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.unsupported("hollaex.get_open_orders_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
-        _request: RecentFillsRequest,
+        request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.unsupported("hollaex.get_recent_fills_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

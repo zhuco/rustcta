@@ -14,13 +14,75 @@
     "positions",
     "market_order",
     "quote_market_order",
-    "reduce_only"
+    "reduce_only",
+    "amend_order",
+    "place_order_list",
+    "oco_order_list",
+    "oto_order_list",
+    "batch_place_orders",
+    "batch_cancel_orders"
   ],
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "unsupported",
+      "boundary": "advanced_order_unsupported",
+      "runtime_error": "gemini.amend_order_unsupported",
+      "capability_flag": "supports_amend_order",
+      "capability_enabled": false,
+      "endpoint_mapping_path": "/unsupported/gemini/amend-order",
+      "reason": "No Gemini spot amend runtime is mapped; composed cancel+replace is intentionally not exposed."
+    },
+    "place_order_list": {
+      "status": "unsupported",
+      "boundary": "advanced_order_unsupported",
+      "runtime_error": "gemini.order_list_unsupported",
+      "capability_flag": "supports_order_list",
+      "capability_enabled": false,
+      "aliases": [
+        "oco_order_list",
+        "oto_order_list"
+      ],
+      "endpoint_mapping_path": "/unsupported/gemini/order-list",
+      "reason": "Shared OCO/OTO order-list semantics are not mapped for Gemini spot."
+    },
+    "batch_place_orders": {
+      "status": "unsupported",
+      "boundary": "advanced_order_unsupported",
+      "runtime_error": "gemini.batch_place_orders_composed_not_exposed",
+      "capability_flag": "supports_batch_place_order",
+      "capability_enabled": false,
+      "capabilities_v2": {
+        "mode": "unsupported",
+        "atomicity": "unknown",
+        "support_reason": "not declared"
+      },
+      "endpoint_mapping_path": "/unsupported/gemini/batch-place",
+      "reason": "Only single order create is supported; composed batch placement is intentionally not exposed."
+    },
+    "batch_cancel_orders": {
+      "status": "unsupported",
+      "boundary": "advanced_order_unsupported",
+      "runtime_error": "gemini.batch_cancel_orders_composed_not_exposed",
+      "capability_flag": "supports_batch_cancel_order",
+      "capability_enabled": false,
+      "capabilities_v2": {
+        "mode": "unsupported",
+        "atomicity": "unknown",
+        "support_reason": "not declared"
+      },
+      "endpoint_mapping_path": "/unsupported/gemini/batch-cancel",
+      "reason": "Only single cancel and cancel-all are supported; composed batch cancel is intentionally not exposed."
+    }
+  },
   "expected_runtime_errors": [
     "gemini.positions_unsupported_spot_only",
     "gemini.market_order_unsupported",
     "gemini.quote_market_order_unsupported",
-    "gemini.reduce_only_unsupported_spot"
+    "gemini.reduce_only_unsupported_spot",
+    "gemini.amend_order_unsupported",
+    "gemini.order_list_unsupported",
+    "gemini.batch_place_orders_composed_not_exposed",
+    "gemini.batch_cancel_orders_composed_not_exposed"
   ],
   "trade_enabled": true,
   "funding_enabled": false

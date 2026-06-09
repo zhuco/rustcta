@@ -242,7 +242,7 @@ impl ExchangeClient for KuCoinGatewayAdapter {
         capabilities.max_order_book_depth = Some(100);
         capabilities.max_recent_fill_limit = Some(500);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(100));
         capabilities.refresh_v2_from_legacy_flags();
         capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
         capabilities.capabilities_v2.private_streams = if self.config.private_rest_enabled() {

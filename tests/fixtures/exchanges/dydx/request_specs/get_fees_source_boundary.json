@@ -1,0 +1,32 @@
+{
+  "exchange": "dydx",
+  "operation": "dydx.get_fees",
+  "boundary_type": "chain_fee_tier_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "dydx_chain_fee_tiers",
+    "source_url": "https://docs.dydx.community/dydx/modules/governance/governance-adjustable-parameters/fee-tiers",
+    "last_reviewed": "2026-06-09",
+    "products": ["perpetual"],
+    "effective_fee_kind": "maker_taker_by_account_tier",
+    "tier_basis": ["30d_trailing_volume", "governance_fee_tier_params"],
+    "account_effective_fee_requires": [
+      "subaccount_or_address_volume_source",
+      "fee_tier_params_height",
+      "chain_indexer_reconciliation"
+    ]
+  },
+  "default_or_override_strategy": {
+    "protocol_default_allowed_for_backtest_only": true,
+    "production_requires_chain_params_and_account_tier_or_override": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "dydx.fees_chain_tier_source_only",
+  "remaining_work": [
+    "fee_tier_params_query",
+    "account_tier_conversion",
+    "FeeRateSnapshot_mapping",
+    "height_or_block_time_guard"
+  ]
+}

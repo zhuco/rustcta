@@ -1,0 +1,24 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "get_recent_fills",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fapi/v1/userTrades",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "orderId": { "match": "exact", "value": "987654321" },
+    "limit": { "match": "exact", "value": "100" },
+    "timestamp": { "match": "exact", "value": "1700000000000" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"]
+}

@@ -35,13 +35,33 @@ batch:
 websocket:
   public:
     support: native
-    channels: [orderBook200, recentlyTrade, instrumentInfo, candle]
+    channels: [orderBook25, orderBook200, recentlyTrade, instrumentInfo, candle]
     heartbeat: { mode: client_ping, interval_ms: 15000, timeout_ms: 15000 }
+    order_book:
+      channel: "orderBook{limit}.H.{symbol}"
+      topics: ["orderBook25.H.{symbol}", "orderBook200.H.{symbol}"]
+      depths: [25, 200]
+      interval: "no fixed ms; official docs label high-frequency but do not publish a fixed interval"
+      update_mode: snapshot_plus_delta
+      ordering: apply_in_timestamp_or_message_id_order
+      checksum: unsupported
+      resync: disorder_or_gap_rest_snapshot
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
     support: api_key_login
     channels: [ws_zk_accounts_v3]
-    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+    resync: { mode: rest_reconciliation, endpoint_operation: get_open_orders }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official ApeX spot account/wallet and trading clues exist, but this adapter scope is ApeX Omni perpetual public REST plus private request-spec boundaries only; remaining Spot runtime work is spot symbol/order-book public specs, spot wallet/account/balance private readback, spot place/cancel/query/open/fill lifecycle, zkLink/L2 signing scope, and reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/apex/request_specs/product_line_source_boundary.json
+    current_scope: "ApeX Omni perpetual public REST plus audited private request-spec boundaries."
+    runtime_gap: "Spot market metadata, spot wallet/account reads, spot order lifecycle, and parser coverage are not wired into the adapter."
+    required_endpoints: [spot_symbols, spot_order_book, spot_account, spot_wallet, spot_place_order, spot_cancel_order, spot_open_orders, spot_fills]
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：未核到可映射成共享 FeeRateSnapshot 的稳定 private fee-tier endpoint。"
 endpoints:
   - operation: symbol_rules
     product: perpetual
@@ -73,7 +93,7 @@ endpoints:
     testnet: true
     support: native
     response_parser: { status: implemented, fixture: tests/fixtures/exchanges/apex/depth_btcusdt.json }
-  - operation: balances
+  - operation: get_balances
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -88,7 +108,9 @@ endpoints:
     atomicity: not_applicable
     testnet: true
     support: spec_only
+    reason: "ApeX account-balance readback is fixture-backed, but shared get_balances runtime remains disabled pending HMAC auth smoke, zkLink/account scope guard, balance parser, and reconciliation."
     request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_account_balance.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/apex/request_specs/get_account_balance.json }
   - operation: positions
     product: perpetual
     market_types: [perpetual]
@@ -105,7 +127,7 @@ endpoints:
     testnet: true
     support: spec_only
     request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_account.json }
-  - operation: open_orders
+  - operation: get_open_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -119,8 +141,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
-    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_open_orders.json }
+    support: native
+    notes: Guarded runtime fails closed unless APEX_PRIVATE_REST_ENABLED/RUSTCTA_APEX_PRIVATE_REST_ENABLED plus API key, API secret and passphrase are configured.
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/apex/request_specs/get_open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/apex/open_orders_success.json }
   - operation: query_order
     product: perpetual
     market_types: [perpetual]
@@ -135,9 +159,11 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
-    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/query_order.json }
-  - operation: recent_fills
+    support: native
+    notes: Guarded runtime fails closed unless APEX_PRIVATE_REST_ENABLED/RUSTCTA_APEX_PRIVATE_REST_ENABLED plus API key, API secret and passphrase are configured.
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/apex/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/apex/order_success.json }
+  - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -151,8 +177,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
-    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_fills.json }
+    support: native
+    notes: Guarded runtime fails closed unless APEX_PRIVATE_REST_ENABLED/RUSTCTA_APEX_PRIVATE_REST_ENABLED plus API key, API secret and passphrase are configured.
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/apex/request_specs/get_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/apex/recent_fills_success.json }
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
@@ -167,7 +195,7 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: true
-    support: unsupported
+    support: spec_only
     reason: order creation requires zkKeys/L2 payload signature not implemented in Rust gateway
     request_spec: { status: unsupported, fixture: tests/fixtures/exchanges/apex/request_specs/place_order_unsupported_zk.json }
   - operation: cancel_order
@@ -191,7 +219,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/apex/batch_place_orders
     auth: unsupported
     rate_limit_bucket: apex_unsupported
@@ -206,7 +234,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/apex/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: apex_unsupported
@@ -237,7 +265,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/apex/amend_order
     auth: unsupported
     rate_limit_bucket: apex_unsupported
@@ -248,11 +276,11 @@ endpoints:
     testnet: false
     support: unsupported
     reason: no official amend/replace endpoint found
-  - operation: order_list
+  - operation: place_order_list
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/apex/order_list
     auth: unsupported
     rate_limit_bucket: apex_unsupported

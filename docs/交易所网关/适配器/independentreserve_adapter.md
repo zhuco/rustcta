@@ -6,6 +6,13 @@ Adapter id: `independentreserve`
 
 - Spot markets only.
 - Official leveraged trading is `项目未实现 Leveraged trading/Margin-like product`; standard futures/perpetual/options are `交易所不支持合约` under the current official API boundary.
+- `endpoint_mapping.yaml` records `leveraged_product` as
+  `status: project_unimplemented`, `official_gap: leveraged_trading`, and
+  `boundary: project_unimplemented_product_line`; `contract_product` remains
+  `unsupported` for standard futures/perpetual/options only.
+- Status recommendation: keep leveraged trading as `project_unimplemented`
+  until account eligibility, leverage/collateral/position/risk parsers,
+  product-scoped private lifecycle, and reconciliation gates are complete.
 - AUD, SGD, and USD quote markets are normalized as canonical symbols such as `BTC/AUD`, `BTC/SGD`, and `BTC/USD`.
 - Public REST surfaces: market discovery fallback and order book snapshots.
 - Private REST surfaces: accounts/balances, place order, cancel order, query order, open orders, and recent fills.
@@ -21,11 +28,23 @@ This intentionally differs from timestamp-header exchanges. The endpoint version
 
 Independent Reserve WebSockets use `wss://websockets.independentreserve.com`.
 Order book subscriptions are channel strings such as `orderbook-xbt`, either in
-the connection query or in an `Event=Subscribe` message. The order book channel
-publishes `NewOrder`, `OrderChanged`, and `OrderCanceled` events. Each channel
-and currency has an increasing `Nonce`; gaps or rewinds require state recovery.
+the connection query (`?subscribe=orderbook-xbt`) or in an `Event=Subscribe`
+message with `Data: ["orderbook-xbt"]`. The order book channel publishes
+order-level `NewOrder`, `OrderChanged`, and `OrderCanceled` events. `NewOrder`
+inserts an order, `OrderChanged` updates remaining volume and deletes when
+`Volume` is zero, and `OrderCanceled` deletes the order. Each channel and
+currency has an increasing `Nonce`; gaps or rewinds require state recovery.
 Official docs do not state a fixed millisecond interval or fixed depth. Heartbeat
 is currently 60 seconds but may change.
+
+| Channel | Status | Subscription | Interval | Depth | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- | --- | --- |
+| `orderbook-{primary}` | Spec/parser ready | Connection query `?subscribe=orderbook-xbt` or JSON `Event=Subscribe` / `Data=["orderbook-xbt"]` | No fixed interval documented | No fixed depth documented | `Nonce` strictly increases per channel/currency; no checksum documented | Start from `GET /Public/GetOrderBook`; reconnect and rebuild on nonce gap/regression, reconnect, stale stream, parse error, or suspected message loss |
+| `trade` | Spec boundary | Same subscribe envelope | No fixed interval documented | N/A | N/A | N/A |
+
+The fixture `tests/fixtures/exchanges/independentreserve/ws/public_orderbook_new_order.json`
+captures a public order book event with `Nonce` so local-book consumers can test
+continuity and REST rebuild triggers.
 
 ## Fiat and accounting boundary
 

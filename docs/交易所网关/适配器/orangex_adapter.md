@@ -28,6 +28,13 @@ REST base URL: `https://api.orangex.com/api/v1`
 
 WebSocket base URL documented by OrangeX: `wss://api.orangex.com/ws/api/v1`
 
+Public order book WebSocket remains spec-only because OrangeX published a
+deprecation notice. The reviewed stable channel is `book.{instrument}.raw`;
+legacy `book.{instrument}.100ms` evidence is retained for audit only. Both are
+recorded as depth: unspecified / no fixed depth because the current verified
+docs do not expose a stable depth selector; continuity depends on
+`change_id`/`prev_change_id` and REST `/public/get_order_book` snapshot rebuild.
+
 ## Authentication
 
 OrangeX private HTTP calls use JSON-RPC plus bearer authorization:

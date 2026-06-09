@@ -24,7 +24,19 @@ rate_limits:
 websocket:
   public:
     url: wss://fstream.asterdex.com/ws
-    channels: [depth, depth20, aggTrade, ticker, kline]
+    channels: [bookTicker, depth5@100ms, depth10@100ms, depth20@100ms, depth@100ms, depth@250ms, depth@500ms, aggTrade, ticker, kline]
+    order_book:
+      channels: [bookTicker, depth5@100ms, depth10@100ms, depth20@100ms, depth@100ms, depth@250ms, depth@500ms]
+      bbo_channel: bookTicker
+      partial_depth_channels: [depth5@100ms, depth10@100ms, depth20@100ms]
+      diff_depth_channels: [depth@100ms, depth@250ms, depth@500ms]
+      supported_depths: [5, 10, 20]
+      push_intervals: [100ms, 250ms, 500ms]
+      sequence_fields: [U, u, pu, lastUpdateId]
+      sequence_policy: Binance-style REST snapshot replay; rebuild when pu does not equal previous u.
+      checksum: unsupported
+      snapshot: GET /fapi/v3/depth
+      resync_policy: Use REST snapshot lastUpdateId replay after sequence gap or reconnect.
   private:
     url: wss://fstream.asterdex.com/ws/{listen_key}
     channels: [ACCOUNT_UPDATE, ORDER_TRADE_UPDATE, listenKeyExpired]
@@ -230,8 +242,79 @@ endpoints:
     support: native
     max_items: 1000
     sign_path: eip712_v3_query
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/aster/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aster.amend_order_unsupported
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/aster/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aster.order_list_unsupported
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/aster/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aster.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/aster/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aster.batch_cancel_orders_unsupported
 unsupported:
-  - spot
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Aster Spot API exists as a separate surface, but this adapter scope is Aster Futures V3 USDT perpetual REST/WS only; remaining Spot runtime work is spot REST/WS host audit, exchangeInfo/depth/ticker/trades public specs, signed account private specs, spot order lifecycle/open-order/fill private specs, listen-key/private stream handling, and product-scope reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/aster/request_specs/product_line_source_boundary.json
+    current_scope: "Aster Futures V3 USDT perpetual REST/WS profile."
+    runtime_gap: "Spot REST/WS host, symbol metadata, depth/ticker/trades, signed account/order endpoints, and listen-key/private stream handling are not wired."
+    required_endpoints: [spot_exchange_info, spot_depth, spot_ticker, spot_trades, spot_account, spot_order, spot_open_orders, spot_user_stream]
   - futures_coin_m
   - quote_sized_market_order
   - order_list

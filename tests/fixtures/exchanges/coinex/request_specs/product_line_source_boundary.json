@@ -1,0 +1,55 @@
+{
+  "exchange": "coinex",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "futures_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://docs.coinex.com/api/v2/futures/",
+      "evidence": "CoinEx API v2 documents a separate Futures module from Spot."
+    }
+  ],
+  "runtime_isolation": "Do not route CoinEx futures symbols through spot REST/WS endpoints, spot balances or spot order parsers.",
+  "unsupported_runtime_reason": "CoinEx Futures is a separate API surface; this spot adapter lacks futures metadata, margin/position/risk readbacks and futures order lifecycle runtime.",
+  "required_endpoints": {
+    "market_metadata": [
+      "futures/perpetual markets",
+      "contract specifications",
+      "settlement currency and precision rules"
+    ],
+    "public_market_data": [
+      "futures/perpetual depth",
+      "futures/perpetual ticker",
+      "futures/perpetual deals"
+    ],
+    "private_account": [
+      "futures balances or margin account",
+      "positions",
+      "leverage and risk limits"
+    ],
+    "private_order_lifecycle": [
+      "futures/perpetual place order",
+      "futures/perpetual cancel order",
+      "futures/perpetual query/open orders",
+      "futures/perpetual fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "futures host/path guard separate from Spot v2",
+    "read-only and trade permission scope guard",
+    "futures order dry-run guard"
+  ],
+  "unsafe_to_promote_without": [
+    "CoinEx Futures metadata and depth fixtures",
+    "position/leverage/risk parser coverage",
+    "futures signing/request specs",
+    "post-write order and fills reconciliation"
+  ],
+  "remaining_work": [
+    "add futures market metadata and depth specs",
+    "add leverage, margin and position readbacks",
+    "add futures order lifecycle signing, parser and runtime guard"
+  ]
+}

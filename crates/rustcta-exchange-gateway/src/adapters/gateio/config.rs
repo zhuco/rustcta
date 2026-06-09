@@ -3,9 +3,13 @@ use std::fmt;
 #[derive(Clone)]
 pub struct GateIoGatewayConfig {
     pub rest_base_url: String,
+    pub spot_public_ws_url: String,
+    pub futures_public_ws_url: String,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
     pub enabled_private_rest: bool,
+    pub enabled_public_streams: bool,
+    pub public_order_book_interval: String,
     pub request_timeout_ms: u64,
     pub enabled: bool,
 }
@@ -20,9 +24,17 @@ impl Default for GateIoGatewayConfig {
             .unwrap_or_else(|| api_key.is_some() && api_secret.is_some());
         Self {
             rest_base_url: "https://api.gateio.ws/api/v4".to_string(),
+            spot_public_ws_url: "wss://api.gateio.ws/ws/v4/".to_string(),
+            futures_public_ws_url: "wss://fx-ws.gateio.ws/v4/ws/usdt".to_string(),
             api_key,
             api_secret,
             enabled_private_rest,
+            enabled_public_streams: env_bool("GATEIO_PUBLIC_STREAMS_ENABLED")
+                .or_else(|| env_bool("GATE_PUBLIC_STREAMS_ENABLED"))
+                .unwrap_or(true),
+            public_order_book_interval: non_empty_env("GATEIO_PUBLIC_ORDER_BOOK_INTERVAL")
+                .or_else(|| non_empty_env("GATE_PUBLIC_ORDER_BOOK_INTERVAL"))
+                .unwrap_or_else(|| "100ms".to_string()),
             request_timeout_ms: 10_000,
             enabled: true,
         }
@@ -48,12 +60,19 @@ impl fmt::Debug for GateIoGatewayConfig {
         formatter
             .debug_struct("GateIoGatewayConfig")
             .field("rest_base_url", &self.rest_base_url)
+            .field("spot_public_ws_url", &self.spot_public_ws_url)
+            .field("futures_public_ws_url", &self.futures_public_ws_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field(
                 "api_secret",
                 &self.api_secret.as_ref().map(|_| "<redacted>"),
             )
             .field("enabled_private_rest", &self.enabled_private_rest)
+            .field("enabled_public_streams", &self.enabled_public_streams)
+            .field(
+                "public_order_book_interval",
+                &self.public_order_book_interval,
+            )
             .field("request_timeout_ms", &self.request_timeout_ms)
             .field("enabled", &self.enabled)
             .finish()

@@ -8,5 +8,12 @@
     "Api-Nonce": "1700000000000",
     "Api-Signature": "fixture-signature"
   },
-  "runtime": "unsupported_request_spec_only"
+  "runtime": "env_gated_PAYMIUM_PRIVATE_REST_ENABLED",
+  "requires": [
+    "PAYMIUM_PRIVATE_REST_ENABLED",
+    "PAYMIUM_API_KEY",
+    "PAYMIUM_API_SECRET",
+    "symbol"
+  ],
+  "response_fixture": "tests/fixtures/exchanges/paymium/open_orders_success.json"
 }

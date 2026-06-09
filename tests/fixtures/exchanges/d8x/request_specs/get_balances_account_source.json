@@ -1,0 +1,48 @@
+{
+  "exchange": "d8x",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "boundary": "wallet_contract_indexer_balance_source_only",
+  "runtime_enabled": false,
+  "chain_profile": {
+    "name": "polygon_zkevm",
+    "chain_id": 1101
+  },
+  "source": {
+    "surfaces": [
+      "D8X Futures Node SDK account state",
+      "direct EVM collateral contract read calls",
+      "audited indexer wallet-account scan"
+    ],
+    "requires": [
+      "wallet_address",
+      "collateral_token_or_pool_id",
+      "perpetual_contract_or_pool_id"
+    ],
+    "address_shape": "0x-prefixed EVM wallet address fixture",
+    "does_not_use": [
+      "gateway_api_key",
+      "hmac_secret",
+      "centralized_exchange_private_rest"
+    ]
+  },
+  "decoded_sample": {
+    "wallet_address": "0x000000000000000000000000000000000000d8a0",
+    "collateral_asset": "USDC",
+    "margin_balance": "2500.000000",
+    "account_equity": "2611.750000",
+    "available_margin": "1900.250000"
+  },
+  "runtime_gap": [
+    "block number and reorg handling",
+    "contract/indexer freshness checks",
+    "margin/equity parser",
+    "wallet ownership and market mapping"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_wallet_address": false,
+    "live_call_allowed": false
+  }
+}

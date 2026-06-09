@@ -161,8 +161,8 @@ private REST and private streams are declared `Unsupported`.
 P9 official verification adds the public order book rebuild rule: subscribe to
 `depth_update@btc_usdt`, buffer events, fetch a REST snapshot with limit 500,
 drop stale updates, and enforce continuity. Spot uses `fi/i`; Futures uses
-`fu/u`. The project already has 1000ms interval evidence; no faster fixed
-official interval or checksum was confirmed in this batch.
+`fu/u`. Spot and Futures `depth_update` topics have 1000ms interval evidence;
+no faster fixed official interval or checksum was confirmed in this batch.
 
 ## Configuration
 

@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "btm_trade_1",
+      "orderId": "btm_order_1",
+      "clientOrderId": "client-btm-1",
+      "symbol": "BTC_USDT",
+      "side": "buy",
+      "price": "64010",
+      "amount": "0.004",
+      "cost": "256.04",
+      "fee": {
+        "currency": "USDT",
+        "cost": "0.25604"
+      },
+      "takerOrMaker": "taker",
+      "timestamp": 1717200060000
+    }
+  ]
+}

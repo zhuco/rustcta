@@ -1,11 +1,15 @@
 use rustcta_exchange_api::{
-    CapabilitySupport, ExchangeClient, OrderBookRequest, SymbolRulesRequest,
-    EXCHANGE_API_SCHEMA_VERSION,
+    BatchAtomicity, BatchExecutionMode, CapabilitySupport, ExchangeClient, OrderBookRequest,
+    PublicStreamKind, PublicStreamSubscription, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
+use super::streams::{
+    binance_partial_depth_stream_name, binance_public_subscribe_payload,
+    parse_binance_public_depth_message,
+};
 use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{BinanceGatewayAdapter, BinanceGatewayConfig};
 
@@ -16,6 +20,15 @@ fn fixture(path: &str) -> serde_json::Value {
     );
     let text = std::fs::read_to_string(path).expect("fixture");
     serde_json::from_str(&text).expect("fixture json")
+}
+
+fn public_subscription(kind: PublicStreamKind) -> PublicStreamSubscription {
+    PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("public-ws"),
+        symbol: symbol_scope("BTC/USDT"),
+        kind,
+    }
 }
 
 #[tokio::test]
@@ -49,16 +62,32 @@ async fn binance_adapter_should_declare_task9_toolchain_capabilities() {
     ));
     assert!(matches!(
         capabilities.capabilities_v2.public_streams,
-        CapabilitySupport::Unsupported { .. }
+        CapabilitySupport::RestFallback { .. }
     ));
     assert!(matches!(
         capabilities.capabilities_v2.private_streams,
         CapabilitySupport::Unsupported { .. }
     ));
-    assert!(!capabilities.supports_public_streams);
+    assert!(capabilities.supports_public_streams);
     assert!(!capabilities.supports_private_streams);
-    assert!(!capabilities.supports_batch_place_order);
-    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(capabilities.supports_batch_place_order);
+    assert!(capabilities.supports_batch_cancel_order);
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.mode,
+        BatchExecutionMode::Native
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.atomicity,
+        BatchAtomicity::Partial
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.max_items,
+        Some(5)
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_cancel_orders.max_items,
+        Some(10)
+    );
     assert_eq!(
         capabilities.capabilities_v2.fills_history.max_limit,
         Some(1000)
@@ -80,6 +109,20 @@ async fn binance_adapter_should_declare_task9_toolchain_capabilities() {
         .capabilities_v2
         .endpoints
         .iter()
+        .any(|endpoint| endpoint.operation == "batch_place_orders"
+            && endpoint.path.as_deref() == Some("/fapi/v1/batchOrders")
+            && endpoint.market_types.contains(&MarketType::Perpetual)));
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
+        .any(|endpoint| endpoint.operation == "batch_cancel_orders"
+            && endpoint.path.as_deref() == Some("/fapi/v1/batchOrders")
+            && endpoint.market_types.contains(&MarketType::Perpetual)));
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
         .any(|endpoint| endpoint.operation == "get_positions"
             && endpoint.path.as_deref() == Some("/fapi/v2/positionRisk")
             && endpoint.market_types.contains(&MarketType::Perpetual)));
@@ -89,6 +132,66 @@ async fn binance_adapter_should_declare_task9_toolchain_capabilities() {
         .iter()
         .any(|endpoint| endpoint.operation == "get_recent_fills"
             && endpoint.path.as_deref() == Some("/api/v3/myTrades")));
+}
+
+#[tokio::test]
+async fn binance_public_ws_should_build_depth_and_book_ticker_subscriptions() {
+    let adapter = BinanceGatewayAdapter::new(BinanceGatewayConfig::default()).expect("adapter");
+    let snapshot = public_subscription(PublicStreamKind::OrderBookSnapshot);
+    let payload = binance_public_subscribe_payload(&snapshot).expect("payload");
+
+    assert_eq!(payload["method"], "SUBSCRIBE");
+    assert_eq!(payload["params"][0], "btcusdt@depth20@100ms");
+    assert_eq!(
+        binance_partial_depth_stream_name("BTC/USDT", 5, 1000).unwrap(),
+        "btcusdt@depth5"
+    );
+    assert_eq!(
+        binance_partial_depth_stream_name("BTC/USDT", 10, 100).unwrap(),
+        "btcusdt@depth10@100ms"
+    );
+
+    let session: serde_json::Value = serde_json::from_str(
+        &adapter
+            .subscribe_public_stream(public_subscription(PublicStreamKind::Ticker))
+            .await
+            .expect("subscribe"),
+    )
+    .expect("session json");
+    assert_eq!(session["url"], "wss://stream.binance.com:9443/ws");
+    assert_eq!(session["payload"]["params"][0], "btcusdt@bookTicker");
+    assert_eq!(session["heartbeat"]["ping_interval_ms"], 20_000);
+}
+
+#[test]
+fn binance_public_ws_fixtures_should_parse_snapshot_delta_and_book_ticker() {
+    let exchange = super::test_support::exchange_id();
+    let snapshot = parse_binance_public_depth_message(
+        &exchange,
+        symbol_scope("BTCUSDT"),
+        &fixture("ws/public_depth_snapshot.json"),
+    )
+    .expect("snapshot");
+    assert_eq!(snapshot.sequence, Some(160));
+    assert_eq!(snapshot.bids[0].quantity, 10.0);
+
+    let delta = parse_binance_public_depth_message(
+        &exchange,
+        symbol_scope("BTCUSDT"),
+        &fixture("ws/public_depth_delta.json"),
+    )
+    .expect("delta");
+    assert_eq!(delta.sequence, Some(160));
+    assert!(delta.exchange_timestamp.is_some());
+
+    let ticker = parse_binance_public_depth_message(
+        &exchange,
+        symbol_scope("BTCUSDT"),
+        &fixture("ws/public_book_ticker.json"),
+    )
+    .expect("book ticker");
+    assert_eq!(ticker.sequence, Some(400900217));
+    assert_eq!(ticker.bids[0].price, 25.3519);
 }
 
 #[test]

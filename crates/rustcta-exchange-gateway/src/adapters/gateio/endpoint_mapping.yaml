@@ -61,12 +61,50 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: native
+    urls:
+      spot: wss://api.gateio.ws/ws/v4/
+      perpetual: wss://fx-ws.gateio.ws/v4/ws/usdt
+    subscription_mode: json_subscribe
+    orderbook:
+      channels:
+        - name: spot.order_book_update
+          product: spot
+          interval: 20ms
+          push_interval_ms: 20
+          depth: 20
+          message_type: delta
+        - name: spot.order_book_update
+          product: spot
+          interval: 100ms
+          push_interval_ms: 100
+          depth: 100
+          message_type: delta
+        - name: futures.order_book_update
+          product: perpetual
+          interval: 20ms
+          push_interval_ms: 20
+          depth: 20
+          message_type: delta
+        - name: futures.order_book_update
+          product: perpetual
+          interval: 100ms
+          push_interval_ms: 100
+          depth: 100
+          message_type: delta
+      sequence_field: u
+      checksum: none_documented
+      resync: rest_order_book_snapshot_then_replay_delta
+      fixtures:
+        - tests/fixtures/exchanges/gateio/ws/public_spot_order_book_update.json
+      implementation:
+        - crates/rustcta-exchange-gateway/src/adapters/gateio/streams.rs
+        - crates/rustcta-exchange-gateway/src/adapters/gateio/stream_tests.rs
     heartbeat:
-      required: false
-      direction: none
+      required: true
+      direction: server_ping
       interval_ms: null
-      timeout_ms: null
+      timeout_ms: 30000
     resync: rest_order_book_snapshot
   private:
     support: unsupported
@@ -74,6 +112,38 @@ websocket:
     renewal_ms: null
     relogin_on_reconnect: true
     fallback: rest_reconciliation
+unsupported:
+  - operation: delivery_futures_product
+    status: project_unimplemented
+    reason: "Official Gate.io Delivery Futures API exists, but this adapter currently wires only Spot and USDT perpetual futures."
+    boundary: project_unimplemented_product_line
+    official_gap: delivery_futures_product
+    current_scope: [spot, perpetual_usdt]
+    source_boundary_fixture: tests/fixtures/exchanges/gateio/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      - delivery contract metadata
+      - delivery order book/snapshot and public WS stream
+      - delivery account/balance and positions
+      - delivery place/cancel/query/open/fills lifecycle
+      - delivery settlement/delivery schedule and risk fields
+    unsafe_to_promote_without: [delivery market type routing, delivery metadata/orderbook parser fixtures, delivery account/position parser coverage, signed delivery order lifecycle request specs, post-write query/open/fills reconciliation]
+  - operation: option_product
+    status: project_unimplemented
+    reason: "Official Gate.io Options API exists, but this adapter currently wires only Spot and USDT perpetual futures."
+    boundary: project_unimplemented_product_line
+    official_gap: option_product
+    current_scope: [spot, perpetual_usdt]
+    source_boundary_fixture: tests/fixtures/exchanges/gateio/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      - option underlyings and contract metadata
+      - option order book/snapshot and public WS stream
+      - option account/balance and positions
+      - option place/cancel/query/open/fills lifecycle
+      - option greeks/settlement/risk fields
+    unsafe_to_promote_without: [option market type routing, option metadata/orderbook parser fixtures, option account/position/risk parser coverage, signed option order lifecycle request specs, post-write query/open/fills reconciliation]
+  - operation: place_order_list
+    status: unsupported
+    reason: "No official Gate.io OCO/order-list surface is verified as a lossless shared place_order_list model for the current Spot/USDT perpetual adapter."
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -163,6 +233,52 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 1
     request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: native
+    notes: Spot amend is implemented through PATCH /spot/orders/{order_id}; futures amend is not mapped in the shared runtime.
+  - operation: batch_place_orders
+    transport: rest
+    product: spot
+    method: POST
+    path: /composed/gateio/batch_place_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential planner; futures native planning is recorded in capabilities_v2.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /spot/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    support: native
+    notes: Symbol-scoped multi-cancel/native cancel-all style endpoint; shared batch planning handles partial failures.
+  - operation: place_order_list
+    transport: rest
+    product: spot
+    method: POST
+    path: /unsupported/gateio/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: gateio.order_list_unsupported
   - operation: query_order
     transport: rest
     product: spot
@@ -240,7 +356,7 @@ endpoints:
     credential_scopes: [read_only]
     rate_limit_bucket: private_uid
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
   - operation: place_order
     transport: rest
     product: perpetual
@@ -290,7 +406,7 @@ endpoints:
     credential_scopes: [read_only]
     rate_limit_bucket: private_uid
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
   - operation: get_recent_fills
     transport: rest
     product: perpetual
@@ -300,4 +416,57 @@ endpoints:
     credential_scopes: [read_only]
     rate_limit_bucket: private_uid
     weight: 1
-    request_spec_required: false
+    request_spec_required: true
+streams:
+  - operation: public_order_book_update_20ms
+    product: spot
+    channel: spot.order_book_update
+    transport: websocket
+    url: wss://api.gateio.ws/ws/v4/
+    subscription_mode: json_subscribe
+    push_interval_ms: 20
+    depth: 20
+    sequence_field: u
+    checksum: none_documented
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book
+  - operation: public_order_book_update_100ms
+    product: spot
+    channel: spot.order_book_update
+    transport: websocket
+    url: wss://api.gateio.ws/ws/v4/
+    subscription_mode: json_subscribe
+    push_interval_ms: 100
+    depth: 100
+    sequence_field: u
+    checksum: none_documented
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book
+  - operation: public_perpetual_order_book_update_20ms
+    product: perpetual
+    channel: futures.order_book_update
+    transport: websocket
+    url: wss://fx-ws.gateio.ws/v4/ws/usdt
+    subscription_mode: json_subscribe
+    push_interval_ms: 20
+    depth: 20
+    sequence_field: u
+    checksum: none_documented
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book
+  - operation: public_perpetual_order_book_update_100ms
+    product: perpetual
+    channel: futures.order_book_update
+    transport: websocket
+    url: wss://fx-ws.gateio.ws/v4/ws/usdt
+    subscription_mode: json_subscribe
+    push_interval_ms: 100
+    depth: 100
+    sequence_field: u
+    checksum: none_documented
+    resync:
+      mode: rest_snapshot_then_delta_replay
+      endpoint_operation: get_order_book

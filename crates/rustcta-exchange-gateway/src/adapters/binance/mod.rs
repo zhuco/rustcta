@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -26,6 +28,7 @@ mod public;
 #[cfg(test)]
 mod public_tests;
 mod signing;
+mod streams;
 #[cfg(test)]
 mod test_support;
 mod toolchain;
@@ -295,9 +298,12 @@ impl ExchangeClient for BinanceGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(20);
-        capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(20));
-        toolchain::apply_toolchain_capabilities(&mut capabilities, private_rest_enabled);
+        capabilities.order_book = rustcta_exchange_api::OrderBookCapability::strict_delta(Some(20));
+        toolchain::apply_toolchain_capabilities(
+            &mut capabilities,
+            private_rest_enabled,
+            self.config.enabled_public_streams,
+        );
         capabilities
     }
 
@@ -365,6 +371,20 @@ impl ExchangeClient for BinanceGatewayAdapter {
         self.place_order_list_impl(request).await
     }
 
+    async fn batch_place_orders(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.batch_place_orders_impl(request).await
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.batch_cancel_orders_impl(request).await
+    }
+
     async fn cancel_all_orders(
         &self,
         request: rustcta_exchange_api::CancelAllOrdersRequest,
@@ -395,18 +415,16 @@ impl ExchangeClient for BinanceGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "binance.subscribe_public_stream",
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(
         &self,
-        _subscription: PrivateStreamSubscription,
+        subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        self.unsupported_private("binance.subscribe_private_stream")
+        self.subscribe_private_stream_impl(subscription).await
     }
 }
 

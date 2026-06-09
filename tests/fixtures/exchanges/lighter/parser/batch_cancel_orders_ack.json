@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "data": {
+    "results": [
+      {
+        "success": true,
+        "tx_type": "cancel_order",
+        "market_index": 0,
+        "order_index": "lighter-order-3001",
+        "client_order_index": "lighter-cancel-client-1",
+        "is_ask": false,
+        "status": "cancelled",
+        "base_amount": "1.00",
+        "price": "2064.50"
+      },
+      {
+        "success": false,
+        "tx_type": "cancel_order",
+        "order_index": "lighter-order-3002",
+        "error": "order not found"
+      }
+    ]
+  }
+}

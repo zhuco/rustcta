@@ -32,6 +32,19 @@ Status: `rustcta-exchange-gateway` Spot + USDT perpetual REST and WebSocket-spec
 | Futures WebSocket V3 | `wss://ws.poloniex.com/ws/v3/public`, `wss://ws.poloniex.com/ws/v3/private` | Subscription specs plus book/trade/ticker/candle/order/fill/balance/position parser coverage |
 | Futures amend/order lists | no verified Binance-compatible gateway mapping | Explicit `Unsupported` |
 
+## Public Order Book WebSocket
+
+| Product | URL | Channel | Depth | Cadence | Sequence | Checksum | Rebuild |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Spot | `wss://ws.poloniex.com/ws/public` | `book_lv2` | 20 levels | Real-time; no fixed ms published | `id` with previous `lastId` | Not documented | REST `GET /markets/{symbol}/orderBook`, then resubscribe |
+| Futures V3 | `wss://ws.poloniex.com/ws/v3/public` | `book_lv2` | 20 levels | Real-time; no fixed ms published | `id` with previous `lid` | Not documented | REST `GET /v3/market/orderBook`, then resubscribe |
+
+The adapter now exposes a structured `book_lv2` policy helper, parses `id` into
+`OrderBookSnapshot.sequence`, and validates continuity with the documented
+previous-id fields. A gap, regression, reconnect, stale stream, or parse failure
+requires discarding the local book, rebuilding from REST, and resubscribing to
+`book_lv2`.
+
 ## Notes
 
 Symbols normalize to Poloniex underscore form: `BTC_USDT` for Spot and `BTC_USDT_PERP` for perpetual. Capability flags are coarse across Spot and perpetual: amend is enabled because Spot has a native cancel-replace endpoint, while perpetual amend still returns `Unsupported`. Stream methods currently return subscription specs/identifiers and parser coverage; production deployment still needs the shared WebSocket supervisor to connect, reconnect, heartbeat, and reconcile. Live trading should remain disabled until dry-run and live-readonly checks validate credentials, account mode, and position-side semantics.

@@ -1,0 +1,30 @@
+{
+  "exchange": "lighter",
+  "operation": "lighter.get_fees",
+  "boundary_type": "config_default_fee_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "default_fee_schedule",
+    "default_account_fee": {
+      "maker": "0",
+      "taker": "0"
+    },
+    "account_effective_fee_requires": [
+      "premium_override_config",
+      "account_tier_guard",
+      "account_index_or_sub_account_scope"
+    ]
+  },
+  "default_or_override_strategy": {
+    "standard_zero_fee_source_allowed_for_standard_accounts": true,
+    "production_requires_account_type_guard_or_explicit_override": true,
+    "zero_fee_placeholder_allowed_without_source": false
+  },
+  "expected_error_until_promoted": "lighter.fees_auth_token_unverified",
+  "remaining_work": [
+    "premium_override_config",
+    "account_tier_guard",
+    "shared_get_fees_response_mapping"
+  ]
+}

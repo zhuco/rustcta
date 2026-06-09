@@ -4,7 +4,7 @@ use rustcta_exchange_api::{
 use rustcta_types::MarketType;
 use serde_json::json;
 
-use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
+use super::parser::{parse_orderbook_snapshot, parse_perpetual_symbol_rules, parse_symbol_rules};
 use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{GateIoGatewayAdapter, GateIoGatewayConfig};
 
@@ -43,6 +43,32 @@ fn gateio_parser_fixtures_should_cover_success_empty_and_error_shapes() {
         &fixture("orderbook_error.json")
     )
     .is_err());
+}
+
+#[test]
+fn gateio_symbol_rules_should_skip_invalid_exchange_symbols() {
+    let exchange = super::test_support::exchange_id();
+    let rules = parse_perpetual_symbol_rules(
+        &exchange,
+        &json!([
+            {
+                "name": "BTC_USDT",
+                "order_price_round": "0.1",
+                "order_size_round": "1",
+                "trade_status": "tradable"
+            },
+            {
+                "name": "龙_USDT",
+                "order_price_round": "0.0001",
+                "order_size_round": "1",
+                "trade_status": "tradable"
+            }
+        ]),
+    )
+    .expect("rules");
+
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].base_asset, "BTC");
 }
 
 #[tokio::test]

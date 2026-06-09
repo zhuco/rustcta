@@ -1,0 +1,18 @@
+{
+  "exchange": "binanceus",
+  "operation": "batch_cancel_orders",
+  "boundary": "unsupported_native_batch_cancel",
+  "product": "spot",
+  "transport": "rest",
+  "method": "UNSUPPORTED",
+  "path": "/unsupported/binanceus/batch_cancel_orders",
+  "auth": "unsupported",
+  "trade_enabled": false,
+  "shared_semantics": "unsupported",
+  "source_boundary": {
+    "reviewed_profile": "Binance.US Spot",
+    "review_result": "No verified Binance.US native batch-cancel endpoint maps losslessly to the shared batch_cancel_orders request model.",
+    "excluded_alias": "Do not reuse Binance.com batch-order routes for Binance.US without a Binance.US-specific official endpoint audit."
+  },
+  "reason": "Binance.US Spot currently exposes single-order and symbol-wide cancel paths in this adapter profile; native batch cancel remains unsupported for the shared gateway boundary."
+}

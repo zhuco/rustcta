@@ -118,6 +118,40 @@ pub enum CoinbasePublicStreamMessage {
     SubscriptionAck,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoinbasePublicOrderBookWsPolicy {
+    pub public_channel: &'static str,
+    pub heartbeat_channel: &'static str,
+    pub public_interval_ms: Option<u64>,
+    pub depth: &'static str,
+    pub sequence_field: &'static str,
+    pub checksum: Option<&'static str>,
+    pub update_semantics: &'static str,
+    pub rest_snapshot_endpoint: &'static str,
+    pub resync: &'static str,
+}
+
+pub fn coinbase_public_order_book_ws_policy() -> CoinbasePublicOrderBookWsPolicy {
+    CoinbasePublicOrderBookWsPolicy {
+        public_channel: "level2",
+        heartbeat_channel: "heartbeats",
+        public_interval_ms: None,
+        depth: "full level2 order book deltas; no fixed official depth parameter",
+        sequence_field: "sequence_num",
+        checksum: None,
+        update_semantics: "snapshot plus update events with absolute new_quantity; quantity 0 removes the price level",
+        rest_snapshot_endpoint: "GET /api/v3/brokerage/product_book",
+        resync: "subscribe level2 and heartbeats, rebuild from REST product_book after reconnect, heartbeat loss, sequence_num gap, or sequence regression",
+    }
+}
+
+pub fn coinbase_sequence_is_contiguous(previous: Option<u64>, next: u64) -> bool {
+    match previous {
+        Some(previous) => next == previous.saturating_add(1),
+        None => true,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum CoinbaseWsSessionEvent {

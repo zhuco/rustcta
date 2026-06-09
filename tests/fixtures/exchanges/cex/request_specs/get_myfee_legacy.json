@@ -1,0 +1,18 @@
+{
+  "exchange": "cex",
+  "operation": "cex.get_fees.get_myfee_legacy",
+  "product": "spot",
+  "method": "POST",
+  "path": "/get_myfee/",
+  "transport": "rest",
+  "auth": "hmac",
+  "credential_scope": "read_only",
+  "body": {
+    "nonce": "1700000000000",
+    "key": "fixture-key",
+    "signature": "33BF9004BAEBB373F6879ADFD86757EF6B36AF67CF246C4D00C0ABF8E6B7EF17"
+  },
+  "signing_vector": "cex/rest_private_hmac_sha256",
+  "profile_guard": "Legacy CEX.IO REST profile fallback; prefer Spot Trading get_my_current_fee when enabled.",
+  "unsupported_boundary": "Shared get_fees runtime is project-unimplemented; this fixture records the official legacy request source."
+}

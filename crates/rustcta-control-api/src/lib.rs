@@ -1793,6 +1793,154 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cross_arb_dashboard_should_use_runner_dashboard_snapshot() {
+        let legacy = serde_json::json!({
+            "generated_at": "2026-06-08T10:00:00Z",
+            "live_trading_enabled": true,
+            "risk_events": [],
+            "cross_arb_dashboard": {
+                "data_source": "cross-exchange-arbitrage-live-runner",
+                "online": true,
+                "summary": {
+                    "strategy_id": "cross_arb_live",
+                    "enabled_exchanges": ["binance", "bitget", "gateio"],
+                    "configured_symbols": 3,
+                    "api_secret": "hidden"
+                },
+                "settings": {
+                    "symbols": ["BTC/USDT", "ETH/USDT"],
+                    "market_type": "perpetual"
+                },
+                "arbitrage_results": [
+                    {
+                        "bundle_id": "arb-1",
+                        "actual_pnl_usdt": "1.25",
+                        "secret": "hidden"
+                    }
+                ],
+                "profit_summary": {
+                    "realized_profit_usdt": 1.25,
+                    "closed_arbitrages": 1
+                },
+                "market_snapshots": [
+                    {
+                        "exchange": "binance",
+                        "canonical_symbol": "H/USDT",
+                        "best_bid_price": 0.194,
+                        "token": "hidden"
+                    }
+                ],
+                "instruments": [
+                    {
+                        "exchange": "binance",
+                        "canonical_symbol": "H/USDT",
+                        "market_type": "perpetual",
+                        "api_key": "hidden"
+                    }
+                ],
+                "instrument_feasibility": {
+                    "known_symbols": 3,
+                    "known_exchanges": 3,
+                    "secret": "hidden"
+                },
+                "exchange_status": [
+                    {
+                        "exchange": "binance",
+                        "status": "ready"
+                    }
+                ]
+            }
+        });
+        let app = router(ControlApiState::from_legacy_dashboard_snapshot(&legacy));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cross-arb/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            value["data"]["data_source"],
+            "cross-exchange-arbitrage-live-runner"
+        );
+        assert_eq!(value["data"]["summary"]["configured_symbols"], 3);
+        assert_eq!(value["data"]["arbitrage_results"][0]["bundle_id"], "arb-1");
+        assert_eq!(
+            value["data"]["profit_summary"]["realized_profit_usdt"],
+            1.25
+        );
+        assert!(!value.to_string().contains("api_secret"));
+        assert!(!value.to_string().contains("secret"));
+
+        let snapshots = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategy-snapshots")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(snapshots.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(snapshots.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value[0]["strategy_kind"], "cross_exchange_arbitrage");
+        assert_eq!(value[0]["detail"]["exchange_status"][0]["status"], "ready");
+        assert!(!value.to_string().contains("api_secret"));
+
+        let instruments = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cross-arb/instruments")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(instruments.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(instruments.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["coverage_ok"], true);
+        assert_eq!(value["instruments"][0]["canonical_symbol"], "H/USDT");
+        assert_eq!(value["feasibility"]["known_symbols"], 3);
+        assert!(!value.to_string().contains("api_key"));
+        assert!(!value.to_string().contains("secret"));
+
+        let market_snapshots = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cross-arb/market-snapshots")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(market_snapshots.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(market_snapshots.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["coverage_ok"], true);
+        assert_eq!(value["snapshots"][0]["canonical_symbol"], "H/USDT");
+        assert!(!value.to_string().contains("token"));
+    }
+
+    #[tokio::test]
     async fn supervisor_registry_path_should_back_processes_and_process_logs() {
         let temp_dir = std::env::temp_dir().join(format!(
             "rustcta-control-api-supervisor-test-{}",

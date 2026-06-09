@@ -1,0 +1,17 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/matcher/orderbook/8QUefk3K8xW6bYzY1gEoQf2rN9WAVESPublicKeyFixture",
+  "auth": "none",
+  "query": {
+    "activeOnly": {
+      "match": "exact",
+      "value": "false"
+    }
+  },
+  "strict_query": false,
+  "expected_error_until_promoted": "wavesexchange.recent_fills_require_public_key_mapping"
+}

@@ -1,8 +1,10 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, ExchangeStreamEvent, OrderBookResponse, PublicStreamKind,
-    PublicStreamSubscription, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    CapabilitySupport, ExchangeApiError, ExchangeApiResult, ExchangeStreamEvent,
+    HeartbeatCapability, OrderBookResponse, PublicStreamKind, PublicStreamSubscription,
+    ReconnectCapability, StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability,
+    SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderBookSnapshot};
 use serde_json::{json, Value};
@@ -36,6 +38,7 @@ impl TapbitGatewayAdapter {
             "url": self.config.public_ws_url,
             "payload": payload,
             "heartbeat": tapbit_heartbeat_spec(),
+            "order_book": tapbit_order_book_stream_spec(),
         })
         .to_string())
     }
@@ -76,8 +79,64 @@ pub fn tapbit_heartbeat_spec() -> Value {
     })
 }
 
+pub fn tapbit_order_book_stream_spec() -> Value {
+    json!({
+        "channels": {
+            "spot": "spot/orderBook.{instrument_id}.[depth]",
+            "perpetual": "usdt/orderBook.{instrument_id}.[depth]",
+        },
+        "supported_depths": [5, 10, 50, 100, 200],
+        "selected_depth": TAPBIT_WS_MAX_BOOK_DEPTH,
+        "push_interval_ms": null,
+        "sequence_field": "version",
+        "sequence_policy": "strictly_increasing",
+        "checksum": null,
+        "resync": "rest_order_book_snapshot_after_reconnect_or_version_gap",
+    })
+}
+
 pub fn tapbit_ws_pong_payload() -> &'static str {
     TAPBIT_WS_PONG_PAYLOAD
+}
+
+pub fn tapbit_stream_runtime_capability() -> StreamRuntimeCapability {
+    StreamRuntimeCapability {
+        public: CapabilitySupport::ws_only(
+            "Tapbit public WS orderBook/ticker specs and parsers are implemented; REST snapshot is required for order-book resync",
+        ),
+        private: CapabilitySupport::unsupported(
+            "tapbit.subscribe_private_stream.no_official_private_ws_topics",
+        ),
+        supports_subscribe: true,
+        supports_unsubscribe: true,
+        supports_public_subscribe: true,
+        supports_public_unsubscribe: true,
+        supports_private_subscribe: false,
+        supports_private_unsubscribe: false,
+        heartbeat: HeartbeatCapability {
+            supported: true,
+            required: true,
+            direction: StreamHeartbeatDirection::ServerPing,
+            interval_ms: Some(TAPBIT_WS_PING_INTERVAL_MS as u64),
+            timeout_ms: Some(TAPBIT_WS_PONG_TIMEOUT_MS as u64),
+        },
+        reconnect: ReconnectCapability {
+            supported: true,
+            requires_resubscribe: true,
+            preserves_session: false,
+            max_reconnect_attempts: None,
+        },
+        resync: StreamResyncCapability {
+            order_book: true,
+            balances: false,
+            positions: false,
+            orders: false,
+        },
+        reconnect_requires_login: false,
+        reconnect_requires_resubscribe: true,
+        orderbook_requires_snapshot_after_reconnect: true,
+        ..StreamRuntimeCapability::default()
+    }
 }
 
 pub fn tapbit_stream_reconnect_policy() -> StreamReconnectPolicy {

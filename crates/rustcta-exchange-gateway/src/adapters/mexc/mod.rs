@@ -7,10 +7,10 @@ use rustcta_exchange_api::{
     CancelOrderRequest, CancelOrderResponse, CapabilitySupport, CredentialScope, ExchangeApiError,
     ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
     HeartbeatDirection, HeartbeatPolicy, HistoryCapability, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    OrderBookCapability, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -27,6 +27,9 @@ mod public;
 #[cfg(test)]
 mod public_tests;
 mod signing;
+#[cfg(test)]
+mod stream_tests;
+mod streams;
 #[cfg(test)]
 mod test_support;
 mod transport;
@@ -235,6 +238,7 @@ impl ExchangeClient for MexcGatewayAdapter {
         capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
+        capabilities.supports_public_streams = true;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
@@ -257,18 +261,21 @@ impl ExchangeClient for MexcGatewayAdapter {
             OrderType::IOC,
             OrderType::FOK,
         ];
-        capabilities.max_order_book_depth = Some(50);
-        capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
+        capabilities.max_order_book_depth = Some(1000);
+        capabilities.order_book = OrderBookCapability::strict_delta(Some(1000));
         capabilities.max_recent_fill_limit = Some(1000);
         capabilities.refresh_v2_from_legacy_flags();
-        capabilities.capabilities_v2.public_streams = CapabilitySupport::rest_fallback(
-            "public WebSocket is not wired in this gateway adapter; REST order-book snapshots provide resync",
-        );
+        capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
         capabilities.capabilities_v2.private_streams = CapabilitySupport::rest_fallback(
             "private WebSocket is not wired; reconciliation uses private REST readbacks",
         );
-        capabilities.capabilities_v2.stream_runtime.heartbeat_policy = HeartbeatPolicy::disabled();
+        capabilities.capabilities_v2.stream_runtime.heartbeat_policy = HeartbeatPolicy {
+            direction: HeartbeatDirection::ClientPing,
+            ping_interval_ms: 30_000,
+            pong_timeout_ms: 10_000,
+            stale_message_ms: 60_000,
+            requires_pong_payload_echo: false,
+        };
         capabilities.capabilities_v2.stream_runtime.public =
             capabilities.capabilities_v2.public_streams.clone();
         capabilities.capabilities_v2.stream_runtime.private =
@@ -284,17 +291,27 @@ impl ExchangeClient for MexcGatewayAdapter {
             .capabilities_v2
             .stream_runtime
             .heartbeat
-            .direction = rustcta_exchange_api::StreamHeartbeatDirection::None;
+            .direction = rustcta_exchange_api::StreamHeartbeatDirection::ClientPing;
         capabilities
             .capabilities_v2
             .stream_runtime
             .heartbeat
-            .required = false;
+            .required = true;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .interval_ms = Some(30_000);
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .timeout_ms = Some(10_000);
         capabilities
             .capabilities_v2
             .stream_runtime
             .heartbeat_policy
-            .direction = HeartbeatDirection::None;
+            .direction = HeartbeatDirection::ClientPing;
         capabilities.capabilities_v2.batch_place_orders = rustcta_exchange_api::BatchCapability {
             support: CapabilitySupport::composed(
                 "planner may compose sequential single-order REST calls",
@@ -425,11 +442,9 @@ impl ExchangeClient for MexcGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "mexc.subscribe_public_stream",
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(

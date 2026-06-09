@@ -109,7 +109,8 @@ impl ExchangeClient for NdaxGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        let private_rest_enabled = self.config.private_rest_enabled();
+        capabilities.supports_private_rest = private_rest_enabled;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -122,9 +123,9 @@ impl ExchangeClient for NdaxGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_rest_enabled;
+        capabilities.supports_open_orders = private_rest_enabled;
+        capabilities.supports_recent_fills = private_rest_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -139,7 +140,7 @@ impl ExchangeClient for NdaxGatewayAdapter {
         capabilities.max_order_book_depth = Some(200);
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(200));
-        capabilities.max_recent_fill_limit = None;
+        capabilities.max_recent_fill_limit = Some(100);
         capabilities
     }
 
@@ -258,25 +259,21 @@ impl ExchangeClient for NdaxGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("ndax.query_order_offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("ndax.open_orders_offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("ndax.recent_fills_offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

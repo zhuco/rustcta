@@ -15,6 +15,41 @@ use super::signing::{backpack_signature, canonical_signing_payload};
 use super::BackpackGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackpackPublicOrderBookWsPolicy {
+    pub book_ticker_channel_template: &'static str,
+    pub realtime_depth_channel_template: &'static str,
+    pub aggregate_depth_channel_template: &'static str,
+    pub aggregate_intervals_ms: &'static [u64],
+    pub rest_snapshot_endpoint: &'static str,
+    pub rest_snapshot_limits: &'static [u32],
+    pub snapshot_sequence_field: &'static str,
+    pub depth_first_update_field: &'static str,
+    pub depth_final_update_field: &'static str,
+    pub book_ticker_sequence_field: &'static str,
+    pub checksum: Option<&'static str>,
+    pub update_semantics: &'static str,
+    pub resync: &'static str,
+}
+
+pub fn backpack_public_order_book_ws_policy() -> BackpackPublicOrderBookWsPolicy {
+    BackpackPublicOrderBookWsPolicy {
+        book_ticker_channel_template: "bookTicker.{symbol}",
+        realtime_depth_channel_template: "depth.{symbol}",
+        aggregate_depth_channel_template: "depth.{interval_ms}ms.{symbol}",
+        aggregate_intervals_ms: &[200, 600, 1000],
+        rest_snapshot_endpoint: "GET /api/v1/depth",
+        rest_snapshot_limits: &[5, 10, 20, 50, 100, 500, 1000],
+        snapshot_sequence_field: "lastUpdateId",
+        depth_first_update_field: "U",
+        depth_final_update_field: "u",
+        book_ticker_sequence_field: "u",
+        checksum: None,
+        update_semantics: "absolute quantity at changed price levels; quantity 0 removes the level",
+        resync: "buffer depth events, fetch REST snapshot, drop u <= lastUpdateId, require first event U <= lastUpdateId + 1 <= u and then contiguous next U == previous u + 1; on gap, reconnect and rebuild from REST snapshot",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackpackPublicStreamMessage {
     OrderBook(rustcta_types::OrderBookSnapshot),
@@ -338,10 +373,33 @@ pub fn backpack_public_stream(subscription: &PublicStreamSubscription) -> String
     match &subscription.kind {
         PublicStreamKind::Trades => format!("trade.{symbol}"),
         PublicStreamKind::Ticker => format!("ticker.{symbol}"),
-        PublicStreamKind::OrderBookDelta => format!("depth.{symbol}"),
+        PublicStreamKind::OrderBookDelta => {
+            backpack_depth_stream(&symbol, None).expect("realtime depth interval is valid")
+        }
         PublicStreamKind::OrderBookSnapshot => format!("bookTicker.{symbol}"),
         PublicStreamKind::Candles { interval } => format!("kline.{interval}.{symbol}"),
     }
+}
+
+pub fn backpack_depth_stream(symbol: &str, interval_ms: Option<u64>) -> ExchangeApiResult<String> {
+    let symbol = normalize_backpack_symbol(symbol);
+    match interval_ms {
+        None => Ok(format!("depth.{symbol}")),
+        Some(interval @ (200 | 600 | 1000)) => Ok(format!("depth.{interval}ms.{symbol}")),
+        Some(_) => Err(ExchangeApiError::Unsupported {
+            operation: "backpack.public_depth_interval",
+        }),
+    }
+}
+
+pub fn backpack_depth_subscribe_payload(
+    symbol: &rustcta_exchange_api::SymbolScope,
+    interval_ms: Option<u64>,
+) -> ExchangeApiResult<Value> {
+    Ok(json!({
+        "method": "SUBSCRIBE",
+        "params": [backpack_depth_stream(&symbol.exchange_symbol.symbol, interval_ms)?],
+    }))
 }
 
 pub fn backpack_private_stream(
@@ -372,23 +430,75 @@ fn parse_backpack_order_book_stream(
         .ok_or_else(|| ExchangeApiError::InvalidRequest {
             message: "backpack order book stream parser requires symbol hint".to_string(),
         })?;
+    let timestamp = timestamp_from_fields(value, &["timestamp", "E", "T"])
+        .map(|value| json!(value.timestamp_micros()))
+        .unwrap_or(Value::Null);
     let normalized = json!({
-        "bids": value.get("bids").or_else(|| value.get("b")).cloned().unwrap_or_else(|| json!([])),
-        "asks": value.get("asks").or_else(|| value.get("a")).cloned().unwrap_or_else(|| json!([])),
+        "bids": stream_side_levels(
+            value,
+            &["bids", "b"],
+            &["bidPrice", "bestBidPrice", "b"],
+            &["bidQuantity", "bidQty", "bestBidQuantity", "B"],
+        ),
+        "asks": stream_side_levels(
+            value,
+            &["asks", "a"],
+            &["askPrice", "bestAskPrice", "a"],
+            &["askQuantity", "askQty", "bestAskQuantity", "A"],
+        ),
         "lastUpdateId": value
             .get("lastUpdateId")
             .or_else(|| value.get("u"))
             .or_else(|| value.get("U"))
             .cloned()
             .unwrap_or(Value::Null),
-        "timestamp": value
-            .get("timestamp")
-            .or_else(|| value.get("E"))
-            .or_else(|| value.get("T"))
-            .cloned()
-            .unwrap_or(Value::Null),
+        "timestamp": timestamp,
     });
     parse_orderbook_snapshot(exchange_id, symbol, &normalized)
+}
+
+fn stream_side_levels(
+    value: &Value,
+    array_fields: &[&str],
+    price_fields: &[&str],
+    quantity_fields: &[&str],
+) -> Value {
+    if let Some(levels) = array_fields
+        .iter()
+        .find_map(|field| value.get(*field).filter(|candidate| candidate.is_array()))
+    {
+        return filter_nonzero_levels(levels);
+    }
+    let Some(price) = price_fields
+        .iter()
+        .find_map(|field| text(value.get(*field)))
+    else {
+        return json!([]);
+    };
+    let Some(quantity) = quantity_fields
+        .iter()
+        .find_map(|field| text(value.get(*field)))
+    else {
+        return json!([]);
+    };
+    json!([[price, quantity]])
+}
+
+fn filter_nonzero_levels(levels: &Value) -> Value {
+    let Some(rows) = levels.as_array() else {
+        return json!([]);
+    };
+    Value::Array(
+        rows.iter()
+            .filter(|row| {
+                row.as_array()
+                    .and_then(|values| text(values.get(1)))
+                    .and_then(|quantity| quantity.parse::<f64>().ok())
+                    .is_none_or(|quantity| quantity != 0.0)
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 fn parse_backpack_public_trade(

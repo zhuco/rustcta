@@ -1,0 +1,15 @@
+[
+  {
+    "id": "ot-trade-1",
+    "order_id": "ot-order-1",
+    "client_id": "client-1",
+    "instrument_code": "BTC_EUR",
+    "side": "BUY",
+    "amount": "0.00400000",
+    "price": "63950.00",
+    "fee": "0.000004",
+    "fee_currency": "BTC",
+    "liquidity": "TAKER",
+    "time": "2026-06-09T01:03:00Z"
+  }
+]

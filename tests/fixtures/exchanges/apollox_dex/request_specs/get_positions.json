@@ -1,0 +1,40 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fapi/v2/positionRisk",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "timestamp": { "match": "exact", "value": "1700000000000" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret", "real", "private"],
+  "response_sample": [
+    {
+      "symbol": "BTCUSDT",
+      "positionAmt": "0.010",
+      "entryPrice": "65000.0",
+      "markPrice": "65100.0",
+      "unRealizedProfit": "1.0",
+      "liquidationPrice": "42000.0",
+      "leverage": "10",
+      "maxNotionalValue": "100000",
+      "marginType": "cross",
+      "isolatedMargin": "0.0",
+      "positionSide": "BOTH"
+    }
+  ],
+  "runtime_boundary": "ApolloX DEX get_positions is request-spec only until signed private REST guard, position parser, account scope policy, and REST/user-stream reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

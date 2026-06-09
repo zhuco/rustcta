@@ -6,8 +6,36 @@
     "modetrade.order_book_requires_orderly_account_signed_request",
     "modetrade.balances_require_orderly_account_audit",
     "modetrade.place_order_requires_orderly_ed25519_account_audit",
+    "modetrade.amend_order_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+    "modetrade.batch_place_orders_spec_only_no_orderly_ed25519_permission_reconciliation_guard",
+    "modetrade.order_list_unverified_orderly_semantics",
+    "modetrade.batch_cancel_orders_unverified_orderly_semantics",
     "modetrade.private_streams_require_orderly_account_auth"
   ],
+  "runtime_disabled_boundaries": {
+    "amend_order": [
+      "ModeTrade/Orderly account onboarding audit",
+      "audited Ed25519 signer runtime",
+      "trade permission scope guard",
+      "post-write query/open/fills reconciliation",
+      "live dry-run guard"
+    ],
+    "batch_place_orders": [
+      "ModeTrade/Orderly account onboarding audit",
+      "audited Ed25519 signer runtime",
+      "trade permission scope guard",
+      "partial-failure reconciliation",
+      "missing-item reconciliation",
+      "post-write query/open/fills reconciliation",
+      "live dry-run guard"
+    ],
+    "place_order_list": [
+      "no verified lossless shared order-list mapping for the ModeTrade/Orderly profile"
+    ],
+    "batch_cancel_orders": [
+      "no verified lossless shared batch-cancel mapping for the ModeTrade/Orderly profile"
+    ]
+  },
   "scan_only": true,
   "trade_enabled": false,
   "private_write_enabled": false

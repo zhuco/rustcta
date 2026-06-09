@@ -95,6 +95,32 @@ batch:
     max_items: 10
     atomicity: exchange_defined_non_atomic
     partial_failure: parse_each_returned_item_then_reconcile_missing_items
+websocket:
+  public:
+    support: spec_payload_and_parser
+    runtime: subscribe_payloads_and_message_parser
+    urls:
+      spot: wss://ascendex.com/api/pro/v1/stream
+      perpetual: wss://ascendex.com/api/pro/v2/stream
+    order_book:
+      depth_channel: depth:{symbol}
+      bbo_channel: bbo:{symbol}
+      interval_ms:
+        depth: 300
+        bbo: on_change
+      depth:
+        delta: l2_delta
+        bbo: 1
+        snapshot: 500
+        snapshot_top100: 100
+      sequence_field: seqnum
+      checksum: unsupported
+      resync:
+        snapshot_actions: [depth-snapshot, depth-snapshot-top100]
+        continuity: next seqnum must equal previous seqnum + 1 per symbol
+        gap_action: resubscribe_and_request_depth_snapshot
+  private:
+    support: spec_payload_and_order_parser_when_credentials_present
 websocket_policy:
   heartbeat:
     ping_payload: '{"op":"ping"}'
@@ -106,6 +132,54 @@ websocket_policy:
     model: reconnect_and_reauth
     listen_key: unsupported
     token_refresh: not_required
+streams:
+  public_orderbook_depth:
+    products:
+      - spot
+      - perpetual
+    channel: depth:{symbol}
+    interval_ms: 300
+    depth: l2_delta
+    sequence_field: seqnum
+    checksum: unsupported
+    update_semantics: absolute_quantity_level_delta
+    fixture: tests/fixtures/exchanges/ascendex/ws_public_depth.json
+    resync:
+      strategy: resubscribe_and_request_snapshot
+      snapshot_actions:
+        - depth-snapshot
+        - depth-snapshot-top100
+      continuity: next seqnum must equal previous seqnum + 1 per symbol
+      gap_action: discard_local_book_then_request_fresh_snapshot
+  public_orderbook_snapshot:
+    products:
+      - spot
+      - perpetual
+    action: depth-snapshot
+    max_levels: 500
+    sequence_field: seqnum
+    checksum: unsupported
+    rebuild_source: websocket_snapshot_request
+  public_orderbook_snapshot_top100:
+    products:
+      - spot
+      - perpetual
+    action: depth-snapshot-top100
+    max_levels: 100
+    sequence_field: seqnum
+    checksum: unsupported
+    rebuild_source: websocket_snapshot_request
+  public_orderbook_bbo:
+    products:
+      - spot
+      - perpetual
+    channel: bbo:{symbol}
+    interval: on_change
+    depth: 1
+    sequence_field: none_documented
+    checksum: unsupported
+    update_semantics: best_bid_offer_snapshot
+    fixture: tests/fixtures/exchanges/ascendex/ws_public_bbo.json
 operations:
   symbol_rules:
     spot:
@@ -200,6 +274,20 @@ operations:
       method: DELETE
       path: /{account_group}/api/pro/v2/futures/order/batch
       sign_path: v2/futures/order/batch
+  amend_order:
+    spot:
+      support: unsupported
+      reason: ascendex.amend_order_unsupported
+    perpetual:
+      support: unsupported
+      reason: ascendex.amend_order_unsupported
+  place_order_list:
+    spot:
+      support: unsupported
+      reason: ascendex.order_list_unsupported
+    perpetual:
+      support: unsupported
+      reason: ascendex.order_list_unsupported
   query_order:
     spot:
       method: GET
@@ -241,6 +329,26 @@ operations:
         trades: trades:{symbol}
         ticker: bbo:{symbol}
         candles: bar:{interval}:{symbol}
+      orderbook:
+        depth:
+          channel: depth:{symbol}
+          interval_ms: 300
+          sequence_field: seqnum
+          checksum: unsupported
+          update_semantics: absolute_quantity_level_delta
+        bbo:
+          channel: bbo:{symbol}
+          interval: on_change
+          depth: 1
+        snapshot:
+          action: depth-snapshot
+          max_levels: 500
+        snapshot_top100:
+          action: depth-snapshot-top100
+          max_levels: 100
+        rebuild:
+          continuity: next seqnum must equal previous seqnum + 1
+          strategy: resubscribe_and_request_depth_snapshot_on_gap
     perpetual:
       url: wss://ascendex.com/api/pro/v2/stream
       channels:
@@ -248,6 +356,26 @@ operations:
         trades: trades:{symbol}
         ticker: bbo:{symbol}
         candles: bar:{interval}:{symbol}
+      orderbook:
+        depth:
+          channel: depth:{symbol}
+          interval_ms: 300
+          sequence_field: seqnum
+          checksum: unsupported
+          update_semantics: absolute_quantity_level_delta
+        bbo:
+          channel: bbo:{symbol}
+          interval: on_change
+          depth: 1
+        snapshot:
+          action: depth-snapshot
+          max_levels: 500
+        snapshot_top100:
+          action: depth-snapshot-top100
+          max_levels: 100
+        rebuild:
+          continuity: next seqnum must equal previous seqnum + 1
+          strategy: resubscribe_and_request_depth_snapshot_on_gap
   private_ws:
     spot:
       url: wss://ascendex.com/{account_group}/api/pro/v1/stream

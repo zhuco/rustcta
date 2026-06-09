@@ -43,7 +43,9 @@ Trading operations are not HMAC/API-key requests. They require Sui transaction b
 
 官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Aftermath Perpetuals SDK 的 account/account objects 返回 positions、available collateral、total equity，并按 account cap / account id 查询。
 
-因此仓位读取写 `官方支持，项目未实现链上账户仓位读取`。补仓位前必须设计 Sui account cap/account id read path、positions parser、available collateral/total equity 映射和链上/indexer 对账。
+因此仓位读取写 `官方支持，离线 source-boundary 已记录，项目未实现链上账户仓位 runtime`。`endpoint_mapping.yaml` 的 `get_positions` 使用 `sdk://aftermath/perpetuals/account/positions` spec-only 边界和 `tests/fixtures/exchanges/aftermath/request_specs/get_positions_account_source.json`，只记录 account cap / account id、positions、available collateral、total equity 等 SDK/account object 来源；本地测试只验证 source-boundary fixture 结构和 runtime guard。补 runtime 前仍必须设计 Sui account cap/account id read path、account object decoder、available collateral/total equity 映射、checkpoint freshness 和链上/indexer 对账。
+
+账户/余额项目未实现/未启用：Aftermath/Sui account-cap readback 有余额线索，`endpoint_mapping.yaml` 已将 `get_balances` 写成 `sdk://aftermath/perpetuals/account/balances` spec-only source boundary，并绑定 `tests/fixtures/exchanges/aftermath/request_specs/get_balances_account_source.json`。矩阵应为 `get_balances=离线`；共享 runtime 仍需完成 Sui account-cap/account-id read path、collateral/equity parser 和链上/indexer 对账。
 
 ## Base URLs And Limits
 
@@ -54,7 +56,9 @@ Trading operations are not HMAC/API-key requests. They require Sui transaction b
 
 ## Endpoint Mapping And Capabilities
 
-`endpoint_mapping.yaml` marks `symbol_rules` and `order_book` as native public REST for perpetual markets. `ticker`, `trades`, and `ohlcv` are fixture/parser-only because the current gateway interface does not expose them through this adapter. Balances, positions, fees, order writes, batch writes, query/open orders, recent fills, and private streams are explicitly `unsupported`.
+`endpoint_mapping.yaml` marks `symbol_rules` and `order_book` as native public REST for perpetual markets. `ticker`, `trades`, and `ohlcv` are fixture/parser-only because the current gateway interface does not expose them through this adapter. Positions and balances are official/SDK readback with fixture-only account-source boundaries, but shared `get_positions` and `get_balances` runtimes are still project-unimplemented; fees, order writes, batch writes, query/open orders, recent fills, and private streams remain explicit boundaries.
+
+`get_positions` remains `离线`: `parse_position_source_boundary` validates the sanitized source fixture, while the live runtime still returns the Sui account-cap boundary because there is no audited Sui RPC/indexer account scan, decoded position response, checkpoint freshness guard, or read-only reconciliation path.
 
 Runtime capabilities follow that mapping: public REST is enabled for scan-only symbol rules and order-book snapshots; private REST, private streams, public stream runtime, trading, batch trading, reduce-only, post-only, and client order id support remain disabled.
 
@@ -62,9 +66,10 @@ Runtime capabilities follow that mapping: public REST is enabled for scan-only s
 
 Official Aftermath Perpetuals SDK exposes `/perpetuals/ws/updates` and
 `orderbook` delta subscriptions. The reviewed SDK docs do not publish fixed
-push milliseconds, fixed depth, sequence, or checksum. Mapping should record
-orderbook subscribe/unsubscribe, no fixed ms/depth/sequence, and REST
-`getOrderbook` snapshot fallback. Source batch:
+push milliseconds, fixed depth, sequence, or checksum. The mapping records the
+`updates.orderbook` topic, orderbook subscribe/unsubscribe payload shape, no
+fixed ms, depth: unspecified / 未给固定档位, sequence/checksum absence, and REST
+`getOrderbook` snapshot fallback for resync. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
 
 ## Validation
@@ -78,3 +83,10 @@ cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway aftermath --lib --message-format short
 cargo test -p rustcta-gateway aftermath --message-format short
 ```
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：Sui perpetual profile 未建立可映射成 gateway account fee 的稳定来源。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core place/cancel/query/open/fills are offline/spec-only Sui transaction/account-source boundaries; cancel-all/order-list remain unsupported shared semantics. Runtime promotion is blocked on Sui transaction construction/signing, account-cap scope, parser, chain/indexer reconciliation, and dry-run guard.

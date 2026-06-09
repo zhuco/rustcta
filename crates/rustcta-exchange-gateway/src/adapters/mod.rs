@@ -107,6 +107,7 @@ pub mod huobi;
 pub mod hyperliquid;
 pub mod independentreserve;
 pub mod indodax;
+pub mod kcex;
 pub mod kraken;
 pub mod krakenfutures;
 pub mod kucoin;
@@ -234,6 +235,7 @@ pub use huobi::HuobiGatewayConfig;
 pub use hyperliquid::HyperliquidGatewayConfig;
 pub use independentreserve::IndependentReserveGatewayConfig;
 pub use indodax::IndodaxGatewayConfig;
+pub use kcex::KcexGatewayConfig;
 pub use kraken::KrakenGatewayConfig;
 pub use krakenfutures::KrakenFuturesGatewayConfig;
 pub use kucoin::KuCoinGatewayConfig;
@@ -435,6 +437,7 @@ impl AdapterBackedGateway {
                 self.register_independentreserve_public_adapter(None)
             }
             "indodax" => self.register_indodax_public_adapter(None),
+            "kcex" | "kc_ex" | "kc-ex" => self.register_kcex_public_adapter(None),
             "kucoin" => self.register_kucoin_public_adapter(None),
             "kucoinfutures" | "kucoin_futures" | "kucoin-futures" => {
                 self.register_kucoinfutures_public_adapter(None)
@@ -1126,6 +1129,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_kcex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = kcex::KcexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_kcex_adapter(config)
+    }
+
+    pub fn register_kcex_adapter(
+        &self,
+        config: kcex::KcexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            kcex::KcexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_bitopro_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1350,6 +1373,7 @@ impl AdapterBackedGateway {
         if let Some(rest_base_url) = rest_base_url {
             config.rest_base_url = rest_base_url;
         }
+        config.enabled_public_streams = true;
         self.register_bullish_adapter(config)
     }
 

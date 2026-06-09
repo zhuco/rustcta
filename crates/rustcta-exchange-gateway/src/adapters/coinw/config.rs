@@ -2,6 +2,7 @@
 pub struct CoinwGatewayConfig {
     pub rest_base_url: String,
     pub spot_public_ws_url: String,
+    pub spot_public_ws_method2_url: String,
     pub spot_private_ws_url: String,
     pub futures_public_ws_url: String,
     pub futures_private_ws_url: String,
@@ -17,6 +18,7 @@ impl Default for CoinwGatewayConfig {
         Self {
             rest_base_url: "https://api.coinw.com".to_string(),
             spot_public_ws_url: "wss://ws.futurescw.info?token={public_token}".to_string(),
+            spot_public_ws_method2_url: "wss://ws.futurescw.com".to_string(),
             spot_private_ws_url: "wss://ws.futurescw.com".to_string(),
             futures_public_ws_url: "wss://ws.futurescw.com/perpum".to_string(),
             futures_private_ws_url: "wss://ws.futurescw.com/perpum".to_string(),

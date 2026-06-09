@@ -44,7 +44,7 @@ adapter. Supported adapter ids:
 `coinsph`, `coinspot`, `coinstore`, `cointr`, `coinw`, `cryptocom`,
 `deepcoin`, `delta`, `deribit`, `derive`, `digifinex`, `dydx`, `gateio`,
 `gemini`, `grvt`, `hashkey_global`, `htx`, `huobi`, `hyperliquid`,
-`independentreserve`, `indodax`, `kraken`, `krakenfutures`, `kucoin`,
+`independentreserve`, `indodax`, `kcex`, `kraken`, `krakenfutures`, `kucoin`,
 `kucoinfutures`, `lbank`, `lighter`, `luno`, `mercado`, `mexc`, `okx`,
 `orangex`, `oxfun`, `pacifica`, `paradex`, `phemex`, `poloniex`, `tapbit`,
 `toobit`, `upbit`, `weex`, `whitebit`, `woo`, and `xt`.
@@ -170,6 +170,13 @@ cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```
 
 Open `http://127.0.0.1:8091`.
+
+Port `8091` is the canonical local control panel entrypoint because it serves
+both the Dioxus static UI and the `/api/*` control routes. Do not run any
+RustCTA control-panel Web service on another port. Do not use port `8080`,
+`dx serve`, or an alternate `RUSTCTA_CONTROL_API_BIND` for this panel; build the
+Dioxus static assets and serve them through `rustcta-control-api` on
+`127.0.0.1:8091`.
 
 The exchange configuration page is backed by `config/accounts.yml` plus the
 local env-store at `data/control_api/exchange_api_keys.env`. The Web UI lists

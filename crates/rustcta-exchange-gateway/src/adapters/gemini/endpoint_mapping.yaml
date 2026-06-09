@@ -6,12 +6,103 @@ websocket:
     url: wss://api.gemini.com/v1/marketdata
     channels: [marketdata]
     resync: rest_order_book_snapshot
+    public_channels:
+      - "{symbol}@bookTicker"
+      - "{symbol}@depth5@100ms"
+      - "{symbol}@depth10@100ms"
+      - "{symbol}@depth20@100ms"
+      - "{symbol}@depth5@1s"
+      - "{symbol}@depth10@1s"
+      - "{symbol}@depth20@1s"
+      - "{symbol}@depth@100ms"
+      - "{symbol}@depth@1s"
+    order_book:
+      host_scope: wss://ws.gemini.com public market data stream
+      channels:
+        book_ticker: { channel: "{symbol}@bookTicker", interval_ms: real_time, depth_per_side: 1 }
+        partial_depth_5_100ms: { channel: "{symbol}@depth5@100ms", interval_ms: 100, depth_per_side: 5 }
+        partial_depth_10_100ms: { channel: "{symbol}@depth10@100ms", interval_ms: 100, depth_per_side: 10 }
+        partial_depth_20_100ms: { channel: "{symbol}@depth20@100ms", interval_ms: 100, depth_per_side: 20 }
+        partial_depth_5_1s: { channel: "{symbol}@depth5@1s", interval_ms: 1000, depth_per_side: 5 }
+        partial_depth_10_1s: { channel: "{symbol}@depth10@1s", interval_ms: 1000, depth_per_side: 10 }
+        partial_depth_20_1s: { channel: "{symbol}@depth20@1s", interval_ms: 1000, depth_per_side: 20 }
+        diff_depth_100ms: { channel: "{symbol}@depth@100ms", interval_ms: 100, depth_per_side: incremental }
+        diff_depth_1s: { channel: "{symbol}@depth@1s", interval_ms: 1000, depth_per_side: incremental }
+      sequence:
+        fields: [lastUpdateId, U, u]
+        continuity: diff_depth_u_links_to_snapshot_lastUpdateId
+        gap_policy: rest_snapshot_resync
+      checksum: none
+      resync:
+        mode: rest_snapshot_rebuild
+        endpoint_operation: get_order_book
+        path: /v1/book/{symbol}
   private:
     support: native
     url: wss://api.gemini.com/v1/order/events
     auth: hmac_headers
     channels: [order_events]
     fallback: rest_reconciliation
+unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [derivatives, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: gemini_derivatives_perpetual_api
+    source_boundary_fixture: tests/fixtures/exchanges/gemini/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Gemini adapter is Spot-only; derivatives/perpetual endpoints need separate region eligibility, symbols, account state and position/risk parsing."
+    required_endpoints:
+      market_metadata: [derivatives/perpetual symbols, contract specifications, region/product eligibility rules]
+      public_market_data: [derivatives/perpetual order book, derivatives/perpetual ticker, derivatives/perpetual trades]
+      private_account: [derivatives account state, positions, risk or margin limits]
+      private_order_lifecycle: [derivatives/perpetual place order, derivatives/perpetual cancel order, derivatives/perpetual query/open orders, derivatives/perpetual fills]
+    unsafe_to_promote_without: [derivatives symbol metadata fixtures, eligibility and credential scope validation, position/risk parser coverage, derivatives order lifecycle reconciliation]
+    reason: "Official Gemini derivatives/perpetual endpoints exist, but this spot adapter has not implemented that product line."
+  - operation: derivatives_product
+    status: project_unimplemented
+    product_lines: [derivatives, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: gemini_derivatives_perpetual_api
+    source_boundary_fixture: tests/fixtures/exchanges/gemini/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [derivatives/perpetual symbols, contract specifications]
+      private_account: [derivatives account state, positions, risk or margin limits]
+      private_order_lifecycle: [derivatives/perpetual place/cancel/query/open orders, derivatives/perpetual fills]
+    reason: "Gemini derivatives REST surfaces are official but absent from the spot runtime."
+  - operation: perpetual_product
+    status: project_unimplemented
+    product_lines: [perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: gemini_derivatives_perpetual_api
+    source_boundary_fixture: tests/fixtures/exchanges/gemini/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [perpetual symbols, contract specifications]
+      private_account: [positions, risk or margin limits]
+      private_order_lifecycle: [perpetual place/cancel/query/open orders, perpetual fills]
+    reason: "Gemini perpetual contract support requires a separate derivatives profile and region/product guard."
+  - operation: amend_order
+    status: unsupported
+    boundary: advanced_order_unsupported
+    runtime_error: gemini.amend_order_unsupported
+    reason: "Gemini spot runtime exposes new/cancel/cancel-all/status/orders/mytrades only; amend is not mapped and composed cancel+replace is intentionally not exposed."
+  - operation: place_order_list
+    status: unsupported
+    aliases: [oco_order_list, oto_order_list]
+    boundary: advanced_order_unsupported
+    runtime_error: gemini.order_list_unsupported
+    reason: "Shared OCO/OTO order-list semantics are not mapped for Gemini spot."
+  - operation: batch_place_orders
+    status: unsupported
+    boundary: advanced_order_unsupported
+    runtime_error: gemini.batch_place_orders_composed_not_exposed
+    reason: "Gemini spot has single order create; composed batch placement is not advertised as an adapter capability."
+  - operation: batch_cancel_orders
+    status: unsupported
+    boundary: advanced_order_unsupported
+    runtime_error: gemini.batch_cancel_orders_composed_not_exposed
+    reason: "Gemini spot has single cancel and cancel-all; composed batch cancel is not advertised as an adapter capability."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 shared spot runtime 中 fees 明确 Unsupported。"
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -130,3 +221,59 @@ endpoints:
     atomicity: non_atomic
     testnet: true
     official_doc: https://docs.gemini.com/rest/orders#get-past-trades
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/gemini/amend-order
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: gemini.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/gemini/order-list
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: gemini.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/gemini/batch-place
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: gemini.batch_place_orders_composed_not_exposed
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/gemini/batch-cancel
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: gemini.batch_cancel_orders_composed_not_exposed

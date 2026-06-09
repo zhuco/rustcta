@@ -113,7 +113,6 @@ pub fn parse_orderbook_snapshot(
     )
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
-    snapshot.sequence = data.get("eventID").and_then(value_u64);
     snapshot.exchange_timestamp = data
         .get("timestamp")
         .and_then(value_i64)
@@ -199,12 +198,6 @@ pub(super) fn value_f64(value: &Value) -> Option<f64> {
 pub(super) fn value_i64(value: &Value) -> Option<i64> {
     value
         .as_i64()
-        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-}
-
-fn value_u64(value: &Value) -> Option<u64> {
-    value
-        .as_u64()
         .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
 }
 

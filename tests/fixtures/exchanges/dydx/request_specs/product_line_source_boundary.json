@@ -1,0 +1,19 @@
+{
+  "exchange": "dydx",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "dYdX v4 Indexer/Node and Solana spot trading material",
+      "evidence": "Solana spot trading is a separate product line; this adapter maps v4 perpetual Indexer reads and Node transaction boundaries."
+    }
+  ],
+  "runtime_isolation": "Do not mix Solana spot routing with dYdX v4 perpetual Indexer/Node runtime until wallet, market discovery and indexer semantics are separated.",
+  "remaining_work": [
+    "map Solana spot market discovery and order-book/indexer source",
+    "add wallet account, order transaction and fill parser fixtures",
+    "wire slot/reorg handling and spot readback reconciliation"
+  ]
+}

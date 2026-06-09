@@ -61,6 +61,13 @@ Private WebSocket auth uses `user.auth` with signature over
 
 Official `orderbook.subscribe` / `orderbook_p.subscribe` supports depth 0/1/5/10/30. The fast mode is about 20ms for requested depth, the aggregated mode is about 120ms, and full depth is 100ms; Phemex also publishes snapshot messages roughly every 60s for self-verification. Messages carry `sequence` and `type=snapshot/incremental`; no checksum is declared, so sequence continuity plus fresh REST/WS snapshot rebuild is required after gaps.
 
+| Channel | Products | Subscription | Cadence | Depth | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- | --- | --- |
+| `orderbook.subscribe` | Spot | `["sBTCUSDT", false, 30]` by default | Fast mode about 20ms; aggregated flag `true` about 120ms | 0/1/5/10/30, default 30; 0 means full book | `sequence`, `type=snapshot/incremental`, zero quantity deletes; no checksum declared | REST `/md/orderbook` or fresh WS snapshot after reconnect, sequence gap/regression, stale stream, parse error, or failed 60s self-check |
+| `orderbook_p.subscribe` | USDT/USDC perpetual | `["BTCUSDT", false, 30]` by default | Fast mode about 20ms; full depth about 100ms | 0/1/5/10/30, default 30 | Same `sequence` and snapshot/incremental rules | REST `/md/v2/orderbook` or fresh WS snapshot |
+
+Fixtures `tests/fixtures/exchanges/phemex/ws_public_orderbook_snapshot.json` and `ws_public_orderbook_incremental.json` cover the snapshot/incremental parser path and zero-quantity delete boundary.
+
 ## Phemex-Specific Extensions
 
 - Public REST helpers for server time, fullbook, index sources, ticker variants,

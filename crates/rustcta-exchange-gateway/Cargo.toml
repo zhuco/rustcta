@@ -30,5 +30,6 @@ rustcta-exchange-api.workspace = true
 rustcta-types.workspace = true
 
 [dev-dependencies]
+serde_yaml = "0.9"
 tokio.workspace = true
 tower = "0.5"

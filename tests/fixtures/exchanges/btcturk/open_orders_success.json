@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "message": null,
+  "code": 0,
+  "data": [
+    {
+      "id": 123456790,
+      "price": "2510000.00",
+      "amount": "0.02000000",
+      "quantity": "0.02000000",
+      "filledQuantity": "0",
+      "pairSymbol": "BTCTRY",
+      "pairSymbolNormalized": "BTC_TRY",
+      "type": "sell",
+      "method": "limit",
+      "status": "Untouched",
+      "orderClientId": "open-fixture",
+      "date": 1700000001000
+    }
+  ]
+}

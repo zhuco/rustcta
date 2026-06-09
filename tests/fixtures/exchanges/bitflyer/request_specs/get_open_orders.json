@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v1/me/getchildorders",
+  "query": {
+    "product_code": "BTC_JPY",
+    "child_order_state": "ACTIVE",
+    "count": "50"
+  },
+  "auth": "hmac"
+}

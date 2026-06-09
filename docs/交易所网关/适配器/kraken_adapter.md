@@ -43,11 +43,13 @@ Futures offset and time-range cursors are rejected because the Futures fills end
 
 Public streams use separate Spot and Futures connections. Spot v2 channels map to `trade`, `ticker`, `book`, and `ohlc`; Futures maps to `trade`, `ticker`, and `book`, with candles marked unsupported. Heartbeat sends `{"method":"ping"}` and accepts `pong`, `channel=heartbeat`, and `event=heartbeat`. Spot/Futures `book` messages are normalized into standard `ExchangeStreamEvent::OrderBookSnapshot` events and reuse the REST order-book parsers.
 
+Spot `book` is structured in `endpoint_mapping.yaml` with official depths 10/25/100/500/1000 and CRC32 checksum over the top 10 levels; Kraken Spot does not expose a monotonic book sequence field. Futures `book` is structured as `book_snapshot` plus `book` delta messages with `seq`; no fixed push interval or checksum is documented. Both products use REST order-book snapshot recovery after reconnect, stale heartbeat, checksum mismatch, or sequence/orderbook gap.
+
 Private Spot streams require `GetWebSocketsToken` and subscribe to `executions` or `balances`. Spot `executions` updates emit standard order or fill events according to the requested private stream kind; Spot `balances` emits `BalanceSnapshot`. The token must be refreshed before expiry; renewal failure requires reconnect and resubscribe. Spot private positions are unsupported and require REST reconciliation fallback.
 
 Private Futures streams request a challenge, sign it, and subscribe to `open_orders`, `fills`, `balances`, or `open_positions`. Futures private messages emit standard order, fill, balance, or position stream events. Reconnect requires a new challenge and resubscribe.
 
-Orderbook resync policy is REST snapshot after reconnect, stale heartbeat, or sequence/orderbook gap.
+Orderbook resync policy is REST snapshot after reconnect, stale heartbeat, checksum mismatch, or sequence/orderbook gap.
 
 ## Batch And Reconciliation
 

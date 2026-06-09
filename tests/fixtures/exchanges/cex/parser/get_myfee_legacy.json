@@ -1,0 +1,18 @@
+{
+  "ok": "ok",
+  "e": "get_myfee",
+  "data": {
+    "ETH:USD": {
+      "sell": "0.15",
+      "buyMaker": "0",
+      "buy": "0.15",
+      "sellMaker": "0"
+    },
+    "BTC:USD": {
+      "sell": "0.25",
+      "buyMaker": "0.10",
+      "buy": "0.25",
+      "sellMaker": "0.10"
+    }
+  }
+}

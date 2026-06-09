@@ -1,0 +1,17 @@
+{
+  "type": "orderbook",
+  "code": "KRW-BTC",
+  "timestamp": 1712230311689,
+  "stream_type": "REALTIME",
+  "total_ask_size": 1.24,
+  "total_bid_size": 1.88,
+  "orderbook_units": [
+    {
+      "ask_price": 70005000,
+      "bid_price": 69995000,
+      "ask_size": 0.31,
+      "bid_size": 0.44
+    }
+  ],
+  "level": 0
+}

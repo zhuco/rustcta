@@ -1,0 +1,28 @@
+{
+  "exchange": "hibachi",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "path": "/trade/orders",
+  "auth": "signed",
+  "body": {
+    "accountId": 42,
+    "nonce": 1714701600000002,
+    "orders": [
+      {
+        "symbol": "BTC/USDT-P",
+        "side": "BID",
+        "orderType": "LIMIT",
+        "quantity": "1",
+        "price": "10",
+        "signature": "<redacted-signature>"
+      }
+    ]
+  },
+  "strict_body": false,
+  "signing_vector": "tests/fixtures/exchanges/hibachi/signing_vectors/exchange_managed_hmac.json",
+  "expected_error": "hibachi.batch_place_requires_contract_id_signer_nonce_and_dry_run_guard",
+  "trade_enabled": false
+}

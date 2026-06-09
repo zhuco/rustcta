@@ -52,7 +52,7 @@ fn mexc_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.public_streams,
-        CapabilitySupport::RestFallback { .. }
+        CapabilitySupport::Native
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.private_streams,

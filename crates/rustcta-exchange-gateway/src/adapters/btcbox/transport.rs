@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::Utc;
 use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
+
+use super::signing::{canonical_form, sign_canonical_form};
 
 #[derive(Clone)]
 pub struct BtcboxRest {
@@ -47,6 +49,39 @@ impl BtcboxRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_post(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        mut params: BTreeMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        params.insert("key".to_string(), api_key.to_string());
+        params.insert(
+            "nonce".to_string(),
+            Utc::now().timestamp_millis().to_string(),
+        );
+        let signature = sign_canonical_form(api_secret, &params)?;
+        let canonical = canonical_form(&params);
+        let body = format!("{canonical}&signature={signature}");
+        let url = format!(
+            "{}/{}",
+            self.rest_base_url.trim_end_matches('/'),
+            endpoint.trim_start_matches('/')
+        );
+        let response = self
+            .http
+            .post(url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

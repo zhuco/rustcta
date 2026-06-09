@@ -1,0 +1,26 @@
+{
+  "exchange": "luno",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/1/balance",
+  "auth": "http_basic_api_key",
+  "headers": {
+    "Authorization": {
+      "match": "prefix",
+      "value": "Basic "
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "runtime_boundary": {
+    "status": "offline",
+    "reason": "Balance endpoint is credentialed readback, but parser, read-only runtime promotion, and reconciliation are not implemented.",
+    "adapter_error": "luno.balances_offline_request_spec_only"
+  },
+  "body": null
+}

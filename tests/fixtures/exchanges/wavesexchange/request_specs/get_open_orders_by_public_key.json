@@ -1,0 +1,17 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/matcher/orderbook/WAVES/USDN/publicKey/8QUefk3K8xW6bYzY1gEoQf2rN9WAVESPublicKeyFixture",
+  "auth": "none",
+  "query": {
+    "activeOnly": {
+      "match": "exact",
+      "value": "true"
+    }
+  },
+  "strict_query": false,
+  "expected_error_until_promoted": "wavesexchange.open_orders_require_public_key_mapping"
+}

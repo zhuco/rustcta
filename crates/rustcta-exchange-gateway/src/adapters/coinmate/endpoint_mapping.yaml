@@ -35,6 +35,41 @@ websocket:
       - "order_book-{PAIR}"
       - "statistics-{PAIR}"
     heartbeat: { mode: ping_pong_event, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+    order_book:
+      product: spot
+      market_types: [spot]
+      url: wss://coinmate.io/api/websocket
+      protocol: websocket_json
+      subscribe:
+        payload:
+          event: subscribe
+          data:
+            channel: order_book-{PAIR}
+        unsubscribe_payload:
+          event: unsubscribe
+          data:
+            channel: order_book-{PAIR}
+        symbol_format: BASE_QUOTE
+      channel: order_book-{PAIR}
+      interval_ms: null
+      interval_source: "Official public WebSocket demo/docs do not publish a fixed order-book cadence."
+      depth: null
+      depth_source: "Official docs do not publish a depth selector or fixed depth for order_book-{PAIR}."
+      sequence:
+        fields: []
+        continuity: unsupported_no_official_sequence
+        gap_detection: reconnect_or_stale_stream_only
+      checksum:
+        supported: false
+        field: null
+        risk: "No official checksum field; book continuity cannot be sequence/checksum-validated."
+      resync:
+        mode: rest_snapshot_rebuild
+        rest_endpoint_operation: order_book
+        rest_endpoint: /orderBook
+        triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]
+      fixtures:
+        parser: tests/fixtures/exchanges/coinmate/ws/public_order_book.json
   private:
     support: payload_helper_only
     channels:
@@ -43,6 +78,8 @@ websocket:
       - "private-user-trades-{ACCOUNT_ID}[-{PAIR}]"
     reconciliation: rest_fallback
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
   - perpetuals
   - futures
   - margin
@@ -153,7 +190,9 @@ endpoints:
     testnet: false
     official_doc: https://coinmate.docs.apiary.io/
     support: spec_only
+    reason: "Coinmate balance readback is fixture-backed, but shared get_balances runtime remains disabled pending nonce/signature runtime guard, balance parser normalization, account scope policy, and reconciliation."
     request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_balances.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/coinmate/balances.json }
   - operation: fees
     product: spot
     market_types: [spot]
@@ -186,8 +225,10 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     official_doc: https://coinmate.docs.apiary.io/
-    support: spec_only
+    support: native
     request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/open_orders.json }
+    notes: "Runtime is fail-closed unless COINMATE_PRIVATE_REST_ENABLED and clientId/publicKey/privateKey credentials are configured."
   - operation: query_order
     product: spot
     market_types: [spot]
@@ -203,8 +244,10 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     official_doc: https://coinmate.docs.apiary.io/
-    support: spec_only
+    support: native
     request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/open_orders.json }
+    notes: "Runtime is fail-closed unless COINMATE_PRIVATE_REST_ENABLED and clientId/publicKey/privateKey credentials are configured."
   - operation: recent_fills
     product: spot
     market_types: [spot]
@@ -220,8 +263,10 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     official_doc: https://coinmate.docs.apiary.io/
-    support: spec_only
+    support: native
     request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_recent_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/fills.json }
+    notes: "Runtime is fail-closed unless COINMATE_PRIVATE_REST_ENABLED and clientId/publicKey/privateKey credentials are configured."
   - operation: place_order
     product: spot
     market_types: [spot]
@@ -306,13 +351,72 @@ endpoints:
     testnet: false
     official_doc: https://coinmate.docs.apiary.io/
     support: spec_only
-    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/amend_order_replace_buy.json }
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/coinmate/request_specs/amend_order_replace_buy.json
+      additional_fixtures:
+        - tests/fixtures/exchanges/coinmate/request_specs/amend_order_replace_sell.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/parser/amend_order_ack.json }
+    reason: coinmate.replace_order_offline_requires_side_price_nonce_and_reconciliation_guard
+    notes: "Coinmate replaceByBuyLimit/replaceBySellLimit is fixture-backed offline. Shared AmendOrderRequest does not carry side or replacement price, and live private writes still need serialized nonce, dry-run guard, and REST/WS reconciliation, so runtime intentionally returns Unsupported."
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmate/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: coinmate.native_batch_place_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmate/batch_cancel_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: coinmate.native_batch_cancel_list_unsupported
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmate/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: coinmate.order_list_unsupported
 streams:
   - operation: public_ws_order_book
     product: spot
     channel: order_book-{PAIR}
     support: parser_only
-    resync: { endpoint_operation: order_book }
+    interval_ms: null
+    depth: null
+    sequence_fields: []
+    checksum: none_documented
+    resync: { mode: rest_snapshot_rebuild, endpoint_operation: order_book, endpoint: /orderBook }
   - operation: public_ws_trades
     product: spot
     channel: trades-{PAIR}

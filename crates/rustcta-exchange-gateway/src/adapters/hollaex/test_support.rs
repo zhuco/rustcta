@@ -14,6 +14,8 @@ pub(super) struct SeenRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) headers: HashMap<String, String>,
+    pub(super) body: String,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -64,6 +66,17 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         .to_string();
     let target = request_line.split_whitespace().nth(1).unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+    let (head, body) = request_text
+        .split_once("\r\n\r\n")
+        .unwrap_or((&request_text, ""));
+    let headers = head
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
     let query = query_text
         .split('&')
         .filter(|pair| !pair.is_empty())
@@ -76,6 +89,8 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         method,
         path: path.to_string(),
         query,
+        headers,
+        body: body.to_string(),
     }
 }
 
@@ -107,6 +122,17 @@ pub(super) fn symbol_scope() -> SymbolScope {
 pub(super) fn config_with_base_url(rest_base_url: String) -> HollaexGatewayConfig {
     HollaexGatewayConfig {
         rest_base_url,
+        enabled: true,
+        ..HollaexGatewayConfig::default()
+    }
+}
+
+pub(super) fn private_config_with_base_url(rest_base_url: String) -> HollaexGatewayConfig {
+    HollaexGatewayConfig {
+        rest_base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
         enabled: true,
         ..HollaexGatewayConfig::default()
     }

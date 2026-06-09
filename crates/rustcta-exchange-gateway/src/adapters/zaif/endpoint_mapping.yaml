@@ -3,7 +3,7 @@ exchange: zaif
 adapter: rustcta_exchange_gateway::adapters::zaif
 metadata:
   status: validated
-  notes: "A-38 Zaif: Japanese Spot/Jpy public REST first; private trade API is request-spec/signing-vector only."
+  notes: "A-38 Zaif: Japanese Spot/Jpy public REST plus guarded read-only TAPI open orders/fills runtime; private writes remain request-spec only."
 market_types:
   - spot
 products:
@@ -67,6 +67,14 @@ websocket:
     protocol: url_query_stream
     channels:
       all_market_events: "?currency_pair={currency_pair}"
+    order_book:
+      channel: "stream?currency_pair={currency_pair} order book"
+      payload_fields: [asks, bids, trades, last_price, timestamp, currency_pair]
+      fixed_update_interval_ms: null
+      depth: unspecified
+      sequence: unsupported
+      checksum: unsupported
+      resync: treat next full board payload or REST depth snapshot as fresh state after reconnect
     heartbeat:
       direction: server_push_no_client_ping_documented
       interval_ms: 0
@@ -104,10 +112,14 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
     request_spec:
       fixture: tests/fixtures/exchanges/zaif/request_specs/get_info2.json
+    response_parser:
+      status: planned
     notes: "Offline request-spec only; fiat account ledger writes are outside gateway scope."
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -119,7 +131,11 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/zaif/request_specs/active_orders.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/zaif/active_orders_success.json
+    notes: "Guarded runtime: enabled only with ZAIF_PRIVATE_REST_ENABLED plus ZAIF_API_KEY/ZAIF_API_SECRET; mock TAPI test covers HMAC headers, form body and active_orders parser."
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: POST
@@ -131,7 +147,11 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/zaif/request_specs/trade_history.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/zaif/trade_history_success.json
+    notes: "Guarded runtime: enabled only with ZAIF_PRIVATE_REST_ENABLED plus ZAIF_API_KEY/ZAIF_API_SECRET and context tenant/account; mock TAPI test covers HMAC headers, form body and trade_history parser."
   - operation: place_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -145,6 +165,7 @@ endpoints:
       fixture: tests/fixtures/exchanges/zaif/request_specs/trade_limit.json
     notes: "Zaif uses action=bid/ask and has no gateway-safe client_order_id mapping."
   - operation: cancel_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -158,14 +179,16 @@ endpoints:
       fixture: tests/fixtures/exchanges/zaif/request_specs/cancel_order.json
 unsupported:
   - operation: private_rest_runtime
-    reason: "A-38 only audits Zaif private signing/request specs; runtime private trading remains disabled pending dedicated live read-only validation."
+    reason: "Write runtime remains disabled; read-only active_orders/trade_history are guarded native runtime."
   - operation: fiat_funding
     reason: "JPY deposits, withdrawals, bank transfer, and ledger write operations are outside gateway trading scope."
-  - operation: futures
-    reason: "A-38 scope is Zaif Japanese Spot markets only."
+  - operation: contract_product
+    reason: "Zaif credit trading is currently stopped; current official/API profile does not expose standard futures/perpetual/options products."
   - operation: private_websocket
     reason: "No stable private order stream is mapped; use REST reconciliation after later validation."
   - operation: client_order_id
     reason: "Zaif trade API is exchange-order-id based."
   - operation: amend_order
     reason: "No standard in-place amend endpoint is exposed."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 Zaif profile 明确不提供稳定 get_fees runtime。"

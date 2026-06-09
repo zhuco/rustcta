@@ -75,6 +75,49 @@ websocket:
       interval_ms: 20000
       timeout_ms: 10000
     resync: rest_order_book_snapshot
+    public_channels:
+      - /contractMarket/level2:{symbol}
+      - /contractMarket/level2Depth5:{symbol}.100ms
+      - /contractMarket/level2Depth50:{symbol}.100ms
+      - obu.depth1.real-time
+      - obu.depth5.100ms
+      - obu.depth50.100ms
+    order_book:
+      classic_channels:
+        level2_increment:
+          channel: /contractMarket/level2:{symbol}
+          interval_ms: real_time
+          depth_per_side: incremental
+        level2_depth_5:
+          channel: /contractMarket/level2Depth5:{symbol}
+          interval_ms: 100
+          depth_per_side: 5
+        level2_depth_50:
+          channel: /contractMarket/level2Depth50:{symbol}
+          interval_ms: 100
+          depth_per_side: 50
+      uta_obu_channels:
+        bbo:
+          channel: obu
+          interval_ms: real_time
+          depth_per_side: 1
+        depth_5:
+          channel: obu.depth5
+          interval_ms: 100
+          depth_per_side: 5
+        depth_50:
+          channel: obu.depth50
+          interval_ms: 100
+          depth_per_side: 50
+      sequence:
+        fields: [sequence, sequenceStart, sequenceEnd]
+        continuity: sequenceEnd_links_to_next_sequenceStart
+        gap_policy: rest_snapshot_resync
+      checksum: none
+      resync:
+        mode: rest_snapshot_rebuild_and_buffered_delta_replay
+        endpoint_operation: get_order_book
+        path: /api/v1/level2/snapshot
   private:
     support: native
     token_endpoint: /api/v1/bullet-private
@@ -82,6 +125,9 @@ websocket:
     renewal: refresh_before_expiry
     renew_before_expiry_ms: 3600000
     fallback: rest_reconciliation
+unsupported:
+  - operation: spot_product
+    reason: KuCoin Futures adapter/profile only maps the KuCoin futures API; spot remains in the kucoin adapter.
 endpoints:
   - operation: get_symbol_rules
     product: perpetual

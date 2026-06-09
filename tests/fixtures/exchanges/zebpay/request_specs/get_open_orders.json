@@ -1,6 +1,7 @@
 {
   "operation": "zebpay.get_open_orders",
-  "request_spec_only": true,
+  "request_spec_only": false,
+  "runtime": "guarded_private_rest",
   "trade_enabled": false,
   "method": "GET",
   "path": "/orders",
@@ -18,5 +19,5 @@
     "Authorization": "<redacted:bearer-token>"
   },
   "credential_scope": "read_only",
-  "expected_error_until_promoted": "zebpay.open_orders_request_spec_only"
+  "runtime_guard": "ZEBPAY_PRIVATE_REST_ENABLED or RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED plus client_id/client_secret/access_token"
 }

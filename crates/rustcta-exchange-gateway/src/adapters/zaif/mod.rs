@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    AccountId, AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
@@ -9,7 +9,8 @@ use rustcta_exchange_api::{
     OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
     PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
     PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    RecentFillsRequest, RecentFillsResponse, RequestContext, SymbolRulesRequest,
+    SymbolRulesResponse, TenantId, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -42,6 +43,7 @@ impl ZaifGatewayAdapter {
         let rest = ZaifRest::new(
             exchange_id.clone(),
             config.public_rest_base_url.clone(),
+            config.private_rest_base_url.clone(),
             config.request_timeout_ms,
         )?;
         Ok(Self {
@@ -72,6 +74,46 @@ impl ZaifGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn private_credentials(&self, operation: &'static str) -> ExchangeApiResult<(&str, &str)> {
+        if !self.config.enabled_private_rest {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        let api_key = self
+            .config
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        let api_secret = self
+            .config
+            .api_secret
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        Ok((api_key, api_secret))
+    }
+
+    fn context_account(
+        &self,
+        context: &RequestContext,
+    ) -> ExchangeApiResult<(TenantId, AccountId)> {
+        let tenant_id =
+            context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "zaif private REST readback requires context.tenant_id".to_string(),
+                })?;
+        let account_id =
+            context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "zaif private REST readback requires context.account_id".to_string(),
+                })?;
+        Ok((tenant_id, account_id))
+    }
 }
 
 #[async_trait]
@@ -99,7 +141,8 @@ impl ExchangeClient for ZaifGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = self.config.private_rest_enabled();
+        let private_rest_available = self.config.private_rest_enabled();
+        capabilities.supports_private_rest = private_rest_available;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(streams::zaif_private_stream_capabilities(
@@ -113,8 +156,8 @@ impl ExchangeClient for ZaifGatewayAdapter {
         capabilities.supports_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
         capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_open_orders = private_rest_available;
+        capabilities.supports_recent_fills = private_rest_available;
         capabilities.supports_client_order_id = false;
         capabilities.supports_post_only = false;
         capabilities.supports_order_types = vec![OrderType::Market, OrderType::Limit];
@@ -236,16 +279,14 @@ impl ExchangeClient for ZaifGatewayAdapter {
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("zaif.get_open_orders.offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("zaif.get_recent_fills.offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

@@ -4,7 +4,7 @@
   "path": "/trading-api/v2/command",
   "auth": "bearer_jwt_plus_bx_signature",
   "supported": false,
-  "expected_error": "bullish.cancel_all_orders_unverified",
+  "expected_error": "bullish.cancel_all_orders_offline_request_spec_only",
   "body": {
     "commandType": "V1CancelAllOrdersByMarket",
     "tradingAccountId": "offline-account",

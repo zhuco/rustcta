@@ -1,0 +1,46 @@
+{
+  "exchange": "bsx",
+  "operation": "get_positions",
+  "status": "source_boundary_only",
+  "support": "spec_only",
+  "product": "perpetual",
+  "transport": "rest_or_websocket",
+  "method": "SOURCE_READ",
+  "path": "source://bsx/account-positions",
+  "auth": "signed_account_headers",
+  "headers": {
+    "BSX-KEY": { "match": "non_empty" },
+    "BSX-SIGNATURE": { "match": "non_empty" },
+    "BSX-TIMESTAMP": { "match": "non_empty" }
+  },
+  "account_scope": {
+    "required": ["account_id_or_wallet", "api_key"],
+    "credential_scopes": ["read_only"],
+    "wallet_binding": "required_for_account_selection"
+  },
+  "source_boundary": {
+    "kind": "account_position_or_margin_state_readback",
+    "stable_rest_path": "not_pinned",
+    "private_ws_reconciliation_source": "account/order updates after permission audit",
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
+  "response_sample": {
+    "accountId": "redacted-account-id",
+    "positions": [
+      {
+        "productId": "BTC-PERP",
+        "size": "0.0100",
+        "entryPrice": "65000.00",
+        "markPrice": "65100.00",
+        "unrealizedPnl": "1.00",
+        "marginMode": "cross"
+      }
+    ],
+    "equity": "1200.00"
+  },
+  "runtime_boundary": "BSX get_positions is source-boundary only until a stable account positions path, account headers, permission scope, position parser, and private REST/WS reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

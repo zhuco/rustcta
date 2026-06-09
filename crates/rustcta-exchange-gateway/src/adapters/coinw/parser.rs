@@ -1,4 +1,4 @@
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use rustcta_exchange_api::{
     ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
 };
@@ -157,7 +157,8 @@ pub fn parse_orderbook_snapshot(
                 .ok_or_else(|| {
                     parse_error(exchange_id.clone(), "CoinW spot order book is empty", data)
                 })?;
-            (book, None)
+            let ts = first_timestamp_millis(book, &["time", "ts", "timestamp"]);
+            (book, ts)
         }
         MarketType::Perpetual => {
             let ts = data
@@ -194,6 +195,7 @@ pub fn parse_orderbook_snapshot(
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
     snapshot.exchange_timestamp = exchange_timestamp;
+    snapshot.sequence = first_u64(book, &["seq", "endSeq", "sequence", "u"]);
     Ok(snapshot)
 }
 
@@ -252,6 +254,9 @@ fn parse_levels(
             ),
             _ => unreachable!("checked by caller"),
         };
+        if quantity <= 0.0 {
+            continue;
+        }
         parsed.push(OrderBookLevel::new(price, quantity).map_err(validation_error)?);
     }
     if side == "bids" {
@@ -368,6 +373,19 @@ fn integer_u32(value: Option<&Value>) -> Option<u32> {
     }
 }
 
+fn first_u64(value: &Value, fields: &[&str]) -> Option<u64> {
+    fields
+        .iter()
+        .find_map(|field| value.get(*field).and_then(value_u64))
+}
+
+fn first_timestamp_millis(value: &Value, fields: &[&str]) -> Option<DateTime<Utc>> {
+    fields
+        .iter()
+        .find_map(|field| value.get(*field).and_then(number_i64))
+        .and_then(|millis| Utc.timestamp_millis_opt(millis).single())
+}
+
 fn decimal_step_from_precision(precision: u32) -> String {
     if precision == 0 {
         return "1".to_string();
@@ -379,6 +397,22 @@ fn number_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Number(number) => number.as_i64(),
         Value::String(text) => text.parse().ok(),
+        _ => None,
+    }
+}
+
+fn value_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64().or_else(|| {
+            number
+                .as_f64()
+                .filter(|value| *value >= 0.0)
+                .map(|value| value as u64)
+        }),
+        Value::String(text) => text.parse().ok().or_else(|| {
+            text.split_once('.')
+                .and_then(|(whole, _)| whole.parse().ok())
+        }),
         _ => None,
     }
 }

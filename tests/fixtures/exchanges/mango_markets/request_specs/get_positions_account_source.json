@@ -1,0 +1,59 @@
+{
+  "exchange": "mango_markets",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "boundary": "solana_mango_account_source_only",
+  "runtime_enabled": false,
+  "transport": "solana_rpc",
+  "method": "POST",
+  "path": "/",
+  "auth": "none",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "body": {
+    "jsonrpc": "2.0",
+    "id": "mango-markets-position-account-scan",
+    "method": "getAccountInfo",
+    "params": [
+      "mango-account-public-key-fixture",
+      {
+        "encoding": "base64",
+        "commitment": "confirmed"
+      }
+    ]
+  },
+  "source": {
+    "program": "Mango v4",
+    "account_type": "MangoAccount",
+    "position_container": "perp_positions",
+    "requires": [
+      "mango_account_public_key",
+      "group_public_key",
+      "perp_market_index"
+    ]
+  },
+  "position_fields": [
+    "market_index",
+    "base_lots",
+    "quote_native",
+    "bids_base_lots",
+    "asks_base_lots",
+    "funding_settlement",
+    "health_contribution",
+    "unrealized_pnl"
+  ],
+  "reconciliation_required": [
+    "slot and commitment freshness",
+    "MangoAccount owner verification",
+    "PerpPosition lot/native-unit decoding",
+    "group/perp market metadata lookup",
+    "indexer or event-queue reconciliation"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_mango_account": false,
+    "live_call_allowed": false
+  }
+}

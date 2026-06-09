@@ -6,10 +6,13 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::signing;
+
 #[derive(Clone)]
 pub struct BitbankRest {
     exchange_id: ExchangeId,
     public_rest_base_url: String,
+    private_rest_base_url: String,
     http: reqwest::Client,
 }
 
@@ -17,6 +20,7 @@ impl BitbankRest {
     pub fn new(
         exchange_id: ExchangeId,
         public_rest_base_url: String,
+        private_rest_base_url: String,
         request_timeout_ms: u64,
     ) -> ExchangeApiResult<Self> {
         let http = reqwest::Client::builder()
@@ -29,6 +33,7 @@ impl BitbankRest {
         Ok(Self {
             exchange_id,
             public_rest_base_url,
+            private_rest_base_url,
             http,
         })
     }
@@ -47,6 +52,65 @@ impl BitbankRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_post(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        path: &str,
+        body: &str,
+    ) -> ExchangeApiResult<Value> {
+        let nonce = Utc::now().timestamp_millis().to_string();
+        let signed = signing::sign_body_request(api_key, api_secret, &nonce, "POST", body)?;
+        let url = build_url(&self.private_rest_base_url, path, &HashMap::new());
+        let response = self
+            .http
+            .post(url)
+            .header("ACCESS-KEY", signed.access_key)
+            .header("ACCESS-NONCE", signed.access_nonce)
+            .header("ACCESS-SIGNATURE", signed.access_signature)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        path: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let nonce = Utc::now().timestamp_millis().to_string();
+        let url = build_url(&self.private_rest_base_url, path, params);
+        let parsed =
+            reqwest::Url::parse(&url).map_err(|error| ExchangeApiError::InvalidRequest {
+                message: format!("invalid bitbank signed GET URL: {error}"),
+            })?;
+        let mut path_with_query = parsed.path().to_string();
+        if let Some(query) = parsed.query() {
+            path_with_query.push('?');
+            path_with_query.push_str(query);
+        }
+        let signed = signing::sign_get_request(api_key, api_secret, &nonce, &path_with_query)?;
+        let response = self
+            .http
+            .get(url)
+            .header("ACCESS-KEY", signed.access_key)
+            .header("ACCESS-NONCE", signed.access_nonce)
+            .header("ACCESS-SIGNATURE", signed.access_signature)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }
@@ -119,8 +183,10 @@ fn build_url(base: &str, path: &str, params: &HashMap<String, String>) -> String
         path.trim_start_matches('/')
     );
     if !params.is_empty() {
-        let query = params
-            .iter()
+        let mut pairs = params.iter().collect::<Vec<_>>();
+        pairs.sort_by(|(left, _), (right, _)| left.cmp(right));
+        let query = pairs
+            .into_iter()
             .map(|(key, value)| format!("{}={}", url_encode(key), url_encode(value)))
             .collect::<Vec<_>>()
             .join("&");

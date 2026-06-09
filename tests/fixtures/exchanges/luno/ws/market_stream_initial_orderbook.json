@@ -1,0 +1,24 @@
+{
+  "sequence": "24352",
+  "asks": [
+    {
+      "id": "offline-ask-1",
+      "price": "1201000.00",
+      "volume": "0.25000000"
+    }
+  ],
+  "bids": [
+    {
+      "id": "offline-bid-1",
+      "price": "1200000.00",
+      "volume": "0.10000000"
+    }
+  ],
+  "status": "ACTIVE",
+  "timestamp": 1700000000000,
+  "fixture_notes": {
+    "semantics": "Luno market stream sends this full current order book after the client sends API key credentials.",
+    "url": "wss://ws.luno.com/api/1/stream/XBTZAR",
+    "auth_required": true
+  }
+}

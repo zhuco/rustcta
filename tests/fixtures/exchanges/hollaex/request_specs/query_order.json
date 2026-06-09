@@ -1,0 +1,31 @@
+{
+  "exchange": "hollaex",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v2/order",
+  "auth": "signed",
+  "query": {
+    "order_id": {
+      "match": "exact",
+      "value": "order-fixture-1"
+    }
+  },
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "api-signature": {
+      "match": "present"
+    },
+    "api-expires": {
+      "match": "present"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "runtime_guard": "HOLLAEX_PRIVATE_REST_ENABLED plus API key/secret required"
+}

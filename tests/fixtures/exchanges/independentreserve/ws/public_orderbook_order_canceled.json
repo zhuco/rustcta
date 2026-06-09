@@ -1,0 +1,11 @@
+{
+  "Channel": "orderbook-xbt",
+  "Nonce": 44,
+  "Data": {
+    "OrderType": "LimitBid",
+    "OrderGuid": "dbe7b832-b9b7-4eac-84ce-9f49c2a93b87",
+    "ClientId": "client-42"
+  },
+  "Time": 1689718322139,
+  "Event": "OrderCanceled"
+}

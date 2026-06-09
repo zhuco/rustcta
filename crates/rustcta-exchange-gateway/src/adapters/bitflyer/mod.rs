@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    AccountId, AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
@@ -9,7 +9,8 @@ use rustcta_exchange_api::{
     OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
     PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
     PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    RecentFillsRequest, RecentFillsResponse, RequestContext, SymbolRulesRequest,
+    SymbolRulesResponse, TenantId, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -71,6 +72,48 @@ impl BitflyerGatewayAdapter {
 
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
+    }
+
+    fn private_credentials(&self, operation: &'static str) -> ExchangeApiResult<(&str, &str)> {
+        if !self.config.enabled_private_rest {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        let api_key = self
+            .config
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        let api_secret = self
+            .config
+            .api_secret
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(ExchangeApiError::Unsupported { operation })?;
+        Ok((api_key, api_secret))
+    }
+
+    fn context_account(
+        &self,
+        context: &RequestContext,
+    ) -> ExchangeApiResult<(TenantId, AccountId)> {
+        let tenant_id =
+            context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "bitflyer private REST readback requires context.tenant_id"
+                        .to_string(),
+                })?;
+        let account_id =
+            context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "bitflyer private REST readback requires context.account_id"
+                        .to_string(),
+                })?;
+        Ok((tenant_id, account_id))
     }
 }
 
@@ -227,24 +270,21 @@ impl ExchangeClient for BitflyerGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.unsupported("bitflyer.query_order.rest_parser_pending")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitflyer.get_open_orders.rest_parser_pending")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitflyer.get_recent_fills.rest_parser_pending")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

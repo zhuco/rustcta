@@ -104,19 +104,21 @@ pub fn parse_orders(
     value: &Value,
 ) -> ExchangeApiResult<Vec<OrderState>> {
     let data = value.get("data").unwrap_or(value);
-    let orders = data
+    let orders_value = data
         .get("entrustedList")
         .or_else(|| data.get("orderList"))
         .or_else(|| data.get("list"))
-        .unwrap_or(data)
-        .as_array()
-        .ok_or_else(|| {
-            parse_error(
-                exchange_id.clone(),
-                "open orders response is not an array",
-                value,
-            )
-        })?;
+        .unwrap_or(data);
+    let Some(orders) = orders_value.as_array() else {
+        if orders_value.is_null() {
+            return Ok(Vec::new());
+        }
+        return Err(parse_error(
+            exchange_id.clone(),
+            "open orders response is not an array",
+            value,
+        ));
+    };
     orders
         .iter()
         .map(|order| parse_order_state(exchange_id, fallback_symbol, market_type, order))

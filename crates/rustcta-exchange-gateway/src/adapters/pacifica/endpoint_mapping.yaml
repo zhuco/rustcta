@@ -33,9 +33,31 @@ websocket:
     channels: [prices, book, bbo, trades, candle, mark_candle]
     heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 60000, stale_message_ms: 60000, force_reconnect_ms: 86400000 }
     resync: REST /api/v1/book snapshot plus last_order_id ordering where present
+    order_book:
+      channel: book
+      bbo_channel: bbo
+      push_interval_ms: 100
+      update_model: aggregate_book_updates
+      aggregation_levels: [1, 10, 100, 1000, 10000]
+      book_aggregation_levels: [1, 10, 100, 1000, 10000]
+      ordering_field: li
+      sequence_field: li
+      checksum: unsupported
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: order_book
   private:
     support: spec_only
     channels: [account_positions, account_order_updates, account_trades]
+unsupported:
+  - operation: spot_product
+    reason: Pacifica official contract specifications are perpetual contracts; spot products are outside this adapter profile.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：agent-wallet account fee 字段未映射，当前只稳定到 public market/book。"
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/pacifica/request_specs/get_balances_account_source.json
+    reason: "Pacifica account streams and agent-wallet account model provide account-state evidence, but balances/account equity readback is not implemented in shared get_balances runtime yet."
 endpoints:
   - operation: symbol_rules
     product: perpetual
@@ -71,6 +93,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
+    support: spec_only
     method: GET
     path: /api/v1/positions
     auth: none
@@ -80,10 +103,26 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
     request_spec_fixture: tests/fixtures/exchanges/pacifica/request_specs/get_positions.json
     official_doc: https://docs.pacifica.fi/api-documentation/api/last-order-id
     reason: pacifica.positions_request_spec_only
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: SOURCE_READ
+    path: source://pacifica/agent-wallet-account-equity
+    auth: none
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Agent-wallet/account equity source boundary only; shared get_balances runtime remains project-unimplemented pending account/equity parser and private WS reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/pacifica/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/pacifica/request_specs/get_balances_account_source.json }
   - operation: get_open_orders
     product: perpetual
     market_types: [perpetual]

@@ -40,7 +40,10 @@ are served as `ExchangeId("myokx")` without copying OKX request or parser code.
 ## Unsupported Boundary
 
 - Swaps, futures, options, margin, leverage, margin mode, position mode, and
-  position readback are unsupported in the current runtime for this profile.
+  position readback are not wired in the current runtime for this profile.
+  Where the regional OKX v5 docs expose the product line, the endpoint mapping
+  records `项目未实现` pending EEA product-scope and credential audit instead of
+  `交易所不支持`.
 - Runtime private REST reads, runtime private REST writes, private WebSocket
   login/subscriptions, real order placement, real cancels, batch operations,
   transfers, withdrawals, and funding actions are unsupported.
@@ -55,12 +58,26 @@ include Spot/Margin, Swap, Futures, Options, Events, positions, leverage,
 funding, and open interest. These are `项目未实现` for this `myokx` profile or
 should be delegated to the main `okx` adapter after a regional scope audit; they
 must not be documented as `交易所不支持合约`.
+Mapping now records `contract_product`, `market_type_perpetual`,
+`market_type_futures`, `market_type_options`, `event_contract_product`, and
+`margin_product` as `status: project_unimplemented` with
+`boundary: project_unimplemented_product_line`, all bound to
+`request_specs/product_line_source_boundary.json` with required EEA domain,
+credential-scope, product-eligibility, account-mode, lifecycle, parser, and
+reconciliation gaps. Status recommendation: keep Margin, SWAP/perpetual,
+expiry futures, options, and Event Contracts as regional
+`project_unimplemented` product lines until the EEA profile has explicit
+eligibility, credential scope, metadata, private lifecycle, positions, and
+settlement/reconciliation coverage. Runtime remains Spot-first until EEA
+product-scope and credential permissions are audited.
 
 ## Official Core Trading Detail
 
 官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。MyOKX regional profile 使用 OKX V5 Trade API 语义，官方支持 `POST /api/v5/trade/order`、`POST /api/v5/trade/cancel-order`、batch order/cancel、orders-pending/history，并支持 `clOrdId`。
 
 当前 adapter 禁用 private trading runtime，且区域凭证 scope 还未审计；这是 `项目未实现/未启用区域 private trading`，不是 `交易所不支持下单/撤单`。未完成 credential scope guard、signing vectors、order/cancel parser 前继续保持 runtime disabled。
+
+账户/余额已补离线边界：OKX V5 `GET /api/v5/account/balance` 已固定 MyOKX/EEA host request-spec `request_specs/get_balances_account_balance.json`，矩阵按 `get_balances=离线` 记录。`myokx` shared `get_balances` runtime 尚未完成 EEA domain、credential scope guard、eligibility/account-mode guard、parser 和 read-only reconciliation。
 
 ## Endpoint Mapping
 
@@ -69,18 +86,23 @@ records:
 
 - EEA REST and WebSocket base URLs.
 - Spot public REST endpoints inherited from OKX V5.
-- Derivatives and private trading as explicit `Unsupported`.
+- Derivatives and margin as explicit `project_unimplemented` product-line
+  boundaries where regional docs expose them, while keeping runtime support
+  disabled.
+- Private trading as explicit `Unsupported` runtime endpoints with
+  `project_unimplemented` notes where official regional private APIs exist.
 - REST order book snapshot as the public WebSocket resync path.
 
 ## Official WebSocket Order Book Detail
 
 P9 official verification treats this as an OKX V5 regional profile. Public
-market data supports `bbo-tbt` at 10ms, `books5` at 100ms, and `books` at
-100ms; `books-l2-tbt`/`books50-l2-tbt` are 10ms depth channels but require
-login/VIP eligibility. The MyOKX public host is
-`wss://wseea.okx.com:8443/ws/v5/public`. Mapping must record `books`,
-`books5`, `bbo-tbt`, 10ms/100ms intervals, OKX sequence/checksum semantics, and
-REST `/api/v5/market/books` snapshot resync.
+market data supports `bbo-tbt` depth1 at 10ms, `books5` depth5 at 100ms, and
+`books` depth400 at 100ms; `books-l2-tbt` depth400 and `books50-l2-tbt` depth50
+are 10ms depth channels but require login/VIP eligibility. The MyOKX public
+host is `wss://wseea.okx.com:8443/ws/v5/public`. The mapping records `books`,
+`books5`, `bbo-tbt`, 10ms/100ms intervals, OKX `seqId`/`prevSeqId` and
+`checksum` semantics, REST `/api/v5/market/books` snapshot resync, and the EEA
+regional host/scope caveat.
 
 ## Validation
 
@@ -95,3 +117,10 @@ cargo test -p rustcta-gateway myokx --message-format short
 ```
 
 Do not run `cargo build` or any live trading command for this adapter.
+
+## Fee Boundary
+
+费率来源在 OKX V5 区域 account/trade fee 语义中存在；当前已补 EEA host `GET /api/v5/account/trade-fee` 的 `request_specs/get_fees_trade_fee.json` 离线 request-spec 边界。`myokx` shared `get_fees` runtime 仍属项目未实现/未启用；补齐前需完成 EEA domain、credential scope guard、instType/instId policy、parser 和产品资格审计。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core trading now reuses the OKX V5 signed private REST runtime on the MyOKX EEA host when explicit MYOKX credentials/passphrase and private REST enable flag are configured. place/cancel/cancel-all/query/open/fills are matrix `原生`; non-spot products remain separate product-scope gaps.

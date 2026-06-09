@@ -20,8 +20,42 @@ rate_limits:
   private_order: { scope: account, default_weight: 1 }
 websocket:
   public:
+    support: native
     url: wss://ws.bitstamp.net
+    protocol: websocket_v2_json
     channels: [order_book, diff_order_book, live_trades]
+    subscribe:
+      event: bts:subscribe
+      payload: { event: bts:subscribe, data: { channel: "{channel}" } }
+    order_book:
+      snapshot_channel: order_book_{market_symbol}
+      delta_channel: diff_order_book_{market_symbol}
+      fixed_update_interval_ms: null
+      interval_note: "Official WebSocket v2 docs describe real-time data but do not publish a fixed millisecond cadence."
+      depth:
+        parameter: null
+        max_depth_per_side: null
+        note: "No WebSocket depth selector is documented; REST order_book group controls grouping, not a fixed WS depth."
+      sequence:
+        fields: []
+        continuity: unsupported_no_official_sequence
+        gap_detection: stale_stream_or_order_data_event_window_only
+      checksum:
+        supported: false
+        field: null
+        risk: "No official public WS checksum field is documented for order_book/diff_order_book."
+      resync:
+        mode: rest_snapshot_with_order_data_gap_recovery
+        rest_snapshot:
+          method: GET
+          path: /api/v2/order_book/{market_symbol}/
+          query: { group: 1 }
+        order_data_gap_recovery:
+          method: POST
+          path: /api/v2/order_data/
+          auth: none
+          body_fields: [market, since_id, until_id]
+        strategy: "Fetch REST order_book snapshot for a clean book, use POST /api/v2/order_data/ with market/since_id/until_id for public order event gap recovery, and rebuild on reconnect, stale stream, suspected message loss or unavailable event window."
   private:
     token_endpoint: /api/v2/websockets_token/
     channels: [private-my_orders, private-user]
@@ -54,6 +88,21 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: native
+  - operation: get_order_data
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/order_data/
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: "Public WebSocket gap recovery helper; request fields are market, since_id and until_id."
   - operation: get_balances
     product: spot
     market_types: [spot]
@@ -166,6 +215,54 @@ endpoints:
     testnet: false
     support: native
     sign_path: bitstamp_v2_form
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/bitstamp/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitstamp.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /unsupported/bitstamp/batch_cancel_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitstamp.batch_cancel_orders_unsupported
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/bitstamp/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitstamp.order_list_unsupported
   - operation: query_order
     product: spot
     market_types: [spot]
@@ -232,6 +329,31 @@ endpoints:
     support: native
     sign_path: bitstamp_v2_form
 unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [derivatives, contracts]
+    boundary: project_unimplemented_product_line
+    official_gap: bitstamp_derivatives_contracts_api
+    source_boundary_fixture: tests/fixtures/exchanges/bitstamp/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Bitstamp adapter is Spot-only; derivatives endpoints require a separate product profile, symbol model, risk/position parser and credentials scope."
+    required_endpoints:
+      market_metadata: [derivatives instruments, contract specifications, funding or settlement schedule]
+      public_market_data: [derivatives order book, derivatives ticker, derivatives trade history]
+      private_account: [derivatives balances or margin account, positions, risk or leverage limits]
+      private_order_lifecycle: [derivatives place order, derivatives cancel order, derivatives query/open orders, derivatives fills]
+    unsafe_to_promote_without: [derivatives market metadata specs, position/margin/funding parser coverage, signed derivatives order lifecycle request specs, post-write query/open/fills reconciliation]
+    reason: "Official derivatives endpoints exist, but this spot adapter has not implemented a Bitstamp derivatives/contracts profile."
+  - operation: derivatives_product
+    status: project_unimplemented
+    product_lines: [derivatives, contracts]
+    boundary: project_unimplemented_product_line
+    official_gap: bitstamp_derivatives_contracts_api
+    source_boundary_fixture: tests/fixtures/exchanges/bitstamp/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [derivatives instruments, contract specifications]
+      private_account: [positions, risk or leverage limits]
+      private_order_lifecycle: [derivatives place/cancel/query/open orders, derivatives fills]
+    reason: "Bitstamp derivatives API surfaces are official but not wired by the spot adapter."
   - derivatives
   - positions
   - sell_quote_market_order

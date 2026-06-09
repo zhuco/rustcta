@@ -198,9 +198,9 @@ impl ExchangeClient for BitstampGatewayAdapter {
             OrderType::IOC,
             OrderType::FOK,
         ];
-        capabilities.max_order_book_depth = Some(100);
+        capabilities.max_order_book_depth = None;
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+            rustcta_exchange_api::OrderBookCapability::best_effort_delta(None);
         capabilities
     }
 

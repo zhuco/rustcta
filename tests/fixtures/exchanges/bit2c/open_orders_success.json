@@ -1,0 +1,18 @@
+{
+  "BtcNis": {
+    "bid": [
+      {
+        "pair": "BtcNis",
+        "status_type": 1,
+        "created": 1530189838,
+        "type": 0,
+        "order_type": 0,
+        "amount": 1.5,
+        "price": 99000.0,
+        "id": 123456790,
+        "initialAmount": 2.0
+      }
+    ],
+    "ask": []
+  }
+}

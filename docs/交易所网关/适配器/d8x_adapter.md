@@ -46,7 +46,9 @@ liquidations, liquidity provision and private streams remain `Unsupported`.
 
 官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。D8X 是链上 perpetual futures engine，仓位读取需要 wallet/contract/indexer 或 SDK 账户状态解析。
 
-因此仓位读取写 `官方协议支持，项目未实现链上仓位 runtime`。补仓位前必须完成 EVM wallet/indexer account scan、positions parser、funding/PnL/liquidation fields、reorg handling 和 reconciliation。
+因此仓位读取写 `官方协议支持，离线 source-boundary 已记录，项目未实现链上仓位 runtime`。`endpoint_mapping.yaml` 的 `get_positions` 使用 `indexer://d8x/polygon-zkevm/wallet/positions` spec-only 边界和 `tests/fixtures/exchanges/d8x/request_specs/get_positions_account_source.json`，只记录 wallet/contract/indexer 或 SDK 账户状态来源；本地测试只验证 source-boundary fixture 结构和 runtime guard。补 runtime 前仍必须完成 EVM wallet/indexer account scan、contract/indexer freshness、positions parser、funding/PnL/liquidation fields、reorg handling 和 reconciliation。
+
+账户/余额项目未实现/未启用：D8X 链上账户/钱包 readback 有余额线索，`endpoint_mapping.yaml` 已将 `get_balances` 写成 `indexer://d8x/polygon-zkevm/wallet/balances` spec-only source boundary，并绑定 `tests/fixtures/exchanges/d8x/request_specs/get_balances_account_source.json`。矩阵应为 `get_balances=离线`；共享 runtime 仍需完成 EVM wallet/contract/indexer account scan、margin/equity parser、reorg handling 和 reconciliation。
 
 ## Official WebSocket Order Book Detail
 
@@ -61,7 +63,8 @@ liquidations, liquidity provision and private streams remain `Unsupported`.
 | `get_symbol_rules` | Native public REST | `GET /coingecko/contracts?chain_id=1101` |
 | `get_order_book` | Native public REST | `GET /coingecko/orderbook/{ticker_id}?chain_id=1101` |
 | Funding/risk fields | Parser fixture context only | Present in raw contracts fixture, not yet exposed by shared trait |
-| Balances/positions | Unsupported | Require wallet/contract/indexer audit |
+| Balances | Spec/source fixture only | `get_balances` source boundary records wallet/contract/indexer balance/equity inputs; no live wallet RPC, Node SDK, contract call or indexer request is executed |
+| Positions | Spec/source fixture only | `get_positions` source boundary records wallet/contract/indexer inputs; no live wallet RPC, Node SDK, contract call or indexer request is executed |
 | Place/cancel/amend/order list | Unsupported | Require EVM signer, ABI/calldata, gas/nonce/reorg and reconciliation design |
 | Batch/cancel-all | Unsupported | No gateway-safe atomicity mapping yet |
 | Public/private WS runtime | Unsupported | Payload fixtures only; REST snapshot is the fallback |
@@ -86,6 +89,7 @@ Fixtures:
 - `tests/fixtures/exchanges/d8x/orderbook.json`
 - `tests/fixtures/exchanges/d8x/request_specs/contracts.json`
 - `tests/fixtures/exchanges/d8x/request_specs/orderbook.json`
+- `tests/fixtures/exchanges/d8x/request_specs/get_positions_account_source.json`
 - `tests/fixtures/exchanges/d8x/request_specs/place_order_unsupported.json`
 - `tests/fixtures/exchanges/d8x/ws/public_orderbook_subscribe.json`
 - `tests/fixtures/exchanges/d8x/ws/private_auth_payload.json`
@@ -113,3 +117,12 @@ cargo test -p rustcta-gateway d8x --message-format short
 ```
 
 Do not run `cargo build`, release builds or any live order/transaction command.
+
+`get_positions` remains `离线`: `parse_position_source_boundary` validates the sanitized source fixture, while the live runtime still returns the wallet/contract/indexer boundary because there is no audited EVM account scan, freshness guard, decoded position response, reorg handling, or reconciliation path.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前 profile 未建立稳定账户/链上 fee runtime。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core place/cancel/query/open/fills are offline/spec-only EVM/SDK source boundaries; cancel-all/order-list remain unsupported shared semantics. Runtime promotion is blocked on EVM signer, ABI/calldata, gas/nonce/reorg handling, indexer parser, and reconciliation.

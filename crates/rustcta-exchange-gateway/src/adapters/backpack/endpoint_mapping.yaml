@@ -63,20 +63,120 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: parser_only
-    channels: [trade, ticker, depth, bookTicker, kline]
+    support: native
+    url: wss://ws.backpack.exchange
+    subscribe:
+      method: SUBSCRIBE
+      params: [stream_name]
+    channels:
+      trade: trade.{symbol}
+      ticker: ticker.{symbol}
+      kline: kline.{interval}.{symbol}
+      book_ticker:
+        stream: bookTicker.{symbol}
+        products: [spot, linear_perp]
+        interval_ms: realtime
+        depth: 1
+        sequence: u
+        checksum: none
+      realtime_depth:
+        stream: depth.{symbol}
+        products: [spot, linear_perp]
+        interval_ms: realtime
+        depth: delta
+        sequence: [U, u]
+        checksum: none
+        update_semantics: absolute_quantity_level_delta
+      aggregate_depth:
+        stream: depth.200ms|600ms|1000ms.{symbol}
+        products: [spot, linear_perp]
+        interval_ms: [200, 600, 1000]
+        depth: delta
+        sequence: [U, u]
+        checksum: none
+        update_semantics: absolute_quantity_level_delta
+    orderbook:
+      rest_snapshot:
+        endpoint_operation: get_order_book
+        path: /api/v1/depth
+        limits: [5, 10, 20, 50, 100, 500, 1000]
+        sequence_field: lastUpdateId
+      replay:
+        buffer_before_snapshot: true
+        drop_rule: discard events where u <= lastUpdateId
+        first_apply_rule: require U <= lastUpdateId + 1 <= u
+        continuity_rule: next U must equal previous u + 1
+        gap_policy: reconnect_resubscribe_and_fetch_rest_snapshot
+      checksum: none
+      risk: no checksum; enforce U/u continuity and REST resync on reconnect or gap
+    fixtures:
+      subscribe_payload: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+      parser_realtime_depth: tests/fixtures/exchanges/backpack/ws/public_depth_realtime.json
+      parser_aggregate_depth: tests/fixtures/exchanges/backpack/ws/public_depth_200ms.json
+      parser_book_ticker: tests/fixtures/exchanges/backpack/ws/public_book_ticker.json
     heartbeat:
       required: true
       direction: client_ping
       interval_ms: 15000
       timeout_ms: 30000
-    resync: rest_order_book_snapshot
+    resync: rest_snapshot_then_delta_replay
   private:
     support: parser_only
     auth: signed_subscribe
     renewal: relogin
     fallback: rest_reconciliation
     channels: [account.orderUpdate, account.positionUpdate]
+streams:
+  - operation: public_orderbook_bbo
+    transport: websocket
+    product: spot
+    market_types: [spot, linear_perp]
+    channel: bookTicker.{symbol}
+    auth: none
+    support: native
+    interval_ms: realtime
+    depth: 1
+    sequence: [u]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/backpack/ws/public_book_ticker.json }
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot
+  - operation: public_orderbook_delta_realtime
+    transport: websocket
+    product: spot
+    market_types: [spot, linear_perp]
+    channel: depth.{symbol}
+    auth: none
+    support: native
+    interval_ms: realtime
+    depth: delta
+    sequence: [U, u]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/backpack/ws/public_depth_realtime.json }
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_delta_replay
+      replay: drop u <= lastUpdateId, apply first U <= lastUpdateId + 1 <= u, then require next U == previous u + 1
+  - operation: public_orderbook_delta_aggregate
+    transport: websocket
+    product: spot
+    market_types: [spot, linear_perp]
+    channel: depth.200ms|600ms|1000ms.{symbol}
+    auth: none
+    support: native
+    interval_ms: [200, 600, 1000]
+    depth: delta
+    sequence: [U, u]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/backpack/ws/public_depth_200ms.json }
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_delta_replay
+      replay: same U/u continuity policy as realtime depth
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -115,6 +215,7 @@ endpoints:
     transport: rest
     product: spot
     market_types: [spot, linear_perp]
+    support: native
     method: GET
     path: /api/v1/capital
     auth: signed
@@ -125,13 +226,16 @@ endpoints:
     request_spec:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+      fixture: tests/fixtures/exchanges/backpack/request_specs/get_balances.json
     response_parser:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+      fixture: tests/fixtures/exchanges/backpack/balances.json
     notes: Signed with instruction=balanceQuery.
   - operation: get_positions
     transport: rest
     product: linear_perp
+    support: native
     method: GET
     path: /api/v1/position
     auth: signed
@@ -142,9 +246,11 @@ endpoints:
     request_spec:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+      fixture: tests/fixtures/exchanges/backpack/request_specs/get_positions.json
     response_parser:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+      fixture: tests/fixtures/exchanges/backpack/positions.json
     params:
       - name: marketType
         source: static
@@ -165,14 +271,19 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
+    support: native
     request_spec:
+      fixture: tests/fixtures/exchanges/backpack/request_specs/get_fees.json
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     response_parser:
+      parser: rustcta_exchange_gateway::adapters::backpack::private_parser::parse_fee_snapshots
+      fixture: tests/fixtures/exchanges/backpack/account.json
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     notes: Signed with instruction=accountQuery.
   - operation: place_order
+    support: native
     transport: rest
     product: spot
     market_types: [spot, linear_perp]
@@ -209,6 +320,7 @@ endpoints:
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     notes: Signed with instruction=orderExecute.
   - operation: cancel_order
+    support: native
     transport: rest
     product: spot
     market_types: [spot, linear_perp]
@@ -227,6 +339,7 @@ endpoints:
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     notes: Signed with instruction=orderCancel; exactly one of orderId/clientId is accepted.
   - operation: cancel_all_orders
+    support: native
     transport: rest
     product: spot
     market_types: [spot, linear_perp]
@@ -285,7 +398,38 @@ endpoints:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     notes: Composed sequential batch cancel; partial failures surface through per-item order state.
+  - operation: amend_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: PATCH
+    path: /unsupported/backpack/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: backpack.amend_order_unsupported
+  - operation: place_order_list
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /unsupported/backpack/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: backpack.order_list_unsupported
   - operation: query_order
+    support: native
     transport: rest
     product: spot
     market_types: [spot, linear_perp]
@@ -304,6 +448,7 @@ endpoints:
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     notes: Signed with instruction=orderQuery; clientId must be numeric uint32.
   - operation: get_open_orders
+    support: native
     transport: rest
     product: spot
     market_types: [spot, linear_perp]
@@ -322,6 +467,7 @@ endpoints:
       test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
     notes: Signed with instruction=orderQueryAll.
   - operation: get_recent_fills
+    support: native
     transport: rest
     product: spot
     market_types: [spot, linear_perp]

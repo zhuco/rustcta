@@ -1,6 +1,6 @@
 # WEEX Gateway Adapter
 
-Status date: 2026-06-07
+Status date: 2026-06-09
 
 Adapter id: `weex`
 
@@ -87,7 +87,7 @@ that API secrets never enter the request path, query, or body.
 
 官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。WEEX Spot V3 支持 `POST /api/v3/order` 和撤单；Contract V2/V3 支持 place/cancel、batch cancel、cancel all。Spot 支持 LIMIT/MARKET 和 GTC/IOC/FOK，Spot `newClientOrderId`、Contract `client_oid`/`origClientOrderId` 可用于幂等或撤单定位。
 
-当前矩阵仍显示 `place_order=-`、`cancel_order=-`，但本 adapter 文档和 endpoint table 已有 private order lifecycle 语义。后续应先核对 endpoint mapping 证据；如果是生成器识别缺口就修 mapping evidence，如果确实缺 runtime，就补 Spot/Perp place/cancel/query/open/fills specs 和 parser。
+当前 mapping 已用 WEEX Spot/Perp endpoint evidence 覆盖 place/cancel/query/open/fills 的标准核心交易操作；这是已完成/已核对边界，不应补 `project_unimplemented`。
 
 ## Official Position Detail
 
@@ -107,10 +107,17 @@ can wire those helpers into a concrete socket loop without changing the public
 
 P9 official verification confirms the public depth channel uses
 `<symbol>@depth{level}` with supported levels 15 and 200, for example
-`BTCUSDT@depth15`. A snapshot is delivered automatically after subscription,
+`BTCUSDT@depth15` or `BTCUSDT@depth200`. A snapshot is delivered automatically after subscription,
 followed by incremental updates. Payloads include `U/u`, depth level `l`, and
 `d=SNAPSHOT` or `CHANGED`; if an update id is missed, resubscribe to obtain a
 fresh snapshot. No fixed push interval or checksum is documented.
+
+Current implementation note: `endpoint_mapping.yaml` now records the
+`depth15/200` levels, `U/u`, `SNAPSHOT/CHANGED`, missing-update resubscribe, and
+no-fixed-ms/checksum boundary. `streams.rs` exposes a depth policy and channel
+builder that can produce `BTCUSDT@depth200`, while the order book parser stores
+`u`/`lastUpdateId` in the standard snapshot `sequence` field for downstream gap
+handling.
 
 ## Reconciliation And Unsupported Boundaries
 

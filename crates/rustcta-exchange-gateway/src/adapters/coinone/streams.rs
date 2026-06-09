@@ -23,6 +23,43 @@ pub struct CoinoneWsSubscriptionSpec {
     pub signature_header: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoinonePublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub protocol: &'static str,
+    pub channel: &'static str,
+    pub request_type: &'static str,
+    pub topic_fields: &'static [&'static str],
+    pub first_message_semantics: &'static str,
+    pub update_semantics: &'static str,
+    pub depth: Option<u32>,
+    pub interval_ms: Option<u64>,
+    pub order_book_id_field: &'static str,
+    pub order_book_id_semantics: &'static str,
+    pub sequence_field: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub reconnect_resync: &'static str,
+}
+
+pub fn coinone_public_order_book_ws_policy() -> CoinonePublicOrderBookWsPolicy {
+    CoinonePublicOrderBookWsPolicy {
+        url: "wss://stream.coinone.co.kr",
+        protocol: "json_websocket",
+        channel: "ORDERBOOK",
+        request_type: "SUBSCRIBE",
+        topic_fields: &["quote_currency", "target_currency"],
+        first_message_semantics: "initial subscription sends the last order book snapshot once",
+        update_semantics: "after the initial snapshot, server pushes only when the order book changes",
+        depth: None,
+        interval_ms: None,
+        order_book_id_field: "data.id",
+        order_book_id_semantics: "larger order book id is newer; use as monotonic freshness only, not a documented contiguous sequence",
+        sequence_field: None,
+        checksum: None,
+        reconnect_resync: "fetch REST /public/v2/orderbook/KRW snapshot on connect/reconnect, then resubscribe because no contiguous sequence or checksum is documented",
+    }
+}
+
 pub fn coinone_private_stream_capabilities(enabled: bool) -> PrivateStreamCapabilities {
     if !enabled {
         return PrivateStreamCapabilities::unsupported(EXCHANGE_API_SCHEMA_VERSION);
@@ -115,6 +152,23 @@ pub fn coinone_public_subscription_spec(
         payload_header: None,
         signature_header: None,
     })
+}
+
+pub fn coinone_orderbook_id(value: &Value) -> Option<&str> {
+    let data = value
+        .get("data")
+        .or_else(|| value.get("d"))
+        .unwrap_or(value);
+    data.get("id")
+        .or_else(|| data.get("i"))
+        .and_then(Value::as_str)
+}
+
+pub fn coinone_orderbook_id_is_newer(previous: &str, next: &str) -> bool {
+    match (previous.parse::<u128>(), next.parse::<u128>()) {
+        (Ok(previous), Ok(next)) => next > previous,
+        _ => next > previous,
+    }
 }
 
 pub fn coinone_private_subscription_spec(

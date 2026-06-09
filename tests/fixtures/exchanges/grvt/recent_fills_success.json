@@ -1,0 +1,20 @@
+{
+  "result": {
+    "fills": [
+      {
+        "trade_id": "grvt-fill-1",
+        "order_id": "grvt-order-1",
+        "client_order_id": "grvt-client-1",
+        "instrument": "BTC_USDT_Perp",
+        "side": "BUY",
+        "price": "63950",
+        "size": "0.004",
+        "notional": "255.8",
+        "fee": "0.10232",
+        "fee_asset": "USDT",
+        "liquidity": "TAKER",
+        "created_at": "2026-06-08T12:00:02Z"
+      }
+    ]
+  }
+}

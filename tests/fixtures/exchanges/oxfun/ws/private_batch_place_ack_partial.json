@@ -1,0 +1,31 @@
+{
+  "event": "placeorders",
+  "submitted": true,
+  "tag": "124",
+  "timestamp": "1592491945249",
+  "dataArray": [
+    {
+      "submitted": true,
+      "clientOrderId": "1",
+      "marketCode": "BTC-USD-SWAP-LIN",
+      "side": "BUY",
+      "orderType": "LIMIT",
+      "quantity": "1.5",
+      "timeInForce": "GTC",
+      "orderId": "1000000700008",
+      "price": "9431.48"
+    },
+    {
+      "submitted": false,
+      "clientOrderId": "2",
+      "marketCode": "BTC-USD-SWAP-LIN",
+      "side": "BUY",
+      "orderType": "LIMIT",
+      "quantity": "0.7",
+      "timeInForce": "GTC",
+      "price": "9420.00",
+      "errorCode": "INSUFFICIENT_MARGIN",
+      "errorMessage": "insufficient margin"
+    }
+  ]
+}

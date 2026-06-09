@@ -1,6 +1,6 @@
 # Upbit Gateway Adapter
 
-Status date: 2026-06-08
+Status date: 2026-06-09
 
 ## Scope
 
@@ -46,6 +46,22 @@ ticket/type/format objects. Orderbook unit count can be specified as
 `{code}.{count}` with supported counts 1, 5, 15, and 30; unsupported counts
 default to 30. Official docs do not state a fixed millisecond interval and do not
 publish a sequence/checksum for orderbook continuity.
+
+| Surface | Upbit public orderbook WS |
+| --- | --- |
+| URLs | Korea/global `wss://api.upbit.com/websocket/v1`; regional examples `wss://sg-api.upbit.com/websocket/v1`, `wss://id-api.upbit.com/websocket/v1`, `wss://th-api.upbit.com/websocket/v1` |
+| Protocol | Native WebSocket, JSON array subscription payload |
+| Subscription | `[{"ticket": ...}, {"type": "orderbook", "codes": ["KRW-BTC.30"], "is_only_realtime": true}, {"format": "DEFAULT"}]` |
+| Unit count / depth | `{code}.{count}`; supported counts/depths are `1`, `5`, `15`, and `30`; adapter helper defaults orderbook subscriptions to `30` |
+| Cadence | No fixed millisecond interval documented |
+| Sequence/timestamp | `timestamp` and `stream_type` are present; no official sequence/update id field |
+| Checksum | No official checksum field; no checksum mismatch risk, but the adapter cannot checksum-validate continuity |
+| Resync | Reconnect/stale/parse-error recovery must rebuild from REST `/v1/orderbook` snapshot |
+
+Unsupported runtime boundary: the adapter records the orderbook subscription
+shape and parser fixture, but it does not maintain a live incremental local book
+because Upbit does not provide an official sequence/checksum contract for public
+orderbook continuity.
 
 ## Unsupported Boundary
 

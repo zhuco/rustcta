@@ -1,0 +1,19 @@
+{
+  "success": 1,
+  "return": {
+    "100025362": {
+      "pair": "btc_usdt",
+      "type": "buy",
+      "amount": "0.00400000",
+      "rate": "64000.00",
+      "timestamp_created": 1700000000
+    },
+    "100025363": {
+      "pair": "btc_usdt",
+      "type": "sell",
+      "amount": "0.02000000",
+      "rate": "65000.00",
+      "timestamp_created": 1700000060
+    }
+  }
+}

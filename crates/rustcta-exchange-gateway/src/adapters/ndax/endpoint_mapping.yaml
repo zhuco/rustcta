@@ -6,7 +6,7 @@ metadata:
   status: draft
   source: docs/ndax_adapter.md
   last_reviewed: "2026-06-08"
-  notes: A-28 NDAX CAD spot scan-only adapter. Runtime exposes public instruments/order-book only; private REST and WebSocket remain offline request-spec/payload boundaries.
+  notes: A-28 NDAX CAD spot adapter. Runtime exposes public instruments/order-book and credential-gated read-only private order/fill readbacks; private writes and WebSocket remain offline request-spec/payload boundaries.
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -21,10 +21,10 @@ rate_limits:
   public_gateway: { scope: ip, interval_ms: 60000, limit: 60, notes: conservative local bucket until NDAX publishes endpoint weights }
   private_rest: { scope: key, interval_ms: 60000, limit: 60, notes: request-spec only }
 pagination:
-  private_history: { mode: cursor_or_time_unverified, notes: not promoted to runtime }
+  private_history: { mode: local_limit_only, notes: recent_fills runtime supports symbol/account scoped readback with local limit truncation; cursor/time/from_trade filters remain unsupported }
 reconciliation:
   private_state: rest_fallback
-  notes: Private WebSocket is unsupported at runtime; use account/order REST readback after separate live-dry-run promotion.
+  notes: Private WebSocket is unsupported at runtime; credential-gated REST order/fill readbacks are available for reconciliation when NDAX_PRIVATE_REST_ENABLED plus credentials/user/account/OMS scope are present.
 batch:
   place: { support: unsupported, reason: ndax.native_batch_place_unsupported }
   cancel: { support: unsupported, reason: ndax.native_batch_cancel_unsupported }
@@ -33,18 +33,80 @@ websocket:
     support: payload_helper
     url: wss://api.ndax.io/WSGateway/
     channels:
+      - SubscribeLevel1
       - SubscribeLevel2
       - SubscribeTrades
       - SubscribeTicker
+    public_channels:
+      - SubscribeLevel1.depth1.bbo.no_fixed_ms.no_sequence.no_checksum.resync_GetL2Snapshot
+      - SubscribeLevel2.depth_parameter_Depth.no_fixed_ms.no_sequence.no_checksum.resync_GetL2Snapshot
+      - GetL2Snapshot.depth_parameter_Depth.snapshot_rebuild
+    order_book:
+      protocol: AlphaPoint WSGateway envelope
+      level1:
+        channel: SubscribeLevel1
+        depth_per_side: 1
+        semantics: best_bid_offer
+      level2:
+        channel: SubscribeLevel2
+        depth_parameter: Depth
+        update_interval_ms: null
+        interval_note: official docs do not publish a fixed millisecond cadence
+      snapshot:
+        method: GetL2Snapshot
+        depth_parameter: Depth
+        endpoint_operation: order_book
+      sequence:
+        fields: []
+        continuity: unsupported_no_official_sequence
+        risk: snapshot_rebuild_required_after_gap_or_reconnect
+      checksum:
+        supported: false
+        field: null
+        risk: no official checksum documented for Level1/Level2 public book payloads
+      resync:
+        mode: request_fresh_l2_snapshot
+        method: GetL2Snapshot
+        endpoint_operation: order_book
+        strategy: rebuild local book from snapshot after reconnect, stale stream, or suspected gap
     heartbeat: { mode: ping_pong_or_transport_heartbeat, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
   private:
     support: payload_helper_only
     auth: AuthenticateUser
     reconciliation: rest_fallback
 unsupported:
-  - perpetuals
-  - futures
-  - margin
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_standard_futures_perpetual_options_api
+    scope: standard_contracts_only
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products; NDAX margin-like account semantics remain a separate project-unimplemented boundary."
+  - operation: perpetual_product
+    status: unsupported
+    official_gap: no_standard_perpetual_api
+    scope: standard_contracts_only
+    reason: "Current official/API profile exposes standard spot instruments only; no stable perpetual product line is wired."
+  - operation: futures_product
+    status: unsupported
+    official_gap: no_standard_futures_api
+    scope: standard_contracts_only
+    reason: "Current official/API profile exposes standard spot instruments only; no stable futures product line is wired."
+  - operation: options_product
+    status: unsupported
+    official_gap: no_standard_options_api
+    scope: standard_contracts_only
+    reason: "Current official/API profile exposes standard spot instruments only; no stable options product line is wired."
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: margin_account_semantics
+    boundary: project_unimplemented_product_line
+    scope: ndax_margin_like_account
+    source_boundary_fixture: tests/fixtures/exchanges/ndax/request_specs/product_line_source_boundary.json
+    required_audit_gaps:
+      - margin account eligibility and account-mode semantics
+      - margin balance, position, profit/loss, leverage, and risk parser fixtures
+      - product-scoped private order lifecycle and permission guard
+      - post-write readback/reconciliation and live dry-run gate
+    reason: "NDAX Margin/Margin-like account semantics are not connected by the current spot scan-only adapter and must not be inferred from public instrument or offline private specs."
   - leverage
   - positions
   - funding
@@ -57,6 +119,8 @@ unsupported:
   - native_batch_place
   - native_batch_cancel_list
   - live_private_write_rest
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 adapter/API 证据只到 public/user API、risk tiers 和 offline private specs，未核到 maker/taker fee readback。"
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -125,7 +189,9 @@ endpoints:
     testnet: false
     official_doc: https://docs.ndax.in/v3/private-endpoints/rest-api
     support: spec_only
+    reason: "NDAX account balance readback is request-spec backed, but shared get_balances runtime remains disabled pending account permission audit, fiat ledger parser, OMS account scope policy, and reconciliation."
     request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json, source: request_spec_only }
     notes: Runtime remains Unsupported until account permissions and fiat ledger semantics are live-dry-run verified.
   - operation: open_orders
     product: spot
@@ -142,8 +208,10 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     official_doc: https://apidoc.ndax.io/#getopenorders
-    support: spec_only
-    request_spec: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json }
+    support: native
+    reason: "NDAX open-order readback is credential-gated by NDAX_PRIVATE_REST_ENABLED, API key/secret, user id, account id, OMS scope, Spot symbol, mapped instrument id, and local parser; pagination remains unsupported until official cursor semantics are pinned."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/get_open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/ndax/open_orders_success.json }
   - operation: recent_fills
     product: spot
     market_types: [spot]
@@ -159,8 +227,10 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     official_doc: https://apidoc.ndax.io/#gettradeshistory
-    support: spec_only
-    request_spec: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json }
+    support: native
+    reason: "NDAX fill history readback is credential-gated by NDAX_PRIVATE_REST_ENABLED, API key/secret, user id, account id, OMS scope, Spot symbol, mapped instrument id, context tenant/account, local limit truncation, and fill parser; cursor/time/from_trade/client_order_id filters remain unsupported until official query semantics are pinned."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/get_recent_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/ndax/recent_fills_success.json }
   - operation: place_order
     product: spot
     market_types: [spot]
@@ -211,5 +281,7 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     official_doc: https://apidoc.ndax.io/#getorderstatus
-    support: spec_only
-    request_spec: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/cancel_order.json }
+    support: native
+    reason: "NDAX order query readback is credential-gated by NDAX_PRIVATE_REST_ENABLED, API key/secret, user id, account id, OMS scope, Spot symbol, exchange_order_id, and order parser; client_order_id lookup remains unsupported until native lookup semantics are verified."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/ndax/order_status_success.json }

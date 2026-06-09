@@ -17,10 +17,11 @@ impl Default for LighterGatewayConfig {
         Self {
             rest_base_url: "https://mainnet.zklighter.elliot.ai/api/v1".to_string(),
             ws_url: "wss://mainnet.zklighter.elliot.ai/stream".to_string(),
-            api_key_index: non_empty_env("LIGHTER_API_KEY_INDEX"),
-            auth_token: non_empty_env("LIGHTER_AUTH_TOKEN"),
-            account_index: non_empty_env("LIGHTER_ACCOUNT_INDEX"),
-            enabled_private_rest: env_bool("LIGHTER_PRIVATE_REST_ENABLED").unwrap_or(false),
+            api_key_index: non_empty_env_prefixed("LIGHTER_API_KEY_INDEX"),
+            auth_token: non_empty_env_prefixed("LIGHTER_AUTH_TOKEN"),
+            account_index: non_empty_env_prefixed("LIGHTER_ACCOUNT_INDEX"),
+            enabled_private_rest: env_bool_prefixed("LIGHTER_PRIVATE_REST_ENABLED")
+                .unwrap_or(false),
             enabled_public_streams: env_bool("LIGHTER_PUBLIC_STREAMS_ENABLED").unwrap_or(false),
             enabled_private_streams: env_bool("LIGHTER_PRIVATE_STREAMS_ENABLED").unwrap_or(false),
             request_timeout_ms: 10_000,
@@ -41,6 +42,14 @@ impl LighterGatewayConfig {
                 .as_ref()
                 .is_some_and(|value| !value.trim().is_empty())
     }
+}
+
+fn non_empty_env_prefixed(key: &str) -> Option<String> {
+    non_empty_env(&format!("RUSTCTA_{key}")).or_else(|| non_empty_env(key))
+}
+
+fn env_bool_prefixed(key: &str) -> Option<bool> {
+    env_bool(&format!("RUSTCTA_{key}")).or_else(|| env_bool(key))
 }
 
 fn non_empty_env(key: &str) -> Option<String> {

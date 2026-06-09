@@ -1,19 +1,24 @@
 schema_version: 1
 exchange: cex
 adapter: rustcta_exchange_gateway::adapters::cex
-status_date: "2026-06-08"
+status_date: '2026-06-08'
 metadata:
-  status: draft
+  status: validated
   source: https://docs.cex.io/
-  last_reviewed: "2026-06-08"
-  notes: "A-15 CEX.IO spot G1 public REST adapter. Private REST and fiat ledger runtime stay disabled pending request-spec promotion."
-market_types: [spot]
-products: [spot]
+  last_reviewed: '2026-06-08'
+  notes: A-15 CEX.IO spot adapter with public REST and Spot Trading WS order book payload/parser coverage. Private REST and
+    fiat ledger runtime stay disabled pending request-spec promotion.
+market_types:
+- spot
+products:
+- spot
 rest:
   base_url: https://cex.io/api
 auth:
-  private_rest: "JSON body nonce/key/signature; HMAC-SHA256 over nonce + user_id + api_key"
-  websocket: "auth message with HMAC-SHA256 over timestamp + api_key"
+  private_rest: JSON body nonce/key/signature; HMAC-SHA256 over nonce + user_id + api_key
+  spot_trading_rest: Spot Trading REST private calls use authenticated session/API-key context; get_my_current_fee requires
+    read permission.
+  websocket: auth message with HMAC-SHA256 over timestamp + api_key
 rate_limits:
   public_rest:
     scope: ip
@@ -25,73 +30,445 @@ rate_limits:
     limit: 2000
 websocket:
   url: wss://ws.cex.io/ws/
-  status: payload_only
+  status: public_order_book_runtime
+  public:
+    support: spec_only
+    runtime: project_unimplemented
+    url: wss://trade.cex.io/api/spot/ws-public
+    order_book:
+      snapshot_channel: order_book_subscribe
+      delta_channel: order_book_increment
+      interval: no fixed ms; event-driven by book changes
+      depth: 25
+      sequence_field: seqId
+      checksum: unsupported
+      resync:
+        mode: rest_snapshot_after_disconnect_or_seqid_gap
+        continuity: initial snapshot seqId, then increments must apply in seqId + 1 order
+        endpoint_operation: get_order_book
+  private:
+    support: unsupported
+    reason: private WebSocket runtime is not promoted in this adapter slice.
   heartbeat: server_ping_client_pong
-  reconnect: "server may drop sessions; reconnect and resubscribe required"
+  reconnect: server may drop sessions; reconnect and resubscribe required
+  public_order_book:
+    product: spot
+    snapshot_event: order_book_subscribe
+    increment_event: order_book_increment
+    subscribe_payload:
+      e: order-book-subscribe
+      data:
+        pair:
+        - '{base}'
+        - '{quote}'
+        subscribe: true
+        depth: 25
+      oid: '{client_request_id}'
+    unsubscribe_payload:
+      e: order-book-unsubscribe
+      data:
+        pair:
+        - '{base}'
+        - '{quote}'
+      oid: '{client_request_id}'
+    sequence:
+      field: seqId
+      continuity: initial order_book_subscribe snapshot carries seqId; each order_book_increment must apply in seqId + 1 order
+      gap_detection: reconnect_resubscribe_and_rest_snapshot_on_gap_or_regression
+    update_semantics: absolute quantity at changed price levels; quantity 0 removes a level in the local book
+    checksum: null
+    resync:
+      mode: rest_snapshot_after_disconnect_or_seqid_gap
+      endpoint_operation: get_order_book
+      triggers:
+      - connect
+      - reconnect
+      - disconnect
+      - seqId_gap
+      - seqId_regression
+      - parse_gap
 reconciliation:
   private_stream_fallback: rest
-  status: "not enabled until private REST request specs are promoted"
+  status: not enabled until private REST request specs are promoted
 unsupported:
-  - private_rest_runtime
-  - private_websocket_runtime
-  - fiat_deposit_withdrawal_runtime
-  - positions
-  - margin
-  - futures
-  - order_list
-  - generic_batch_place
-  - generic_batch_cancel
-  - live_trading
+- operation: contract_product
+  reason: CEX.IO public trading documentation is Spot Trading REST/WS; standard futures/perpetual/options products are not
+    exposed by this profile.
+- operation: get_fees
+  status: project_unimplemented
+  reason: Official/account/config fee source exists, but shared get_fees runtime is project-unimplemented for this adapter
+    pending get_my_current_fee/get_myfee request spec, auth, parser, and profile guard.
+- operation: get_balances
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/cex/request_specs/get_balances.json
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending read-only request spec, private balance parser, HMAC auth, and fiat/trading scope guard.
+- operation: amend_order
+  reason: CEX.IO Spot Trading does not expose a shared in-place amend endpoint for the current gateway model; cancel-and-replace
+    is not treated as amend_order.
+- operation: place_order_list
+  reason: CEX.IO Spot Trading has no native OCO/OTO/order-list endpoint mapped to the shared gateway semantics.
+- operation: batch_place_orders
+  reason: CEX.IO Spot Trading private write runtime is request-spec-only and no safe native/shared batch place mapping is
+    enabled.
+- operation: batch_cancel_orders
+  reason: CEX.IO Spot Trading private write runtime is request-spec-only and no safe native/shared batch cancel mapping is
+    enabled.
+- private_rest_runtime
+- private_websocket_runtime
+- fiat_deposit_withdrawal_runtime
+- positions
+- margin
+- futures
+- order_list
+- generic_batch_place
+- generic_batch_cancel
+- live_trading
 endpoints:
-  - operation: get_symbol_rules
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /currency_limits
-    auth: none
-    rate_limit_bucket: public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://docs.cex.io/#currency-limits
-    request_spec:
-      fixture: tests/fixtures/exchanges/cex/request_specs/currency_limits.json
-  - operation: get_order_book
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /order_book/{symbol1}/{symbol2}/
-    auth: none
-    rate_limit_bucket: public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://docs.cex.io/#orderbook
-    request_spec:
-      fixture: tests/fixtures/exchanges/cex/request_specs/orderbook_btc_usd.json
-  - operation: place_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /place_order/{symbol1}/{symbol2}
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: non_atomic
-    testnet: false
-    support: unsupported
-    reason: "Private trading remains request-spec only; the adapter does not send signed order mutations."
-    request_spec:
-      fixture: tests/fixtures/exchanges/cex/request_specs/place_order_unsupported.json
+- operation: get_symbol_rules
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /currency_limits
+  auth: none
+  rate_limit_bucket: public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://docs.cex.io/#currency-limits
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/currency_limits.json
+- operation: get_order_book
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /order_book/{symbol1}/{symbol2}/
+  auth: none
+  rate_limit_bucket: public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://docs.cex.io/#orderbook
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/orderbook_btc_usd.json
+- operation: get_fees
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /get_my_current_fee
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 5
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official CEX.IO Spot Trading Current Fee endpoint is mapped as an offline request-spec boundary; shared get_fees
+    runtime/parser is not enabled.
+  official_doc: https://trade.cex.io/docs/
+  request_spec:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/cex/request_specs/get_my_current_fee.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/cex/parser/get_my_current_fee.json
+  notes: Source returns data.tradingFee keyed by DASH pairs with percent values; parser must map the single percent into gateway
+    maker/taker policy after CEX Spot profile guard is enabled.
+- operation: get_fees
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /get_myfee/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official legacy CEX.IO get_myfee source is mapped as an offline fallback boundary; shared get_fees runtime/parser
+    is not enabled.
+  official_doc: https://docs.cex.io/#get-my-fee
+  request_spec:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/cex/request_specs/get_myfee_legacy.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/cex/parser/get_myfee_legacy.json
+  notes: Legacy source returns colon-pair keys with buy/sell taker and buyMaker/sellMaker maker percentages; parser must normalize
+    percent units and choose side-aware maker/taker rates per requested symbol.
+- operation: get_balances
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /balance/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official CEX.IO account balance endpoint is fixture-backed, but shared get_balances runtime is disabled pending
+    HMAC auth promotion, fiat/crypto parser, and Spot Trading/legacy profile guard.
+  official_doc: https://docs.cex.io/#account-balance
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/get_balances.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/cex/request_specs/get_balances.json
+    source: response_sample
+  notes: 'P3 balance boundary: private balance request spec and sanitized response sample are pinned offline; runtime still
+    returns cex.balances_private_rest_deferred.'
+- operation: place_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /place_order/{symbol1}/{symbol2}
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: CEX.IO place_order is fixture-backed offline; runtime stays disabled pending live-write/dry-run guard, ack parser,
+    post-write readback reconciliation, and profile safety review.
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/place_order_unsupported.json
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /cancel_order/
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: CEX.IO cancel_order is fixture-backed offline; runtime stays disabled pending live-write/dry-run guard, cancel
+    parser/readback reconciliation, and profile safety review.
+  official_doc: https://docs.cex.io/#cancel-order
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/cancel_order.json
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_all_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /cancel_orders/{symbol1}/{symbol2}
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: CEX.IO cancel_all_orders is fixture-backed offline; runtime stays disabled pending pair-scope over-cancel safety,
+    parser/readback reconciliation, and live dry-run controls.
+  official_doc: https://docs.cex.io/#cancel-all-orders-for-given-pair
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/cancel_all_orders.json
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: query_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /get_order/
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: CEX.IO private query-order REST is promoted as credential-gated read-only runtime behind CEX_PRIVATE_REST_ENABLED
+    plus API key, secret, and user id.
+  official_doc: https://docs.cex.io/#get-order-details
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/query_order.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/cex/order_success.json
+  notes: 'P2 core readback runtime: sends signed JSON POST to /get_order/ only when private REST guard and credentials
+    are configured; write operations remain offline/spec-only.'
+- operation: get_open_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /open_orders/{symbol1}/{symbol2}
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: CEX.IO private open-orders REST is promoted as credential-gated read-only runtime behind CEX_PRIVATE_REST_ENABLED
+    plus API key, secret, and user id.
+  official_doc: https://docs.cex.io/#open-orders-by-pair
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/get_open_orders.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/cex/open_orders_success.json
+  notes: 'P2 core readback runtime: sends signed pair-scoped JSON POST to /open_orders/{symbol1}/{symbol2} only when
+    private REST guard and credentials are configured; write operations remain offline/spec-only.'
+- operation: get_recent_fills
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /archived_orders/{symbol1}/{symbol2}
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: CEX.IO private archived-orders REST is promoted as credential-gated read-only runtime behind CEX_PRIVATE_REST_ENABLED
+    plus API key, secret, and user id.
+  official_doc: https://docs.cex.io/#archived-orders
+  request_spec:
+    fixture: tests/fixtures/exchanges/cex/request_specs/get_recent_fills.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/cex/archived_orders_success.json
+  notes: 'P2 core readback runtime: sends signed pair-scoped JSON POST to /archived_orders/{symbol1}/{symbol2} only when
+    private REST guard and credentials are configured; write operations remain offline/spec-only.'
+- operation: amend_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/cex/amend-order
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: CEX.IO Spot Trading does not expose a shared in-place amend endpoint for the current gateway model; cancel-and-replace
+    is not treated as amend_order.
+- operation: place_order_list
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/cex/order-list
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: CEX.IO Spot Trading has no native OCO/OTO/order-list endpoint mapped to the shared gateway semantics.
+- operation: batch_place_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/cex/batch-place
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: CEX.IO Spot Trading private write runtime is request-spec-only and no safe native/shared batch place mapping is
+    enabled.
+- operation: batch_cancel_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/cex/batch-cancel
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: CEX.IO Spot Trading private write runtime is request-spec-only and no safe native/shared batch cancel mapping is
+    enabled.

@@ -1,0 +1,51 @@
+{
+  "exchange": "d8x",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "boundary": "wallet_contract_indexer_source_only",
+  "runtime_enabled": false,
+  "chain_profile": {
+    "name": "polygon_zkevm",
+    "chain_id": 1101
+  },
+  "source": {
+    "surfaces": [
+      "D8X Futures Node SDK account state",
+      "direct EVM smart-contract read calls",
+      "audited indexer wallet-position scan"
+    ],
+    "requires": [
+      "wallet_address",
+      "perpetual_contract_or_pool_id",
+      "market_metadata_from_contracts_endpoint"
+    ],
+    "does_not_use": [
+      "gateway_api_key",
+      "hmac_secret",
+      "centralized_exchange_private_rest"
+    ]
+  },
+  "position_fields": [
+    "market",
+    "base_position",
+    "quote_exposure",
+    "entry_price",
+    "mark_price",
+    "unrealized_pnl",
+    "funding_accrual",
+    "maintenance_margin",
+    "liquidation_price"
+  ],
+  "reconciliation_required": [
+    "block number and reorg handling",
+    "contract/indexer freshness checks",
+    "funding and PnL normalization",
+    "wallet-scoped account ownership and market mapping"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_wallet_address": false,
+    "live_call_allowed": false
+  }
+}

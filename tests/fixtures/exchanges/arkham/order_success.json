@@ -1,0 +1,17 @@
+{
+  "id": "ark-order-1",
+  "clientOrderId": "client-1",
+  "symbol": "BTC_USDT",
+  "side": "buy",
+  "type": "limitGtc",
+  "timeInForce": "gtc",
+  "size": "0.01000000",
+  "price": "64000.00",
+  "filledSize": "0.00400000",
+  "averagePrice": "63950.00",
+  "status": "partiallyFilled",
+  "reduceOnly": false,
+  "postOnly": false,
+  "createdAt": "2026-06-09T01:02:03Z",
+  "updatedAt": "2026-06-09T01:03:04Z"
+}

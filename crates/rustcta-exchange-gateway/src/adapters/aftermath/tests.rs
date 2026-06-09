@@ -1,6 +1,7 @@
 use rustcta_exchange_api::{
-    BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest, PublicStreamKind,
-    PublicStreamSubscription, RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest, PositionsRequest,
+    PublicStreamKind, PublicStreamSubscription, RequestContext, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderType,
@@ -8,7 +9,7 @@ use rustcta_types::{
 };
 use serde_json::{json, Value};
 
-use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
+use super::parser::{parse_orderbook_snapshot, parse_position_source_boundary, parse_symbol_rules};
 use super::streams::{
     aftermath_public_subscribe_payload, aftermath_public_unsubscribe_payload,
     aftermath_reconnect_policy_ms,
@@ -66,6 +67,9 @@ fn fixture(name: &str) -> Value {
         "signing_boundary" => include_str!(
             "../../../../../tests/fixtures/exchanges/aftermath/signing_vectors/sui_transaction_unsupported.json"
         ),
+        "positions_source" => include_str!(
+            "../../../../../tests/fixtures/exchanges/aftermath/request_specs/get_positions_account_source.json"
+        ),
         "ws_subscribe_orderbook" => include_str!(
             "../../../../../tests/fixtures/exchanges/aftermath/ws/updates_subscribe_orderbook.json"
         ),
@@ -88,6 +92,26 @@ fn request_spec(name: &str) -> RequestSpec {
         _ => panic!("unknown request spec {name}"),
     };
     serde_json::from_str(text).expect(name)
+}
+
+#[test]
+fn parser_should_validate_position_source_boundary_fixture() {
+    let audit = parse_position_source_boundary(&exchange_id(), &fixture("positions_source"))
+        .expect("audit");
+
+    assert_eq!(audit.boundary, "sdk_account_source_only");
+    assert!(audit
+        .required_sources
+        .iter()
+        .any(|source| source == "account_cap_id_or_account_id"));
+    assert!(audit
+        .position_fields
+        .iter()
+        .any(|field| field == "position_size"));
+    assert!(audit
+        .reconciliation_required
+        .iter()
+        .any(|gap| gap == "Sui checkpoint/epoch freshness"));
 }
 
 #[test]
@@ -143,6 +167,28 @@ fn capabilities_should_expose_public_perpetual_scan_only_surface() {
         .iter()
         .any(|endpoint| endpoint.operation == "get_order_book"
             && endpoint.path.as_deref() == Some("/api/ccxt/orderbook")));
+}
+
+#[tokio::test]
+async fn get_positions_should_return_sui_account_source_boundary() {
+    let adapter = AftermathGatewayAdapter::new(AftermathGatewayConfig::default()).expect("adapter");
+    let error = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![symbol().exchange_symbol],
+        })
+        .await
+        .expect_err("positions boundary");
+
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: private::POSITIONS_UNSUPPORTED
+        }
+    ));
 }
 
 #[tokio::test]

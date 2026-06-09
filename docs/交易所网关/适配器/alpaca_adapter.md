@@ -42,9 +42,10 @@ Alpaca is wired as a Broker crypto spot adapter. It targets Alpaca Broker REST f
 Alpaca Crypto Data API supports `orderbooks` over
 `wss://stream.data.alpaca.markets/v1beta3/crypto/us`; clients authenticate and
 then subscribe with an `orderbooks` symbol list. Official docs do not provide a
-fixed millisecond interval, fixed depth, sequence, or checksum. Mapping should
-record auth+subscribe, no fixed ms/depth/checksum, and REST latest orderbooks as
-the rebuild source. Source batch:
+fixed millisecond interval, fixed depth, sequence, or checksum. The mapping
+records authenticated `orderbooks` subscribe, no fixed ms, depth: unspecified /
+未给固定档位, sequence/checksum risk, and REST latest orderbooks as the rebuild
+source. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
 
 ## Environment
@@ -75,3 +76,7 @@ cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway alpaca --lib --message-format short
 cargo test -p rustcta-gateway alpaca --message-format short
 ```
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：Broker crypto fee schedule 不是共享模型需要的 per-symbol trading-fee endpoint。

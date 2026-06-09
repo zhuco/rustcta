@@ -9,9 +9,10 @@ use crate::streams::StreamSupervisorAction;
 
 use super::streams::{
     parse_poloniex_private_stream_message, parse_poloniex_public_stream_message,
-    poloniex_private_subscribe_payload, poloniex_public_subscribe_payload,
-    poloniex_stream_reconnect_policy, poloniex_ws_auth_payload, PoloniexPublicStreamMessage,
-    PoloniexWsSessionEvent,
+    poloniex_order_book_replay_decision, poloniex_order_book_sequence,
+    poloniex_private_subscribe_payload, poloniex_public_order_book_ws_policy,
+    poloniex_public_subscribe_payload, poloniex_stream_reconnect_policy, poloniex_ws_auth_payload,
+    PoloniexOrderBookReplayDecision, PoloniexPublicStreamMessage, PoloniexWsSessionEvent,
 };
 use super::test_support::{context, exchange_id, perp_symbol_scope, spot_symbol_scope};
 use super::{PoloniexGatewayAdapter, PoloniexGatewayConfig};
@@ -61,6 +62,21 @@ fn poloniex_streams_should_build_public_and_private_payloads() {
     assert!(auth["params"]["signature"]
         .as_str()
         .is_some_and(|signature| !signature.is_empty()));
+}
+
+#[test]
+fn poloniex_public_order_book_policy_should_describe_book_lv2_details() {
+    let policy = poloniex_public_order_book_ws_policy();
+    assert_eq!(policy.spot_url, "wss://ws.poloniex.com/ws/public");
+    assert_eq!(policy.futures_url, "wss://ws.poloniex.com/ws/v3/public");
+    assert_eq!(policy.channel, "book_lv2");
+    assert_eq!(policy.levels, 20);
+    assert_eq!(policy.spot_sequence_fields, &["id", "lastId"]);
+    assert_eq!(policy.futures_sequence_fields, &["id", "lid"]);
+    assert_eq!(policy.checksum_field, None);
+    assert!(policy
+        .resync_strategy
+        .contains("refetch the REST order book snapshot"));
 }
 
 #[test]
@@ -175,6 +191,105 @@ fn poloniex_stream_parser_should_parse_public_book_trade_ticker_and_candle() {
         }
         other => panic!("unexpected candle message: {other:?}"),
     }
+}
+
+#[test]
+fn poloniex_stream_parser_should_parse_spot_and_futures_book_lv2_fixtures() {
+    let spot_value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/poloniex/ws/public_spot_book_lv2.json"
+    ))
+    .expect("spot fixture");
+    let spot_book =
+        parse_poloniex_public_stream_message(&exchange_id(), spot_symbol_scope(), &spot_value)
+            .expect("spot book");
+    match spot_book {
+        PoloniexPublicStreamMessage::OrderBook(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(10411));
+            assert_eq!(snapshot.bids.len(), 2);
+            assert_eq!(snapshot.asks.len(), 2);
+            assert_eq!(
+                snapshot.exchange_symbol.expect("exchange symbol").symbol,
+                "BTC_USDT"
+            );
+        }
+        other => panic!("unexpected spot book: {other:?}"),
+    }
+
+    let futures_value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/poloniex/ws/public_futures_book_lv2.json"
+    ))
+    .expect("futures fixture");
+    let futures_book =
+        parse_poloniex_public_stream_message(&exchange_id(), perp_symbol_scope(), &futures_value)
+            .expect("futures book");
+    match futures_book {
+        PoloniexPublicStreamMessage::OrderBook(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(230));
+            assert_eq!(snapshot.bids[0].price, 46000.0);
+            assert_eq!(
+                snapshot.exchange_symbol.expect("exchange symbol").symbol,
+                "BTC_USDT_PERP"
+            );
+        }
+        other => panic!("unexpected futures book: {other:?}"),
+    }
+}
+
+#[test]
+fn poloniex_book_lv2_sequence_should_detect_contiguous_gap_and_regression() {
+    let spot_current = json!({
+        "channel": "book_lv2",
+        "data": [{
+            "symbol": "BTC_USDT",
+            "id": 10411,
+            "lastId": 10410,
+            "bids": [["46000", "1"]],
+            "asks": [["46100", "2"]]
+        }]
+    });
+    let spot_sequence =
+        poloniex_order_book_sequence(&spot_current, MarketType::Spot).expect("spot sequence");
+    assert_eq!(spot_sequence.current_id, 10411);
+    assert_eq!(spot_sequence.previous_id, Some(10410));
+    assert_eq!(
+        poloniex_order_book_replay_decision(None, spot_sequence),
+        PoloniexOrderBookReplayDecision::Initialize
+    );
+    assert_eq!(
+        poloniex_order_book_replay_decision(Some(10410), spot_sequence),
+        PoloniexOrderBookReplayDecision::Apply
+    );
+    assert_eq!(
+        poloniex_order_book_replay_decision(Some(10409), spot_sequence),
+        PoloniexOrderBookReplayDecision::Rebuild
+    );
+    assert_eq!(
+        poloniex_order_book_replay_decision(Some(10412), spot_sequence),
+        PoloniexOrderBookReplayDecision::Rebuild
+    );
+
+    let futures_current = json!({
+        "channel": "book_lv2",
+        "data": [{
+            "s": "BTC_USDT_PERP",
+            "id": 230,
+            "lid": 229,
+            "bids": [["46000", "1"]],
+            "asks": [["46100", "2"]]
+        }]
+    });
+    let futures_sequence = poloniex_order_book_sequence(&futures_current, MarketType::Perpetual)
+        .expect("futures sequence");
+    assert_eq!(futures_sequence.current_id, 230);
+    assert_eq!(futures_sequence.previous_id, Some(229));
+    assert_eq!(
+        poloniex_order_book_replay_decision(Some(229), futures_sequence),
+        PoloniexOrderBookReplayDecision::Apply
+    );
+    assert_eq!(
+        poloniex_order_book_replay_decision(Some(228), futures_sequence),
+        PoloniexOrderBookReplayDecision::Rebuild
+    );
 }
 
 #[test]

@@ -1,13 +1,34 @@
 {
   "exchange": "paradex",
   "operation": "get_balances",
+  "product": "perpetual",
+  "transport": "rest",
   "method": "GET",
   "path": "/balance",
+  "auth": "bearer_jwt",
   "query": {},
   "body": null,
   "headers": {
     "Accept": "application/json",
     "Authorization": "Bearer fixture.jwt.token"
   },
+  "account_scope": {
+    "required": ["stark_account", "jwt"],
+    "credential_scopes": ["read_only"],
+    "ws_reconciliation_source": "user.balance"
+  },
+  "response_sample": {
+    "results": [
+      {
+        "token": "USDC",
+        "size": "1000.000000",
+        "available": "950.000000",
+        "unrealized_pnl": "0.000000"
+      }
+    ]
+  },
+  "runtime_boundary": "Paradex get_balances is request-spec only until JWT/Stark auth guard, balance parser, and private WS user.balance reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
   "secret_free": true
 }

@@ -34,6 +34,31 @@ websocket:
   public:
     support: spec_only
     heartbeat: { mode: server_hb, timeout_ms: 30000 }
+    order_book:
+      channel: book
+      url: wss://api-pub.bitfinex.com/ws/2
+      protocol: json_array_v2
+      subscribe:
+        event: subscribe
+        channel: book
+        symbol_example: tBTCUSD
+        params:
+          prec: { default: P0, supported: [P0, P1, P2, P3, P4] }
+          freq: { default: F0, supported: [F0, F1], semantics: { F0: realtime, F1: two_seconds } }
+          len: { default: 100, supported: [1, 25, 100, 250] }
+      conf_flags:
+        SEQ_ALL: { value: 65536, support: native, purpose: sequence_numbers_for_gap_detection }
+        OB_CHECKSUM: { value: 131072, support: native, purpose: signed_crc32_top_25_book_check }
+        BULK_UPDATES: { value: 536870912, support: documented_boundary, purpose: multiple_book_updates_in_one_message }
+      message_semantics:
+        snapshot: "First book payload is an array of [price, count, amount] rows."
+        update: "Subsequent book payloads are [price, count, amount]; count=0 deletes the bid when amount=1 and the ask when amount=-1."
+        checksum: "When OB_CHECKSUM is enabled the server sends [chanId, 'cs', checksum]."
+        sequence: "When SEQ_ALL is enabled sequence is appended to every event and any gap/regression requires rebuilding."
+      checksum:
+        algorithm: crc32_signed_int
+        scope: top_25_bids_and_asks
+        on_mismatch: rest_snapshot_rebuild
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
     support: spec_only
@@ -41,7 +66,15 @@ websocket:
     heartbeat: { mode: server_hb, timeout_ms: 30000 }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
   public_channels:
-    - { channel: book, auth: none, support: spec_only, official_doc: "https://docs.bitfinex.com/reference/ws-public-books" }
+    - channel: book
+      auth: none
+      support: spec_only
+      official_doc: "https://docs.bitfinex.com/reference/ws-public-books"
+      params:
+        prec: [P0, P1, P2, P3, P4]
+        freq: [F0, F1]
+        len: [1, 25, 100, 250]
+      rebuild: rest_snapshot_after_reconnect_sequence_gap_or_checksum_mismatch
   private_auth:
     method: auth
     url: wss://api.bitfinex.com/ws/2
@@ -59,6 +92,8 @@ unsupported:
     reason: Wallet/derivatives funding conversion and transfers are not runtime order lifecycle operations.
   - operation: amend_order
     reason: Shared amend request lacks side/cid_date fields needed for safe Bitfinex amount update mapping.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前仓库没有稳定 Bitfinex fee runtime；零费率/占位不能当 API fee。"
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -174,6 +209,54 @@ endpoints:
     support: native
     official_doc: https://docs.bitfinex.com/reference/rest-auth-cancel-orders-multiple
     notes: Runtime supports exchange order IDs and account-wide all=1 cancel; cid cancellation requires cid_date and remains unsupported in shared request.
+  - operation: batch_place_orders
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitfinex/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitfinex.batch_place_multi_op_not_mapped
+  - operation: amend_order
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: PATCH
+    path: /unsupported/bitfinex/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitfinex.amend_order_not_mapped_safely
+  - operation: place_order_list
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitfinex/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitfinex.order_list_unsupported
   - operation: cancel_all_orders
     product: mixed
     market_types: [spot, margin, perpetual]

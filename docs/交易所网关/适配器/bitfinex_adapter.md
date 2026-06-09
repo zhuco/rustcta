@@ -60,9 +60,13 @@ Private WebSocket auth signs `AUTH{nonce}` with HMAC-SHA384 and sends `event=aut
 
 ## WebSocket Policy
 
-Public sockets are spec/parser ready. The adapter emits subscribe/unsubscribe payloads and treats Bitfinex `hb` messages as heartbeat. Order-book resync uses REST snapshots after reconnect or sequence gaps.
+Public sockets are spec/parser ready. The adapter emits subscribe/unsubscribe payloads and treats Bitfinex `hb` messages as heartbeat. Order-book resync uses REST snapshots after reconnect, `SEQ_ALL` gaps/regressions, or `OB_CHECKSUM` mismatches.
 
-Official public book details still need structured mapping: `book` supports `prec=P0..P4`, `freq=F0` realtime or `F1` 2s, `len=1/25/100/250`, optional `OB_CHECKSUM`, optional `SEQ_ALL`, and optional bulk updates. This is a `public_ws_struct` task, not a missing official WS capability.
+Structured public book details are recorded in the mapping and covered by fixtures/tests:
+
+| Channel | Parameters | Cadence | Depth | Integrity | Rebuild |
+| --- | --- | --- | --- | --- | --- |
+| `book` | `prec=P0/P1/P2/P3/P4`, `freq=F0/F1`, `len=1/25/100/250` | `F0` realtime, `F1` 2s | 1/25/100/250 price levels | Optional `SEQ_ALL=65536`; optional `OB_CHECKSUM=131072` signed CRC32 over top 25 bids/asks; documented `BULK_UPDATES=536870912` boundary | First book array is the snapshot, later `[price,count,amount]` rows update/delete levels; rebuild from REST book after reconnect, sequence gap/regression, or checksum mismatch |
 
 Private sockets authenticate once per connection. Channel 0 account events can carry orders, trades, wallets and positions. The runtime policy is REST reconciliation after reconnect before trusting private stream state.
 
@@ -87,3 +91,7 @@ cargo fmt --check --package rustcta-exchange-gateway
 cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway bitfinex --lib --message-format short
 ```
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前仓库没有稳定 Bitfinex fee runtime；零费率/占位不能当 API fee。

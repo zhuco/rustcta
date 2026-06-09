@@ -4,6 +4,7 @@ use rustcta_gateway_app::GatewayAppConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    rustcta_observability::init_tracing("warn");
     let args = LiveRunnerArgs::from_env_args()?;
     let config = gateway_config_from_env();
     let loaded_adapters = config.adapters.clone();
@@ -33,12 +34,14 @@ fn gateway_env(key: &str) -> Option<String> {
             key,
             "GATEIO_API_KEY",
             "GATE_API_KEY",
+            "GATE__53636022__API_KEY",
             "GATE__16076371__API_KEY",
         ]),
         "RUSTCTA_GATEIO_API_SECRET" => first_env(&[
             key,
             "GATEIO_API_SECRET",
             "GATE_API_SECRET",
+            "GATE__53636022__API_SECRET",
             "GATE__16076371__API_SECRET",
         ]),
         _ => std::env::var(key)

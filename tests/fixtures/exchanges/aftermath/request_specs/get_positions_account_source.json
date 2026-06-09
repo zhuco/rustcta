@@ -1,0 +1,44 @@
+{
+  "exchange": "aftermath",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "boundary": "sdk_account_source_only",
+  "runtime_enabled": false,
+  "transport": "sdk",
+  "source": {
+    "chain": "sui",
+    "surface": "Aftermath Perpetuals SDK account/account objects",
+    "requires": [
+      "account_cap_id_or_account_id",
+      "wallet_or_account_owner_context",
+      "perpetual_market_id"
+    ],
+    "does_not_use": [
+      "gateway_api_key",
+      "hmac_secret",
+      "cex_private_rest"
+    ]
+  },
+  "position_fields": [
+    "market_id",
+    "position_size",
+    "entry_price",
+    "mark_price",
+    "available_collateral",
+    "total_equity",
+    "unrealized_pnl",
+    "liquidation_price"
+  ],
+  "reconciliation_required": [
+    "Sui checkpoint/epoch freshness",
+    "account-cap ownership validation",
+    "SDK account object to gateway position-side mapping",
+    "indexer/RPC readback consistency"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_account_id": false,
+    "live_call_allowed": false
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "order-fixture-1",
+  "symbol": "xht-usdt",
+  "side": "sell",
+  "size": 0.1,
+  "filled": 0,
+  "type": "limit",
+  "price": 1,
+  "status": "new",
+  "created_at": "2024-03-09T16:00:00.000Z",
+  "updated_at": "2024-03-09T16:00:01.000Z",
+  "meta": {
+    "client_order_id": "fixture-client-id"
+  }
+}

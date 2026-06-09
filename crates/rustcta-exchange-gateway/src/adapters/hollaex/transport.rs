@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::private::HollaexOfflineRequest;
+
 #[derive(Clone)]
 pub struct HollaexRest {
     exchange_id: ExchangeId,
@@ -43,7 +45,35 @@ impl HollaexRest {
     ) -> ExchangeApiResult<Value> {
         let response = self
             .http
-            .get(build_url(&self.rest_base_url, endpoint, params))
+            .get(build_url(&self.rest_base_url, endpoint, params.iter()))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_request(
+        &self,
+        request: &HollaexOfflineRequest,
+    ) -> ExchangeApiResult<Value> {
+        let mut builder = self.http.request(
+            request
+                .method
+                .parse()
+                .map_err(|error| ExchangeApiError::InvalidRequest {
+                    message: format!("invalid HollaEx private method: {error}"),
+                })?,
+            build_url(&self.rest_base_url, &request.path, request.query.iter()),
+        );
+        for (key, value) in &request.headers {
+            builder = builder.header(key, value);
+        }
+        if let Some(body) = &request.body {
+            builder = builder.json(body);
+        }
+        let response = builder
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {
@@ -101,10 +131,18 @@ fn classify_hollaex_error(message: &str, status: u16) -> ExchangeErrorClass {
     }
 }
 
-fn build_url(base: &str, endpoint: &str, params: &HashMap<String, String>) -> String {
+fn build_url<'a, I>(base: &str, endpoint: &str, params: I) -> String
+where
+    I: IntoIterator<Item = (&'a String, &'a String)>,
+{
+    let endpoint = if base.trim_end_matches('/').ends_with("/v2") {
+        endpoint.strip_prefix("/v2").unwrap_or(endpoint)
+    } else {
+        endpoint
+    };
     let mut url = format!("{}{}", base.trim_end_matches('/'), endpoint);
-    if !params.is_empty() {
-        let mut pairs = params.iter().collect::<Vec<_>>();
+    let mut pairs = params.into_iter().collect::<Vec<_>>();
+    if !pairs.is_empty() {
         pairs.sort_by(|left, right| left.0.cmp(right.0));
         url.push('?');
         url.push_str(

@@ -38,6 +38,7 @@ fn gateio_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
         api_key: Some("gate-key".to_string()),
         api_secret: Some("gate-secret".to_string()),
         enabled_private_rest: true,
+        enabled_public_streams: true,
         ..GateIoGatewayConfig::default()
     })
     .expect("adapter");
@@ -65,7 +66,7 @@ fn gateio_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.public_streams,
-        CapabilitySupport::RestFallback { .. }
+        CapabilitySupport::Native
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.private_streams,

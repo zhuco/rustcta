@@ -116,32 +116,8 @@ impl BitmartGatewayAdapter {
             self.ensure_exchange(&symbol.exchange)?;
             self.ensure_supported_market(symbol.market_type)?;
         }
-        let fees = request
-            .symbols
-            .into_iter()
-            .map(|symbol| rustcta_exchange_api::FeeRateSnapshot {
-                schema_version: EXCHANGE_API_SCHEMA_VERSION,
-                maker_rate: if symbol.market_type == MarketType::Spot {
-                    "0.0025"
-                } else {
-                    "0.0002"
-                }
-                .to_string(),
-                taker_rate: if symbol.market_type == MarketType::Spot {
-                    "0.0025"
-                } else {
-                    "0.0006"
-                }
-                .to_string(),
-                symbol,
-                source: Some("bitmart_default_until_private_fee_live_validated".to_string()),
-                updated_at: chrono::Utc::now(),
-            })
-            .collect();
-        Ok(FeesResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
-            fees,
+        Err(ExchangeApiError::Unsupported {
+            operation: "bitmart.fees_config_source_only",
         })
     }
 

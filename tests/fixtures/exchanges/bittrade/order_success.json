@@ -1,0 +1,20 @@
+{
+  "status": "ok",
+  "data": {
+    "id": 59378,
+    "symbol": "btcjpy",
+    "account-id": 100009,
+    "amount": "0.010000000000000000",
+    "price": "3000000.000000000000000000",
+    "created-at": 1717804800000,
+    "type": "buy-limit",
+    "field-amount": "0.004000000000000000",
+    "field-cash-amount": "12000.000000000000000000",
+    "field-fees": "12.000000000000000000",
+    "finished-at": 0,
+    "source": "api",
+    "state": "partial-filled",
+    "canceled-at": 0,
+    "client-order-id": "fixture-client-order-id"
+  }
+}

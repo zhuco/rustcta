@@ -30,18 +30,28 @@ mod toolchain;
 mod transport;
 
 pub use config::LighterGatewayConfig;
+use transport::LighterRest;
 
 #[derive(Clone)]
 pub struct LighterGatewayAdapter {
     exchange_id: ExchangeId,
     config: LighterGatewayConfig,
+    rest: LighterRest,
 }
 
 impl LighterGatewayAdapter {
     pub fn new(config: LighterGatewayConfig) -> ExchangeApiResult<Self> {
+        let exchange_id = ExchangeId::new("lighter").map_err(validation_error)?;
+        let rest = LighterRest::new(
+            exchange_id.clone(),
+            config.rest_base_url.clone(),
+            config.auth_token.clone(),
+            config.request_timeout_ms,
+        )?;
         Ok(Self {
-            exchange_id: ExchangeId::new("lighter").map_err(validation_error)?,
+            exchange_id,
             config,
+            rest,
         })
     }
 
@@ -96,8 +106,8 @@ impl ExchangeClient for LighterGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Perpetual];
         capabilities.supports_public_rest = false;
-        let _ = self.config.private_read_available();
-        capabilities.supports_private_rest = false;
+        let private_read = self.config.private_read_available();
+        capabilities.supports_private_rest = private_read;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
@@ -110,9 +120,9 @@ impl ExchangeClient for LighterGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read;
+        capabilities.supports_open_orders = private_read;
+        capabilities.supports_recent_fills = private_read;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -142,7 +152,7 @@ impl ExchangeClient for LighterGatewayAdapter {
         request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("lighter.positions_auth_token_unverified")
+        self.unsupported(private::POSITIONS_UNSUPPORTED)
     }
 
     async fn get_symbol_rules(
@@ -206,7 +216,7 @@ impl ExchangeClient for LighterGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("lighter.send_tx_modify_signing_unverified")
+        self.unsupported(private::AMEND_ORDER_UNSUPPORTED)
     }
 
     async fn place_order_list(
@@ -215,7 +225,7 @@ impl ExchangeClient for LighterGatewayAdapter {
     ) -> ExchangeApiResult<OrderListResponse> {
         self.ensure_exchange(&request.symbol().exchange)?;
         self.ensure_supported_market_type(request.symbol().market_type)?;
-        self.unsupported("lighter.order_list_unsupported")
+        self.unsupported(private::ORDER_LIST_UNSUPPORTED)
     }
 
     async fn batch_place_orders(
@@ -227,7 +237,7 @@ impl ExchangeClient for LighterGatewayAdapter {
             self.ensure_exchange(&order.symbol.exchange)?;
             self.ensure_supported_market_type(order.symbol.market_type)?;
         }
-        self.unsupported("lighter.send_tx_batch_signing_unverified")
+        self.unsupported(private::BATCH_PLACE_UNSUPPORTED)
     }
 
     async fn batch_cancel_orders(
@@ -235,7 +245,11 @@ impl ExchangeClient for LighterGatewayAdapter {
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("lighter.send_tx_batch_signing_unverified")
+        for cancel in &request.cancels {
+            self.ensure_exchange(&cancel.symbol.exchange)?;
+            self.ensure_supported_market_type(cancel.symbol.market_type)?;
+        }
+        self.unsupported(private::BATCH_CANCEL_UNSUPPORTED)
     }
 
     async fn cancel_all_orders(
@@ -243,32 +257,28 @@ impl ExchangeClient for LighterGatewayAdapter {
         request: CancelAllOrdersRequest,
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("lighter.cancel_all_orders_signing_unverified")
+        self.unsupported(private::CANCEL_ALL_UNSUPPORTED)
     }
 
     async fn query_order(
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("lighter.query_order_auth_token_unverified")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("lighter.open_orders_auth_token_unverified")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("lighter.trades_auth_token_unverified")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

@@ -14,5 +14,18 @@
   },
   "canonical_payload": "GET/v2/auth/accountzeros=false",
   "credential_scope": "read_only",
+  "response_sample": [
+    {
+      "currency": "BTC",
+      "available": "0.01000000",
+      "blocked": "0.00200000"
+    },
+    {
+      "currency": "USDT",
+      "available": "100.00000000",
+      "blocked": "0.00000000"
+    }
+  ],
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns latoken.balances_request_spec_only until signed request promotion, parser, and read-only reconciliation are promoted.",
   "expected_error_until_promoted": "latoken.balances_request_spec_only"
 }

@@ -1,0 +1,18 @@
+{
+  "exchange": "cex",
+  "operation": "get_recent_fills",
+  "method": "POST",
+  "path": "/archived_orders/BTC/USD",
+  "transport": "rest",
+  "auth": "hmac",
+  "credential_scope": "read_only",
+  "body": {
+    "nonce": "1700000000000",
+    "key": "fixture-key",
+    "signature": "33BF9004BAEBB373F6879ADFD86757EF6B36AF67CF246C4D00C0ABF8E6B7EF17",
+    "limit": 10,
+    "dateFrom": 1700000000,
+    "dateTo": 1700003600
+  },
+  "runtime_guard": "Enabled only when CEX_PRIVATE_REST_ENABLED plus CEX API key, secret, and user id are configured."
+}

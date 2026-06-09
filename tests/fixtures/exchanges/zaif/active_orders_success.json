@@ -1,0 +1,13 @@
+{
+  "success": 1,
+  "return": {
+    "123456789": {
+      "currency_pair": "btc_jpy",
+      "action": "bid",
+      "amount": "0.01",
+      "price": "6500000",
+      "timestamp": 1710000003,
+      "comment": ""
+    }
+  }
+}

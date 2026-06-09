@@ -1,0 +1,33 @@
+{
+  "exchange": "bybiteu",
+  "profile_of": "bybit",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v5/position/list",
+  "auth": "signed",
+  "query": {
+    "category": { "match": "exact", "value": "linear" },
+    "symbol": { "match": "absent" },
+    "settleCoin": { "match": "exact", "value": "USDT" },
+    "limit": { "match": "exact", "value": "50" },
+    "cursor": { "match": "absent" }
+  },
+  "headers": {
+    "X-BAPI-API-KEY": { "match": "non_empty" },
+    "X-BAPI-SIGN": { "match": "non_empty" },
+    "X-BAPI-SIGN-TYPE": { "match": "exact", "value": "2" },
+    "X-BAPI-TIMESTAMP": { "match": "non_empty" },
+    "X-BAPI-RECV-WINDOW": { "match": "exact", "value": "5000" }
+  },
+  "pagination": {
+    "mode": "cursor",
+    "request_param": "cursor",
+    "response_field": "result.nextPageCursor"
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["test-secret"],
+  "signing_vector": "tests/fixtures/exchanges/bybiteu/signing_vectors/rest_hmac_shape.json",
+  "runtime_boundary": "Bybit EU position readback reuses the guarded Bybit V5 signed REST runtime only when explicit BYBITEU/BYBIT_EU credentials and the private REST enable flag are configured; the first page is request-spec matched and cursor follow-up is covered by mock REST tests."
+}

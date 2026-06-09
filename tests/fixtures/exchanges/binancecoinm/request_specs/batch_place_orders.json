@@ -1,0 +1,27 @@
+{
+  "exchange": "binancecoinm",
+  "operation": "batch_place_orders",
+  "product": "futures",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/dapi/v1/batchOrders",
+  "auth": "signed",
+  "query": {
+    "batchOrders": {
+      "match": "exact",
+      "value": "%5B%7B%22symbol%22%3A%22BTCUSD_PERP%22%2C%22side%22%3A%22BUY%22%2C%22positionSide%22%3A%22LONG%22%2C%22type%22%3A%22LIMIT%22%2C%22timeInForce%22%3A%22GTC%22%2C%22quantity%22%3A%222%22%2C%22price%22%3A%2225000.0%22%2C%22newClientOrderId%22%3A%22cli-batch-1%22%7D%5D"
+    },
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "binancecoinm/batch_place_orders"
+}

@@ -19,6 +19,7 @@ use crate::GatewayExchangeStatus;
 mod config;
 mod parser;
 mod private;
+mod private_parser;
 #[cfg(test)]
 mod private_tests;
 mod public;
@@ -112,9 +113,10 @@ impl ExchangeClient for OneTradingGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
+        let private_read_enabled = self.config.private_rest_enabled();
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities =
@@ -126,9 +128,9 @@ impl ExchangeClient for OneTradingGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -267,7 +269,7 @@ impl ExchangeClient for OneTradingGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("onetrading.query_order_offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -278,7 +280,7 @@ impl ExchangeClient for OneTradingGatewayAdapter {
         if let Some(market_type) = request.market_type {
             self.ensure_supported_market_type(market_type)?;
         }
-        self.unsupported("onetrading.open_orders_offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -286,7 +288,7 @@ impl ExchangeClient for OneTradingGatewayAdapter {
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("onetrading.recent_fills_offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

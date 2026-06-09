@@ -1,0 +1,32 @@
+{
+  "exchange": "bitopro",
+  "operation": "bitopro.get_fees",
+  "boundary_type": "config_fee_table_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "official_vip_fee_schedule",
+    "source_url": "https://www.bitopro.com/ns/fees",
+    "last_reviewed": "2026-06-09",
+    "products": ["spot"],
+    "effective_fee_kind": "maker_taker_by_vip_level",
+    "tier_basis": ["30d_trade_volume", "bito_holding"],
+    "account_effective_fee_requires": [
+      "vip_level_config",
+      "pair_scope",
+      "fee_table_version"
+    ]
+  },
+  "default_or_override_strategy": {
+    "default_allowed_for_backtest_only": true,
+    "production_requires_explicit_vip_or_account_override": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "bitopro.fees_config_source_only",
+  "remaining_work": [
+    "vip_config_loader",
+    "maker_taker_percent_parser",
+    "account_effective_fee_source_or_override",
+    "shared_get_fees_response_mapping"
+  ]
+}

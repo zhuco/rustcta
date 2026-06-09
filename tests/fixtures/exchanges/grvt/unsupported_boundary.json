@@ -5,9 +5,69 @@
     "grvt.symbol_rules_session_spec_only",
     "grvt.order_book_session_spec_only",
     "grvt.place_order_session_spec_only",
-    "grvt.bulk_orders_session_spec_only",
+    "grvt.amend_requires_session_renewal_eip712_signer_and_reconciliation",
+    "grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard",
+    "grvt.order_list_unsupported",
     "grvt.private_stream_session_spec_only"
   ],
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "project_unimplemented",
+      "runtime_error": "grvt.amend_requires_session_renewal_eip712_signer_and_reconciliation",
+      "official_path": "POST /v1/amend_order",
+      "request_spec_fixture": "tests/fixtures/exchanges/grvt/request_specs/amend_order_session_spec_only.json",
+      "parser_fixture": "tests/fixtures/exchanges/grvt/parser/amend_order_ack.json",
+      "source_boundary": "session-cookie trading API plus EIP-712/external signer; no live write runtime is enabled",
+      "remaining_runtime_work": [
+        "session-cookie auth renewal smoke",
+        "EIP-712/external signer runtime",
+        "amend response parser promotion beyond fixture-only",
+        "post-write query/open-orders reconciliation",
+        "live dry-run guard"
+      ]
+    },
+    "batch_place_orders": {
+      "status": "project_unimplemented",
+      "runtime_error": "grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard",
+      "official_path": "POST /v2/bulk_orders",
+      "request_spec_fixture": "tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json",
+      "parser_fixture": "tests/fixtures/exchanges/grvt/parser/bulk_orders_ack.json",
+      "source_boundary": "native bulk order API supports create entries; shared runtime remains disabled without session/signing/reconciliation gates",
+      "remaining_runtime_work": [
+        "session-cookie auth renewal smoke",
+        "EIP-712/external signer runtime",
+        "partial-failure parser promotion beyond fixture-only",
+        "post-write query/open-orders reconciliation",
+        "live dry-run guard"
+      ]
+    },
+    "batch_cancel_orders": {
+      "status": "project_unimplemented",
+      "runtime_error": "grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard",
+      "official_path": "POST /v2/bulk_orders",
+      "request_spec_fixture": "tests/fixtures/exchanges/grvt/request_specs/bulk_orders_session_spec_only.json",
+      "parser_fixture": "tests/fixtures/exchanges/grvt/parser/bulk_cancel_orders_ack.json",
+      "source_boundary": "native bulk order API supports cancel entries; shared runtime remains disabled without session/signing/reconciliation gates",
+      "remaining_runtime_work": [
+        "session-cookie auth renewal smoke",
+        "EIP-712/external signer runtime",
+        "partial-failure parser promotion beyond fixture-only",
+        "post-write query/open-orders reconciliation",
+        "live dry-run guard"
+      ]
+    },
+    "place_order_list": {
+      "status": "unsupported",
+      "runtime_error": "grvt.order_list_unsupported",
+      "source_boundary": "no audited GRVT OCO/OTO/order-list endpoint can be mapped losslessly into the shared order-list trait"
+    },
+    "oco": {
+      "status": "unsupported",
+      "runtime_error": "grvt.order_list_unsupported",
+      "source_boundary": "OCO is covered by the shared order-list unsupported boundary"
+    }
+  },
   "scan_only": false,
-  "trade_enabled": false
+  "trade_enabled": false,
+  "private_write_enabled": false
 }

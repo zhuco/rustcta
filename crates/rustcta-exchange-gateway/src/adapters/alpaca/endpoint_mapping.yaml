@@ -72,6 +72,18 @@ websocket:
     url: wss://stream.data.alpaca.markets/v1beta3/crypto/us
     channels: [orderbooks]
     auth: api_key
+    order_book:
+      channel: orderbooks
+      subscription: { action: subscribe, orderbooks: ["<symbol>"] }
+      auth_required: true
+      interval: "no fixed ms"
+      depth: unspecified
+      sequence: none_documented
+      checksum: none_documented
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
+        rest_path: /v1beta3/crypto/{loc}/latest/orderbooks
     heartbeat:
       direction: none_documented
       disconnect_policy: reconnect_and_resync
@@ -80,12 +92,16 @@ websocket:
     support: unsupported
     reason: Alpaca Broker trade events are exposed as SSE at /v2/events/trades, not WebSocket.
 unsupported:
+  - operation: contract_product
+    reason: "This adapter maps Alpaca crypto Spot/Broker APIs only; no standard crypto futures/perpetual/options product line is exposed in the current API profile."
   - operation: margin_short_leverage
     reason: Alpaca crypto positions are spot-only and non-marginable.
   - operation: private_websocket_orders
     reason: Broker order updates use SSE; this adapter does not expose a private WebSocket.
   - operation: historical_order_book
     reason: Alpaca crypto data REST exposes latest orderbooks, not historical depth snapshots.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：Broker crypto fee schedule 不是共享模型需要的 per-symbol trading-fee endpoint。"
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -188,6 +204,62 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/alpaca/request_specs/cancel_all_orders.json
     notes: Account-wide cancel-all only; symbol-scoped cancel-all is unsupported.
+  - operation: batch_place_orders
+    transport: rest
+    product: spot
+    method: POST
+    path: /unsupported/alpaca/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: Alpaca Broker order API is single-order only in this adapter.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /composed/alpaca/batch_cancel_orders
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential cancel; account-wide cancel-all remains native.
+  - operation: amend_order
+    transport: rest
+    product: spot
+    method: PATCH
+    path: /unsupported/alpaca/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: Alpaca Broker crypto order API is single-order create/cancel for this adapter.
+  - operation: place_order_list
+    transport: rest
+    product: spot
+    method: POST
+    path: /unsupported/alpaca/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: Alpaca Broker crypto order API has no shared OCO/OTO/order-list mapping.
   - operation: query_order
     transport: rest
     product: spot
@@ -225,15 +297,3 @@ endpoints:
     request_spec_required: false
     support: unsupported
     reason: Account activity fills exist, but this adapter keeps recent fills unsupported until pagination and symbol filters are mapped losslessly.
-  - operation: get_fees
-    transport: rest
-    product: spot
-    method: UNSUPPORTED
-    path: /unsupported/alpaca/fees
-    auth: unsupported
-    credential_scopes: [read_only]
-    rate_limit_bucket: unsupported
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Broker crypto fee schedule is not exposed as a per-symbol trading-fee endpoint matching the shared gateway model.

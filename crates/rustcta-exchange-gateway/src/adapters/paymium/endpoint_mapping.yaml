@@ -1,156 +1,338 @@
 schema_version: 1
 exchange: paymium
 adapter: rustcta_exchange_gateway::adapters::paymium
-status_date: "2026-06-08"
+status_date: '2026-06-09'
 metadata:
-  status: draft
+  status: validated
   source: https://paymium.github.io/api-documentation/
-  last_reviewed: "2026-06-08"
-  notes: "A-33 Paymium BTC/EUR spot public REST first adapter. Private REST, trading mutations and socket.io runtime stay disabled pending live-validated request-spec promotion."
-market_types: [spot]
-products: [spot]
+  last_reviewed: '2026-06-09'
+  notes: A-33 Paymium BTC/EUR spot adapter. Public REST and bounded public socket.io v1.3 order book update parsing are implemented;
+    public socket runtime is env-gated. Private REST read-only core order readbacks are credential-gated; trading mutations,
+    private balances, fees, and user socket stay disabled pending live-validated promotion.
+market_types:
+- spot
+products:
+- spot
 rest:
   base_url: https://paymium.com/api/v1
 auth:
-  private_rest: "Api-Key/Api-Nonce/Api-Signature; HMAC-SHA256 hex over nonce + full_url + body"
+  private_rest: Api-Key/Api-Nonce/Api-Signature; HMAC-SHA256 hex over nonce + full_url + body
 rate_limits:
   public_rest:
     scope: ip
     interval: 1d
     limit: 86400
-    notes: "official docs describe one request per second on average"
+    notes: official docs describe one request per second on average
   private_rest:
     scope: account
     interval: 1d
     limit: 86400
+  public_ws:
+    scope: connection
+    interval: unknown
+    limit: unknown
+    notes: official docs do not publish a fixed socket.io public stream message cadence or request quota
 websocket:
   public_url: https://paymium.com/public
   user_url: https://paymium.com/user
   path: /ws/socket.io
   protocol: socket.io_v1.3
-  status: payload_descriptor_only
+  status: public_order_book_runtime_env_gated
+  public:
+    support: native
+    runtime_gate: PAYMIUM_PUBLIC_STREAMS_ENABLED
+    connect_packet: '1::'
+    event: stream
+    subscription: connect_only_public_stream
+    order_book:
+      channel: stream
+      channels:
+      - orderbook:stream
+      - orderbook:bids_asks
+      - stream
+      - bids_asks
+      stream: bids_asks
+      update_fields:
+      - bids
+      - asks
+      interval_ms: null
+      depth: null
+      depth_boundary: 'depth: unspecified; no fixed depth is documented for socket.io bids/asks updates'
+      update_semantics: changed price levels; amount/quantity 0 deletes the price level when present
+      sequence:
+        field: null
+        contiguous: false
+        gap_detection: unsupported_no_official_sequence
+        risk: Paymium public stream docs do not publish sequence/update id fields, so missed messages cannot be proven from
+          the feed.
+      checksum:
+        mode: unsupported
+        risk: No official checksum is documented for public bids/asks stream updates.
+      rebuild:
+        rest_snapshot: GET /api/v1/data/eur/depth
+        strategy: initialize the local book from REST before consuming stream updates; after disconnect, stale socket, parse
+          error, or suspected message loss, reconnect and fully rebuild from REST because no sequence/checksum is documented.
+  private:
+    support: rest_fallback
+    reason: user socket requires a private channel id from /user; order readbacks reconcile through private REST
 reconciliation:
   private_stream_fallback: rest
-  status: "not enabled until private REST and user channel id handling are promoted"
+  status: not enabled until private REST and user channel id handling are promoted
 unsupported:
-  - non_btc_eur_pairs
-  - private_rest_runtime
-  - public_socketio_runtime
-  - private_socketio_runtime
-  - positions
-  - margin
-  - futures
-  - perpetuals
-  - order_list
-  - amend_order
-  - cancel_all_orders
-  - generic_batch_place
-  - generic_batch_cancel
-  - live_trading
-  - merchant_api
-  - payments
-  - withdrawals
+- operation: contract_product
+  reason: Paymium is spot only under the current official API scope; no standard futures/perpetual/options products are exposed.
+- non_btc_eur_pairs
+- private_rest_writes
+- public_socketio_autostart
+- private_socketio_runtime
+- positions
+- margin
+- futures
+- perpetuals
+- order_list
+- amend_order
+- cancel_all_orders
+- generic_batch_place
+- generic_batch_cancel
+- live_trading
+- merchant_api
+- payments
+- withdrawals
+- operation: get_fees
+  reason: 交易所不支持当前费率接口 runtime：当前 public adapter 未见 fee 文档。
+- operation: get_balances
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/paymium/request_specs/get_balances.json
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending
+    Paymium private REST auth, BTC/EUR balance parser, and read-only scope guard.
+streams:
+- operation: subscribe_public_stream
+  scope: public
+  product: spot
+  market_types:
+  - spot
+  transport: websocket
+  protocol: socket.io_v1.3
+  path: /ws/socket.io
+  support: native
+  runtime_gate: PAYMIUM_PUBLIC_STREAMS_ENABLED
+  event: stream
+  stream: bids_asks
+  channel: stream
+  subscription_method: connect_only
+  request_spec_required: false
+  interval_ms: null
+  depth: null
+  depth_boundary: 'depth: unspecified; no fixed depth is documented for socket.io bids/asks updates'
+  sequence_fields: []
+  checksum: none
+  resync: get_order_book
+  fixture: tests/fixtures/exchanges/paymium/ws/public_book_update.json
 endpoints:
-  - operation: get_symbol_rules
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /data/eur/ticker
-    auth: none
-    rate_limit_bucket: public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1ticker/get
-    request_spec:
-      fixture: tests/fixtures/exchanges/paymium/request_specs/ticker_btc_eur.json
-  - operation: get_order_book
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /data/eur/depth
-    auth: none
-    rate_limit_bucket: public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1depth/get
-    request_spec:
-      fixture: tests/fixtures/exchanges/paymium/request_specs/orderbook_btc_eur.json
-  - operation: public_trades
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /data/eur/trades
-    auth: none
-    rate_limit_bucket: public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: spec_only
-    official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1trades/get
-  - operation: get_open_orders
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /user/orders
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: "Private REST runtime is deferred; request spec only."
-    request_spec:
-      fixture: tests/fixtures/exchanges/paymium/request_specs/get_open_orders.json
-  - operation: place_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /user/orders
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: non_atomic
-    testnet: false
-    support: unsupported
-    reason: "Trading mutation is request-spec only until live validation and risk controls are promoted."
-    request_spec:
-      fixture: tests/fixtures/exchanges/paymium/request_specs/place_order_limit.json
-  - operation: cancel_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: DELETE
-    path: /user/orders/{uuid}
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: non_atomic
-    testnet: false
-    support: unsupported
-    reason: "Trading mutation is request-spec only until live validation and risk controls are promoted."
-    request_spec:
-      fixture: tests/fixtures/exchanges/paymium/request_specs/cancel_order.json
+- operation: get_symbol_rules
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /data/eur/ticker
+  auth: none
+  rate_limit_bucket: public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1ticker/get
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/ticker_btc_eur.json
+- operation: get_order_book
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /data/eur/depth
+  auth: none
+  rate_limit_bucket: public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1depth/get
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/orderbook_btc_eur.json
+- operation: public_trades
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /data/eur/trades
+  auth: none
+  rate_limit_bucket: public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1trades/get
+- operation: get_balances
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /user
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official Paymium user info endpoint contains BTC/EUR balance fields, but shared get_balances runtime is disabled
+    pending API-token/OAuth auth promotion, BTC/EUR balance parser, and read-only scope guard.
+  official_doc: https://paymium.github.io/api-documentation/#tag/User/paths/~1user/get
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/get_balances.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/paymium/request_specs/get_balances.json
+    source: response_sample
+  notes: 'P3 balance boundary: private user-info request spec and sanitized response sample are pinned offline; runtime still
+    returns paymium.balances_private_rest_deferred.'
+- operation: get_open_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /user/orders
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Credential-gated read-only runtime uses signed GET /user/orders?active=true; write operations remain offline.
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/paymium/open_orders_success.json
+    source: sanitized_private_rest_sample
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/get_open_orders.json
+  notes: 'P2 core readback runtime gate: PAYMIUM_PRIVATE_REST_ENABLED. Fails closed unless PAYMIUM_API_KEY/PAYMIUM_API_SECRET
+    are configured. Trading mutations still return guarded Unsupported.'
+- operation: place_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /user/orders
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: Paymium BTC/EUR private core trading is fixture-backed offline; runtime stays disabled pending API-token/OAuth scope
+    guard, parser, reconciliation, and live dry-run controls.
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/place_order_limit.json
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: DELETE
+  path: /user/orders/{uuid}
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: Paymium BTC/EUR private core trading is fixture-backed offline; runtime stays disabled pending API-token/OAuth scope
+    guard, parser, reconciliation, and live dry-run controls.
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/cancel_order.json
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: query_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /user/orders/{uuid}
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Credential-gated read-only runtime uses signed GET /user/orders/{uuid}; client-order-id lookup is not promoted.
+  official_doc: https://github.com/Paymium/api-documentation
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/paymium/order_success.json
+    source: sanitized_private_rest_sample
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/query_order.json
+  notes: 'P2 core readback runtime gate: PAYMIUM_PRIVATE_REST_ENABLED. Fails closed unless PAYMIUM_API_KEY/PAYMIUM_API_SECRET
+    are configured. Trading mutations still return guarded Unsupported.'
+- operation: get_recent_fills
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /user/orders
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Credential-gated read-only runtime derives fills from signed GET /user/orders order trade rows; requires context
+    tenant/account ids for normalized Fill ownership.
+  official_doc: https://github.com/Paymium/api-documentation
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/paymium/recent_fills_success.json
+    source: sanitized_private_rest_sample
+  request_spec:
+    fixture: tests/fixtures/exchanges/paymium/request_specs/get_recent_fills.json
+  notes: 'P2 core readback runtime gate: PAYMIUM_PRIVATE_REST_ENABLED. Fails closed unless PAYMIUM_API_KEY/PAYMIUM_API_SECRET
+    are configured. Trading mutations still return guarded Unsupported.'

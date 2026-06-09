@@ -1,12 +1,12 @@
 # OKX Gateway Adapter
 
-Status: `rustcta-exchange-gateway` Spot REST adapter with task-9 toolchain metadata.
+Status: `rustcta-exchange-gateway` Spot + Swap + Futures + Options REST adapter with public order book WS subscription metadata.
 
 ## Scope
 
-- Public REST: Spot instruments and order book snapshots.
-- Private REST: balances, fees, place order, quote market order, cancel order, cancel all through pending-order readback plus batch cancel, amend order, query order, open orders, and recent fills.
-- Public WebSocket: not wired in this gateway adapter; REST order book snapshots are the current resync source.
+- Public REST: Spot, Swap, Futures, and Options instruments and order book snapshots.
+- Private REST: balances, derivative positions, fees, place order, quote market order for Spot, cancel order, cancel all through pending-order readback plus batch cancel, amend order, query order, open orders, and recent fills.
+- Public WebSocket: Spot/Swap/Futures/Options `books5`, `books`, and `bbo-tbt` subscription payloads are wired through `subscribe_public_stream`; REST order book snapshots are the resync source.
 - Private WebSocket: not wired in this gateway adapter; REST reconciliation is the fallback.
 
 ## Toolchain Artifacts
@@ -15,16 +15,18 @@ Status: `rustcta-exchange-gateway` Spot REST adapter with task-9 toolchain metad
 - Request specs: `tests/fixtures/exchanges/okx/request_specs/`.
 - Signing vectors: `tests/fixtures/exchanges/okx/signing_vectors/`.
 - Parser fixtures: `tests/fixtures/exchanges/okx/parser/`.
+- WS fixtures: `tests/fixtures/exchanges/okx/ws/`.
 - `capabilities_v2` declaration: `crates/rustcta-exchange-gateway/src/adapters/okx/toolchain.rs`.
 
 ## Capabilities
 
 - `public_rest`: native.
 - `private_rest`: native when key, secret, and passphrase are present and private REST is enabled.
-- `public_streams`: unsupported in runtime.
+- `public_streams`: REST-fallback runtime metadata for Spot/Swap/Futures/Options `books5`, `books`, and `bbo-tbt`; resync uses `GET /api/v5/market/books`.
 - `private_streams`: unsupported in runtime; use REST reconciliation.
-- `batch_place_orders`: unsupported.
-- `batch_cancel_orders`: unsupported as a public trait operation; native cancel-batch is used internally by `cancel_all_orders`.
+- `get_positions`: native REST `GET /api/v5/account/positions` for Swap/Futures; Spot positions remain unsupported.
+- `batch_place_orders`: native REST `POST /api/v5/trade/batch-orders`, max 20, same market type required, partial exchange failure semantics.
+- `batch_cancel_orders`: native REST `POST /api/v5/trade/cancel-batch-orders`, max 20, same market type required, partial exchange failure semantics.
 - `cancel_all_orders`: composed from `GET /api/v5/trade/orders-pending` and `POST /api/v5/trade/cancel-batch-orders`.
 
 ## Signing
@@ -37,8 +39,8 @@ The endpoint mapping declares public IP and private UID buckets. Recent fills su
 
 ## Reconciliation And Safety
 
-Private stream fallback uses REST `get_balances`, `query_order`, `get_open_orders`, and `get_recent_fills`. Live dry-run eligibility requires upstream kill switch, disabled-symbol filtering, max-notional limits, and successful read-only reconciliation; this adapter does not require withdraw or transfer credentials.
+Private stream fallback uses REST `get_balances`, `get_positions`, `query_order`, `get_open_orders`, and `get_recent_fills`. Batch place/cancel returns per-item reports for partial success/failure and marks missing item responses for readback reconciliation. Live dry-run eligibility requires upstream kill switch, disabled-symbol filtering, max-notional limits, and successful read-only reconciliation; this adapter does not require withdraw or transfer credentials.
 
 ## WebSocket Policy
 
-OKX public WS heartbeat and private login semantics are recorded in endpoint mapping for future runtime work, but current `subscribe_public_stream` and `subscribe_private_stream` return `Unsupported`. Order book resync uses REST snapshots.
+OKX public WS now builds Spot, Swap, Futures, and Options subscription sessions for `books5`, `books`, and `bbo-tbt`, with `seqId` parsed into order book sequence metadata. VIP/login-only TBT depth channels such as `books-l2-tbt` and `books50-l2-tbt` are documented but not enabled. Private WS remains unsupported.

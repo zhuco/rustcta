@@ -1,0 +1,22 @@
+{
+  "response_type": "DATA",
+  "channel": "ORDERBOOK",
+  "data": {
+    "quote_currency": "KRW",
+    "target_currency": "BTC",
+    "timestamp": 1693560156038,
+    "id": "1693560156038001",
+    "asks": [
+      {
+        "price": "35010000",
+        "qty": "0.1000"
+      }
+    ],
+    "bids": [
+      {
+        "price": "35000000",
+        "qty": "0.2000"
+      }
+    ]
+  }
+}

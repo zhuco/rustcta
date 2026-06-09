@@ -3,6 +3,27 @@
   "fiat_markets_documented": ["TRY"],
   "trade_enabled": false,
   "private_write_mode": "offline_request_spec_only",
+  "advanced_orders": {
+    "runtime_enabled": false,
+    "native_batch": false,
+    "order_list": false,
+    "cancel_all": false,
+    "unsupported_operations": [
+      "amend_order",
+      "place_order_list",
+      "batch_place_orders",
+      "batch_cancel_orders",
+      "cancel_all_orders"
+    ],
+    "runtime_unsupported_operations": {
+      "amend_order": "btcturk.amend_order_unsupported",
+      "place_order_list": "btcturk.order_list_unsupported",
+      "batch_place_orders": "btcturk.batch_place_orders_unsupported",
+      "batch_cancel_orders": "btcturk.batch_cancel_orders_unsupported",
+      "cancel_all_orders": "btcturk.cancel_all_orders_unsupported"
+    },
+    "reason": "BtcTurk private writes remain offline request-spec-only; no verified shared amend, OCO/OTO, native batch place/cancel, or safe cancel-all runtime is enabled."
+  },
   "excluded": [
     "fiat_withdrawals",
     "fiat_deposits",

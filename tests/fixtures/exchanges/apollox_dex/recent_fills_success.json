@@ -1,0 +1,32 @@
+[
+  {
+    "id": 12345,
+    "orderId": 987654321,
+    "symbol": "BTCUSDT",
+    "price": "65000.5",
+    "qty": "0.010",
+    "quoteQty": "650.005",
+    "commission": "0.260002",
+    "commissionAsset": "USDT",
+    "time": 1700000006000,
+    "isBuyer": true,
+    "isMaker": false,
+    "realizedPnl": "0",
+    "positionSide": "BOTH"
+  },
+  {
+    "id": 12346,
+    "orderId": 987654321,
+    "symbol": "BTCUSDT",
+    "price": "65010.0",
+    "qty": "0.005",
+    "quoteQty": "325.05",
+    "commission": "0.13002",
+    "commissionAsset": "USDT",
+    "time": 1700000007000,
+    "isBuyer": true,
+    "isMaker": true,
+    "realizedPnl": "0",
+    "positionSide": "BOTH"
+  }
+]

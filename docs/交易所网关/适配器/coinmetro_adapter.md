@@ -13,7 +13,9 @@ Coinmetro is implemented as a conservative Spot-only gateway adapter. REST base 
 
 ## Public WebSocket Order Book
 
-Official WebSocket subscriptions use the `pairs` query string, for example `wss://api.coinmetro.com/ws?pairs=BTCEUR`. Subscribed pairs receive `bookUpdate` deltas with `seqNumber` and CRC32 `checksum`; checksum generation has exchange-specific rounding rules. `tick` messages include current ask and bid and are useful as BBO. The reviewed docs do not publish a fixed millisecond interval or fixed depth parameter, so REST book snapshot plus checksum/sequence validation remains the rebuild path.
+Official WebSocket subscriptions use the `pairs` query string, for example `wss://api.coinmetro.com/ws?pairs=BTCEUR`. Subscribed pairs receive `bookUpdate` changes with `seqNumber` and CRC32 `checksum`. The checksum source is the lexicographically sorted non-zero `ask` price/quantity concatenation followed by the same sorted `bid` concatenation, without separators. `tick` messages include current `ask` and `bid` and are treated as BBO.
+
+The reviewed docs do not publish a fixed millisecond interval or a fixed depth parameter. Runtime must initialize the local book with `GET /exchange/book/{pair}`, apply `bookUpdate` messages in monotonically increasing `seqNumber` order, compare CRC32 against the maintained book after each update, and rebuild from REST after reconnect, stale stream, sequence duplicate/regression, parse error, or checksum mismatch.
 
 ## Capability Matrix
 
@@ -51,8 +53,22 @@ Coinmetro documents a general 500 calls per 10 seconds limit and stricter endpoi
 ## Product-Line And Unsupported Boundary
 
 官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Coinmetro 官方资料确认 Margin 平台，API docs repo 也记录 `/swap` 相关限制；这些不能简单写成交易所不支持，应按 `项目未实现 Margin/Swap/TRAM-like product boundary` 或“当前 adapter 不接入”处理。
+Mapping 中 `margin_product` 已写 `status: project_unimplemented`、
+`official_gap: margin_swap_tram_like_product_boundary`、
+`boundary: project_unimplemented_product_line`；标准 futures/perpetual/options
+仍由 `contract_product=unsupported` 表示。
+状态建议：Margin/Swap/TRAM-like surfaces 保持
+`margin_product=project_unimplemented`，直到 product taxonomy、account
+eligibility、collateral/position/risk/fee parsers、private order lifecycle 和
+REST/WS reconciliation 完成；不要把它并入标准合约 unsupported。
 
-Standard futures/perpetual/options are `交易所不支持合约` under current official sources. Margin orders, margin collateral, swaps, hedge/close endpoints, TRAM orders, deposits, withdrawals, fiat payment rails, transfers, positions, reduce-only, post-only, client order ids, cancel-all, and batch operations are not connected. The executable boundary fixture is `tests/fixtures/exchanges/coinmetro/unsupported_boundary.json`.
+Standard futures/perpetual/options are `交易所不支持合约` under current official sources. Margin orders, margin collateral, swaps, hedge/close endpoints, TRAM orders, deposits, withdrawals, fiat payment rails, transfers, positions, reduce-only, post-only, client order ids, cancel-all, shared amend, OCO/OTO/order-list, native batch place, and native batch cancel are not connected. The executable boundary fixture is `tests/fixtures/exchanges/coinmetro/unsupported_boundary.json`.
+
+Advanced order unsupported boundary:
+- `amend_order` returns `coinmetro.modify_order_unmapped_requires_native_qty_fields` because shared amend does not safely capture Coinmetro's side/currency quantity model for replacement.
+- `place_order_list`, `batch_place_orders`, `batch_cancel_orders`, and `cancel_all_orders` return adapter-specific `Unsupported.operation` strings and do not call private REST.
+- `endpoint_mapping.yaml` records each unsupported advanced operation with `auth: unsupported` and `native_batch: false`; `tests/fixtures/exchanges/coinmetro/unsupported_boundary.json` records the executable fixture evidence.
+- `tests.rs` covers capability flags, runtime unsupported errors, mapping support, and the unsupported fixture.
 
 ## Official References
 
@@ -74,3 +90,7 @@ cargo test -p rustcta-exchange-gateway coinmetro --lib --message-format short
 ```
 
 `cargo build` is intentionally not part of Task A-17 validation.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前 Coinmetro profile 未映射稳定 fee endpoint。

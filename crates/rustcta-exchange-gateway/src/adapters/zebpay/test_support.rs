@@ -1,5 +1,118 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use rustcta_exchange_api::{RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION};
 use rustcta_types::{AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, TenantId};
+use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+#[derive(Debug, Clone)]
+pub(super) struct SeenRequest {
+    pub(super) method: String,
+    pub(super) path: String,
+    pub(super) query: HashMap<String, String>,
+    pub(super) headers: HashMap<String, String>,
+    pub(super) body: String,
+}
+
+pub(super) async fn spawn_rest_server(
+    responses: Vec<Value>,
+) -> (String, Arc<Mutex<Vec<SeenRequest>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let seen_requests = Arc::clone(&seen);
+    let responses = Arc::new(Mutex::new(responses.into_iter()));
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let mut buffer = vec![0_u8; 8192];
+            let mut bytes_read = stream.read(&mut buffer).await.unwrap();
+            let mut request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            if let Some(content_length) = content_length(&request_text) {
+                while body_len(&request_text) < content_length {
+                    let read = stream.read(&mut buffer[bytes_read..]).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    bytes_read += read;
+                    request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                }
+            }
+            seen_requests
+                .lock()
+                .unwrap()
+                .push(parse_seen_request(&request_text));
+            let body = responses
+                .lock()
+                .unwrap()
+                .next()
+                .unwrap_or_else(|| json!({ "success": true, "data": [] }));
+            let body_text = body.to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body_text.len(),
+                body_text
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    (format!("http://{address}"), seen)
+}
+
+fn content_length(request_text: &str) -> Option<usize> {
+    request_text
+        .lines()
+        .find_map(|line| line.split_once(':'))
+        .filter(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse().ok())
+}
+
+fn body_len(request_text: &str) -> usize {
+    request_text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.len())
+        .unwrap_or(0)
+}
+
+fn parse_seen_request(request_text: &str) -> SeenRequest {
+    let request_line = request_text.lines().next().unwrap_or_default();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or_default().to_string();
+    let target = request_parts.next().unwrap_or_default();
+    let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+    let (head, body) = request_text
+        .split_once("\r\n\r\n")
+        .unwrap_or((request_text, ""));
+    let headers = head
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    let query = query_text
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    SeenRequest {
+        method,
+        path: path.to_string(),
+        query,
+        headers,
+        body: body.to_string(),
+    }
+}
 
 pub(super) fn exchange_id() -> ExchangeId {
     ExchangeId::new("zebpay").expect("zebpay exchange")

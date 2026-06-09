@@ -1,0 +1,27 @@
+{
+  "exchange": "orangex",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/public/get_instruments",
+  "auth": "none",
+  "jsonrpc": "2.0",
+  "body": {
+    "method": {
+      "match": "exact",
+      "value": "/public/get_instruments"
+    },
+    "params": {
+      "currency": {
+        "match": "exact",
+        "value": "USDT"
+      },
+      "kind": {
+        "match": "exact",
+        "value": "spot"
+      }
+    }
+  },
+  "strict_body": false
+}

@@ -13,12 +13,19 @@ Delta-only files.
   extraction from product metadata.
 - Private REST: balances, margined positions, place/cancel/query order, open
   orders, recent fills, cancel-all, and composed batch place/cancel.
+- Advanced orders: `batch_place_orders` and `batch_cancel_orders` are exposed as
+  composed sequential calls over `/v2/orders`; native `/v2/orders/batch`
+  endpoints are not wired into this adapter. `amend_order` is enabled through
+  official `PUT /v2/orders` for shared quantity edits and parses the order ack.
+  `place_order_list` remains unsupported because OCO/OTO semantics are not mapped.
 - Adapter-specific helpers: `get_delta_option_chain` and
   `get_delta_funding_rates`.
 - WebSocket: subscription/auth payload descriptors only. Public descriptors use
   `wss://public-socket.india.delta.exchange`; private descriptors use
   `wss://socket.india.delta.exchange`. Full typed WS parser integration remains
   future work.
+
+Spot 边界写入 `spot_product status: project_unimplemented`：当前 `/v2/products` 只映射 futures/options/perpetual derivative scope。补 Spot 前需要 spot product filter、spot books/tickers、spot wallet/account reads、spot place/cancel/query/open/fills lifecycle 和 parser fixtures。
 
 ## Official WebSocket Order Book Detail
 
@@ -40,6 +47,17 @@ The implementation follows Delta v2 docs for:
 - `GET /v2/wallet/balances`
 - `GET /v2/fills`
 - `GET /v2/tickers`
+
+Advanced order mapping:
+
+- `batch_place_orders`: composed sequential `POST /v2/orders`, non-atomic,
+  partial failures require REST readback; native `/v2/orders/batch` is not wired.
+- `batch_cancel_orders`: composed sequential `DELETE /v2/orders`, non-atomic,
+  partial failures require REST readback; native batch cancel is not wired.
+- `amend_order`: native `PUT /v2/orders` quantity edit through the shared
+  `AmendOrderRequest`; Delta price edit remains outside the current shared
+  request shape.
+- `place_order_list`: unsupported; OCO/OTO order-list semantics are not mapped.
 
 REST authentication signs:
 
@@ -83,4 +101,11 @@ Delta fixtures live under `tests/fixtures/exchanges/delta/` and cover:
 - Balances, orders, open orders, fills, positions.
 - Error classification.
 - REST HMAC signing vector.
-- Request-spec examples for balances, place order, and cancel order.
+- Request-spec examples for balances, place order, cancel order, and enabled
+  amend order runtime.
+
+## P2 Product Line Boundary (2026-06-09)
+
+`spot_product` is an official-source project boundary, not an exchange-unsupported row. Delta has spot products alongside derivatives, while this adapter is scoped to futures, options, and perpetual derivatives from `/v2/products` and derivative private endpoints.
+
+Do not promote Spot runtime from derivative product filters. Promotion requires spot product filters/books/tickers public specs, spot wallet/account private readback, spot place/cancel/query/open/fill lifecycle, and spot-specific reconciliation guards.

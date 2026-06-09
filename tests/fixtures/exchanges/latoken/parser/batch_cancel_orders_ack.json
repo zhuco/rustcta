@@ -1,0 +1,16 @@
+{
+  "status": "SUCCESS",
+  "message": [
+    {
+      "id": "latoken_test_order_id_001",
+      "message": "cancellation request successfully submitted",
+      "status": "SUCCESS"
+    },
+    {
+      "id": "latoken_test_order_id_002",
+      "message": "Order cancellation aborted due to invalid request in the bulk",
+      "error": "VALIDATION_ERROR",
+      "status": "FAILURE"
+    }
+  ]
+}

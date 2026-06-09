@@ -1,0 +1,48 @@
+{
+  "exchange": "bitbank",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "spot_private_rest"
+  ],
+  "official_product_lines": [
+    "margin_status_positions"
+  ],
+  "product_line_classification": {
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Official Margin status/position surfaces exist, but account eligibility, risk policy, lifecycle, and reconciliation are not wired."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "No standard futures, perpetual, or options product line is exposed in the current official API profile."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "futures",
+    "perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://github.com/bitbankinc/bitbank-api-docs",
+      "evidence": "The public API material includes margin status/position surfaces, but this adapter only wires spot market data and spot private order/account runtime."
+    }
+  ],
+  "runtime_isolation": "Do not route bitbank margin status, margin positions, leverage, or margin order lifecycle through the spot adapter until margin account eligibility, product metadata, signed readbacks, order lifecycle, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "margin account eligibility and permission guard",
+    "margin status and position parser fixtures",
+    "margin order lifecycle request specs and parsers",
+    "post-write readback/reconciliation and live dry-run gate"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_standard_futures_api",
+    "perpetual": "unsupported_no_standard_perpetual_api",
+    "options": "unsupported_no_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

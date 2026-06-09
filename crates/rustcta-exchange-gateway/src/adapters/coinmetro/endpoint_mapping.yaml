@@ -6,13 +6,58 @@ websocket:
     url: wss://api.coinmetro.com/ws
     channels: [book_update, tick]
     subscription: query_pairs
+    protocol: websocket_json
+    query:
+      pairs:
+        support: native
+        format: comma_separated_symbols
+        example: wss://api.coinmetro.com/ws?pairs=BTCEUR,LTCEUR
+        purpose: public_order_book_updates
+    order_book:
+      channel: bookUpdate
+      subscription: pairs_query_string
+      depth: null
+      fixed_update_interval_ms: null
+      sequence:
+        field: bookUpdate.seqNumber
+        mode: monotonic_freshness
+        resync_on: [duplicate, regression, stale_stream]
+      checksum:
+        field: bookUpdate.checksum
+        algorithm: crc32_unsigned
+        source: "Object.keys(book.ask).filter(non_zero).sort().map(price+qty).join('') + Object.keys(book.bid).filter(non_zero).sort().map(price+qty).join('')"
+        sort: lexicographic_ascending_per_side
+        separators: none
+        resync_on_mismatch: true
+      update_semantics: "bookUpdate carries changed ask/bid levels for subscribed pairs; maintain a local book initialized from REST and verify the server checksum after applying each update."
+    bbo:
+      channel: tick
+      update_semantics: "tick is broadcast for all pairs and includes current ask and bid fields."
+      fields: [tick.pair, tick.ask, tick.bid, tick.seqNum, tick.timestamp]
     resync: rest_order_book_snapshot
+    rebuild: "Initialize with GET /exchange/book/{pair}; apply bookUpdate by seqNumber; rebuild from REST after reconnect, parse error, sequence duplicate/regression, stale stream, or CRC32 mismatch."
   private:
     support: native
     url: wss://api.coinmetro.com/ws
     auth: jwt_query_token
     channels: [orderStatus, walletUpdate]
     fallback: rest_reconciliation
+unsupported:
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_standard_futures_perpetual_options_api
+    scope: standard_contracts_only
+    reason: "Coinmetro margin/swap/TRAM-like products are separate project-unimplemented surfaces; current official sources do not expose standard futures/perpetual/options, so unsupported applies only to standard contracts."
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: margin_swap_tram_like_product_boundary
+    boundary: project_unimplemented_product_line
+    scope: coinmetro_margin_swap_tram
+    source_boundary_fixture: tests/fixtures/exchanges/coinmetro/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [product_taxonomy, account_eligibility, collateral_position_risk_fee_parsers, private_order_lifecycle, rest_ws_reconciliation]
+    reason: "Official Coinmetro Margin/Swap/TRAM-like surfaces are not connected by the current spot adapter and must not be treated as standard contract runtime."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 Coinmetro profile 未映射稳定 fee endpoint。"
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -118,3 +163,73 @@ endpoints:
     atomicity: non_atomic
     testnet: true
     official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmetro/amend-order
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: coinmetro.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmetro/order-list
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: coinmetro.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmetro/batch-place
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: coinmetro.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmetro/batch-cancel
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: coinmetro.batch_cancel_orders_unsupported
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinmetro/cancel-all
+    auth: unsupported
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: coinmetro.cancel_all_orders_no_native_endpoint

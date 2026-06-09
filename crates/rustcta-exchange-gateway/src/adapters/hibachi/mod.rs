@@ -4,10 +4,10 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookCapability, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
-    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    CancelOrderResponse, CapabilitySupport, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookCapability, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
     PrivateStreamCapabilities, PrivateStreamSubscription, PublicStreamSubscription,
     QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
     RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
@@ -89,6 +89,31 @@ impl HibachiGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn context_account(
+        &self,
+        context: &rustcta_exchange_api::RequestContext,
+        operation: &'static str,
+    ) -> ExchangeApiResult<(
+        rustcta_exchange_api::TenantId,
+        rustcta_exchange_api::AccountId,
+    )> {
+        let tenant_id =
+            context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: format!("{operation} requires context.tenant_id"),
+                })?;
+        let account_id =
+            context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: format!("{operation} requires context.account_id"),
+                })?;
+        Ok((tenant_id, account_id))
+    }
 }
 
 #[async_trait]
@@ -127,14 +152,14 @@ impl ExchangeClient for HibachiGatewayAdapter {
         ));
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
         capabilities.supports_order_book_snapshot = self.config.enabled_public_rest;
-        capabilities.supports_balances = false;
-        capabilities.supports_positions = false;
+        capabilities.supports_balances = self.config.private_read_available();
+        capabilities.supports_positions = self.config.private_read_available();
         capabilities.supports_fees = self.config.enabled_public_rest;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = self.config.private_read_available();
+        capabilities.supports_open_orders = self.config.private_read_available();
+        capabilities.supports_recent_fills = self.config.private_read_available();
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -154,23 +179,88 @@ impl ExchangeClient for HibachiGatewayAdapter {
         capabilities.supports_public_rest = self.config.enabled_public_rest;
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
         capabilities.supports_order_book_snapshot = self.config.enabled_public_rest;
+        capabilities.supports_private_rest = self.config.private_read_available();
+        capabilities.supports_balances = self.config.private_read_available();
         capabilities.supports_fees = self.config.enabled_public_rest;
+        capabilities.supports_positions = self.config.private_read_available();
+        capabilities.supports_query_order = self.config.private_read_available();
+        capabilities.supports_open_orders = self.config.private_read_available();
+        capabilities.supports_recent_fills = self.config.private_read_available();
+        capabilities.capabilities_v2.private_rest = if self.config.private_read_available() {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED)
+        };
+        capabilities.capabilities_v2.order_history = if self.config.private_read_available() {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_limit: true,
+                max_limit: Some(500),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(private::PRIVATE_REST_DISABLED)
+        };
+        capabilities.capabilities_v2.fills_history = if self.config.private_read_available() {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_limit: true,
+                max_limit: Some(500),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(private::PRIVATE_REST_DISABLED)
+        };
+        if let Some(endpoint) = capabilities
+            .capabilities_v2
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| endpoint.operation == "get_positions")
+        {
+            endpoint.support = if self.config.private_read_available() {
+                CapabilitySupport::native()
+            } else {
+                CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED)
+            };
+        }
+        if let Some(endpoint) = capabilities
+            .capabilities_v2
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| endpoint.operation == "get_balances")
+        {
+            endpoint.support = if self.config.private_read_available() {
+                CapabilitySupport::native()
+            } else {
+                CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED)
+            };
+        }
+        for operation in ["query_order", "get_open_orders", "get_recent_fills"] {
+            if let Some(endpoint) = capabilities
+                .capabilities_v2
+                .endpoints
+                .iter_mut()
+                .find(|endpoint| endpoint.operation == operation)
+            {
+                endpoint.support = if self.config.private_read_available() {
+                    CapabilitySupport::native()
+                } else {
+                    CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED)
+                };
+            }
+        }
         capabilities
     }
 
     async fn get_balances(&self, request: BalancesRequest) -> ExchangeApiResult<BalancesResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_market_type(request.market_type)?;
-        self.unsupported(private::PRIVATE_REST_DISABLED)
+        self.get_balances_impl(request).await
     }
 
     async fn get_positions(
         &self,
         request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_market_type(request.market_type)?;
-        self.unsupported(private::PRIVATE_REST_DISABLED)
+        self.get_positions_impl(request).await
     }
 
     async fn get_symbol_rules(
@@ -269,27 +359,21 @@ impl ExchangeClient for HibachiGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported(private::PRIVATE_REST_DISABLED)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_market_type(request.market_type)?;
-        self.unsupported(private::PRIVATE_REST_DISABLED)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_market_type(request.market_type)?;
-        self.unsupported(private::PRIVATE_REST_DISABLED)
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

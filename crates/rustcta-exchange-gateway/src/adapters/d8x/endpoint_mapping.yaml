@@ -17,6 +17,7 @@ auth:
   private_write_rest: unsupported wallet signer / EVM contract call
 rate_limits:
   d8x_public: { scope: ip, interval_ms: 1000, limit: 5 }
+  d8x_account_source: { scope: account, interval_ms: 1000, limit: 1 }
   d8x_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   contracts: { mode: none }
@@ -29,12 +30,26 @@ batch:
   cancel: { support: unsupported, reason: d8x.batch_cancel_orders_not_mapped_to_gateway_contract_semantics }
 websocket:
   public:
-    support: spec_only
+    support: unsupported
     helper_only: true
+    reason: "交易所不支持当前公共 WS runtime：当前只核到 CoinGecko-compatible REST orderbook，未找到稳定官方公共订单簿 WebSocket 文档；payload fixture 仅作后续重核线索。"
     heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: spot_product
+    reason: D8X is audited as a perpetual futures engine profile; spot products are not supported by this adapter.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 profile 未建立稳定账户/链上 fee runtime。"
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/d8x/request_specs/get_balances_account_source.json
+    reason: "Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending EVM wallet/contract account scan, balance parser, and chain/indexer reconciliation."
+  - operation: get_positions
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/d8x/request_specs/get_positions_account_source.json
+    reason: "Official/API/SDK position readback exists, but shared get_positions runtime is project-unimplemented pending EVM wallet/contract/indexer account scan, positions parser, funding/PnL/liquidation fields, reorg handling, and reconciliation."
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -72,39 +87,45 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/d8x/balances
-    auth: unsupported
-    rate_limit_bucket: d8x_unsupported
-    weight: 0
-    request_spec_required: false
+    method: SOURCE_READ
+    path: indexer://d8x/polygon-zkevm/wallet/balances
+    auth: none
+    rate_limit_bucket: d8x_account_source
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: d8x.balances_require_wallet_contract_audit
+    support: spec_only
+    reason: "Wallet/contract/indexer source boundary only; shared get_balances runtime remains project-unimplemented pending EVM account scan, margin/equity parser, reorg handling, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/d8x/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/d8x/request_specs/get_balances_account_source.json }
+    notes: "No live wallet RPC, Node SDK call, contract call or indexer request is executed by this adapter."
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/d8x/positions
-    auth: unsupported
-    rate_limit_bucket: d8x_unsupported
-    weight: 0
-    request_spec_required: false
+    method: SOURCE_READ
+    path: indexer://d8x/polygon-zkevm/wallet/positions
+    auth: none
+    rate_limit_bucket: d8x_account_source
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: d8x.positions_require_wallet_contract_audit
+    support: spec_only
+    reason: "Wallet/contract/indexer source boundary only; shared get_positions runtime remains project-unimplemented pending EVM account scan, contract/indexer freshness, positions parser, funding/PnL/liquidation fields, reorg handling, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/d8x/request_specs/get_positions_account_source.json }
+    response_parser: { status: fixture_only, parser: parse_position_source_boundary, fixture: tests/fixtures/exchanges/d8x/request_specs/get_positions_account_source.json }
+    notes: "No live wallet RPC, Node SDK call, contract call or indexer request is executed by this adapter. Parser coverage validates the source-boundary shape, not decoded live positions."
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/d8x/place_order
-    auth: unsupported
+    path: evm_tx/d8x_place_order
+    auth: signed
     rate_limit_bucket: d8x_unsupported
     weight: 0
     request_spec_required: true
@@ -112,14 +133,44 @@ endpoints:
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: d8x.place_order_requires_evm_signer_and_contract_audit
   - operation: cancel_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/d8x/cancel_order
+    path: evm_tx/d8x_cancel_order
+    auth: signed
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: spec_only
+    reason: d8x.cancel_order_requires_evm_signer_and_contract_audit
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: evm_source/d8x_order
+    auth: none
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: d8x.query_order_requires_sdk_contract_indexer_and_reorg_reconciliation
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/d8x/amend_order
     auth: unsupported
     rate_limit_bucket: d8x_unsupported
     weight: 0
@@ -128,12 +179,27 @@ endpoints:
     atomicity: unsupported
     testnet: false
     support: unsupported
-    reason: d8x.cancel_order_requires_evm_signer_and_contract_audit
+    reason: d8x.amend_order_requires_evm_signer_and_contract_audit
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/d8x/order_list
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.order_list_not_mapped_to_gateway_contract_semantics
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/d8x/batch_place_orders
     auth: unsupported
     rate_limit_bucket: d8x_unsupported
@@ -148,7 +214,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/d8x/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: d8x_unsupported
@@ -179,30 +245,30 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/d8x/open_orders
-    auth: unsupported
+    path: evm_source/d8x_open_orders
+    auth: none
     rate_limit_bucket: d8x_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: d8x.open_orders_require_sdk_contract_audit
   - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/d8x/recent_fills
-    auth: unsupported
+    path: evm_source/d8x_fills
+    auth: none
     rate_limit_bucket: d8x_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: d8x.recent_fills_require_indexer_contract_audit
 streams:
   - operation: public_orderbook_delta

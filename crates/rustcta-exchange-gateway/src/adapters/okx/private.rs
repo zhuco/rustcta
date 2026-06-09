@@ -3,19 +3,27 @@ use std::collections::HashMap;
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchItemResult, BatchOperationReport,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
+    ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
+use rustcta_types::{
+    ExchangeError, ExchangeErrorClass, MarketType, OrderSide, OrderStatus, OrderType, PositionSide,
+};
 use serde_json::Value;
 
 use super::parser::{
-    normalize_okx_symbol, normalize_okx_symbol_for_market, okx_inst_type, okx_td_mode,
+    is_okx_derivative_market, normalize_okx_symbol, normalize_okx_symbol_for_market, okx_inst_type,
+    okx_td_mode,
 };
-use super::types::{parse_balances, parse_fees, parse_fills, parse_order, parse_orders};
+use super::types::{
+    parse_balances, parse_fees, parse_fills, parse_order, parse_orders, parse_positions,
+};
 use super::OkxGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
@@ -52,7 +60,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_market_type(request.symbol.market_type)?;
+        self.ensure_spot(request.symbol.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.place_quote_market_order",
             "okxus.place_quote_market_order",
@@ -96,6 +104,111 @@ impl OkxGatewayAdapter {
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
             order,
             cancelled: true,
+        })
+    }
+
+    pub(super) async fn batch_place_orders_private_rest(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.batch_place_orders",
+            "okxus.batch_place_orders",
+            "myokx.batch_place_orders",
+        ))?;
+        if request.orders.is_empty() {
+            return Ok(BatchPlaceOrdersResponse {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                metadata: response_metadata(request.exchange, request.context.request_id),
+                orders: Vec::new(),
+                report: None,
+            });
+        }
+        if request.orders.len() > 20 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "okx.batch_place_orders supports at most 20 orders".to_string(),
+            });
+        }
+        let market_type = request.orders[0].symbol.market_type;
+        self.ensure_market_type(market_type)?;
+        let mut body = Vec::with_capacity(request.orders.len());
+        for order in &request.orders {
+            ensure_exchange_api_schema(order.schema_version)?;
+            self.ensure_exchange(&order.symbol.exchange)?;
+            self.ensure_market_type(order.symbol.market_type)?;
+            if order.symbol.market_type != market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "okx.batch_place_orders requires one market type".to_string(),
+                });
+            }
+            body.push(okx_place_order_body(order)?);
+        }
+        let value = self
+            .rest
+            .send_signed_post("/api/v5/trade/batch-orders", &Value::Array(body))
+            .await?;
+        let (orders, report) = parse_okx_batch_place_response(&self.exchange_id, &request, &value)?;
+        Ok(BatchPlaceOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            report: Some(report),
+        })
+    }
+
+    pub(super) async fn batch_cancel_orders_private_rest(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.batch_cancel_orders",
+            "okxus.batch_cancel_orders",
+            "myokx.batch_cancel_orders",
+        ))?;
+        if request.cancels.is_empty() {
+            return Ok(BatchCancelOrdersResponse {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                metadata: response_metadata(request.exchange, request.context.request_id),
+                orders: Vec::new(),
+                cancelled_count: 0,
+                report: None,
+            });
+        }
+        if request.cancels.len() > 20 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "okx.batch_cancel_orders supports at most 20 cancels".to_string(),
+            });
+        }
+        let market_type = request.cancels[0].symbol.market_type;
+        self.ensure_market_type(market_type)?;
+        let mut body = Vec::with_capacity(request.cancels.len());
+        for cancel in &request.cancels {
+            ensure_exchange_api_schema(cancel.schema_version)?;
+            self.ensure_exchange(&cancel.symbol.exchange)?;
+            self.ensure_market_type(cancel.symbol.market_type)?;
+            if cancel.symbol.market_type != market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "okx.batch_cancel_orders requires one market type".to_string(),
+                });
+            }
+            body.push(okx_cancel_order_body(cancel)?);
+        }
+        let value = self
+            .rest
+            .send_signed_post("/api/v5/trade/cancel-batch-orders", &Value::Array(body))
+            .await?;
+        let (orders, report) =
+            parse_okx_batch_cancel_response(&self.exchange_id, &request, &value)?;
+        Ok(BatchCancelOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            cancelled_count: orders.len() as u32,
+            orders,
+            report: Some(report),
         })
     }
 
@@ -238,6 +351,85 @@ impl OkxGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
             balances,
+        })
+    }
+
+    pub(super) async fn get_positions_private_rest(
+        &self,
+        request: PositionsRequest,
+    ) -> ExchangeApiResult<PositionsResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        let market_type = request
+            .market_type
+            .or_else(|| request.symbols.first().map(|symbol| symbol.market_type))
+            .unwrap_or(MarketType::Perpetual);
+        self.ensure_market_type(market_type)?;
+        if market_type == MarketType::Spot {
+            return Err(ExchangeApiError::Unsupported {
+                operation: self.profile_operation(
+                    "okx.spot_positions",
+                    "okxus.spot_positions",
+                    "myokx.spot_positions",
+                ),
+            });
+        }
+        self.ensure_private_rest(self.profile_operation(
+            "okx.get_positions",
+            "okxus.get_positions",
+            "myokx.get_positions",
+        ))?;
+        for symbol in &request.symbols {
+            self.ensure_exchange(&symbol.exchange_id)?;
+            self.ensure_market_type(symbol.market_type)?;
+            if symbol.market_type != market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "okx.get_positions symbols must match request market_type".to_string(),
+                });
+            }
+        }
+        let tenant_id =
+            request
+                .context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "okx.get_positions requires tenant_id in request context".to_string(),
+                })?;
+        let account_id =
+            request
+                .context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "okx.get_positions requires account_id in request context".to_string(),
+                })?;
+        let mut params = HashMap::new();
+        params.insert(
+            "instType".to_string(),
+            okx_inst_type(market_type)?.to_string(),
+        );
+        if request.symbols.len() == 1 {
+            params.insert(
+                "instId".to_string(),
+                normalize_okx_symbol_for_market(&request.symbols[0].symbol, market_type)?,
+            );
+        }
+        let value = self
+            .rest
+            .send_signed_get("/api/v5/account/positions", &params)
+            .await?;
+        Ok(PositionsResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            positions: parse_positions(
+                &self.exchange_id,
+                tenant_id,
+                account_id,
+                market_type,
+                &request.symbols,
+                &value,
+            )?,
         })
     }
 
@@ -527,15 +719,15 @@ fn okx_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value>
             Value::String(non_empty("client_order_id", client_order_id)?),
         );
     }
-    if request.reduce_only && request.symbol.market_type != MarketType::Perpetual {
+    if request.reduce_only && !is_okx_derivative_market(request.symbol.market_type) {
         return Err(ExchangeApiError::InvalidRequest {
-            message: "okx spot order does not support reduce_only".to_string(),
+            message: "okx reduce_only is only supported for derivative orders".to_string(),
         });
     }
     if request.reduce_only {
         body.insert("reduceOnly".to_string(), Value::Bool(true));
     }
-    if request.symbol.market_type == MarketType::Perpetual {
+    if is_okx_derivative_market(request.symbol.market_type) {
         if let Some(pos_side) = request.position_side.and_then(okx_position_side) {
             body.insert("posSide".to_string(), Value::String(pos_side.to_string()));
         }
@@ -696,6 +888,188 @@ fn okx_ack_item<'a>(
         ));
     }
     Ok(item)
+}
+
+fn parse_okx_batch_place_response(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &BatchPlaceOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<(Vec<OrderState>, BatchOperationReport)> {
+    let rows = okx_batch_response_rows(exchange_id, "batch place response is not an array", value)?;
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.orders.len());
+    for (index, order_request) in request.orders.iter().enumerate() {
+        let Some(row) = rows.get(index) else {
+            let error =
+                okx_missing_batch_item_error(exchange_id, "missing batch place response item");
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "OKX did not return a batch place result for this request item",
+                )),
+            ));
+            continue;
+        };
+        if let Some(error) = okx_batch_item_error(
+            exchange_id,
+            row,
+            order_request.client_order_id.clone(),
+            None,
+        ) {
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchPlacePartialFailure,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "OKX batch place item failed and requires order readback",
+                )),
+            ));
+            continue;
+        }
+        let order = order_state_from_place_ack(exchange_id, order_request, row);
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+    Ok((
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.orders.len(),
+            results,
+        },
+    ))
+}
+
+fn parse_okx_batch_cancel_response(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &BatchCancelOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<(Vec<OrderState>, BatchOperationReport)> {
+    let rows =
+        okx_batch_response_rows(exchange_id, "batch cancel response is not an array", value)?;
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.cancels.len());
+    for (index, cancel_request) in request.cancels.iter().enumerate() {
+        let Some(row) = rows.get(index) else {
+            let error =
+                okx_missing_batch_item_error(exchange_id, "missing batch cancel response item");
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                error,
+                Some(ReconcilePlan::for_cancel_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    cancel_request,
+                    RetryReconcilePolicy::default(),
+                    "OKX did not return a batch cancel result for this request item",
+                )),
+            ));
+            continue;
+        };
+        if let Some(error) = okx_batch_item_error(
+            exchange_id,
+            row,
+            cancel_request.client_order_id.clone(),
+            cancel_request.exchange_order_id.clone(),
+        ) {
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                error,
+                Some(ReconcilePlan::for_cancel_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchCancelPartialFailure,
+                    cancel_request,
+                    RetryReconcilePolicy::default(),
+                    "OKX batch cancel item failed and requires order readback",
+                )),
+            ));
+            continue;
+        }
+        let order = order_state_from_cancel_ack(exchange_id, cancel_request, row);
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+    Ok((
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.cancels.len(),
+            results,
+        },
+    ))
+}
+
+fn okx_batch_response_rows<'a>(
+    exchange_id: &rustcta_types::ExchangeId,
+    message: &str,
+    value: &'a Value,
+) -> ExchangeApiResult<&'a [Value]> {
+    value.as_array().map(Vec::as_slice).ok_or_else(|| {
+        ExchangeApiError::Exchange(ExchangeError::new(
+            exchange_id.clone(),
+            ExchangeErrorClass::Decode,
+            format!("{message}: {value}"),
+            Utc::now(),
+        ))
+    })
+}
+
+fn okx_batch_item_error(
+    exchange_id: &rustcta_types::ExchangeId,
+    value: &Value,
+    client_order_id: Option<String>,
+    exchange_order_id: Option<String>,
+) -> Option<ExchangeError> {
+    let code = value_text(value.get("sCode")).unwrap_or_else(|| "0".to_string());
+    if code == "0" {
+        return None;
+    }
+    let message = value
+        .get("sMsg")
+        .or_else(|| value.get("msg"))
+        .and_then(Value::as_str)
+        .unwrap_or("OKX batch item failed");
+    let mut error = ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::OrderRejected,
+        message,
+        Utc::now(),
+    );
+    error.code = Some(code);
+    error.client_order_id = client_order_id;
+    error.order_id = exchange_order_id;
+    error.raw = Some(value.clone());
+    Some(error)
+}
+
+fn okx_missing_batch_item_error(
+    exchange_id: &rustcta_types::ExchangeId,
+    message: &str,
+) -> ExchangeError {
+    ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::UnknownOrderState,
+        message,
+        Utc::now(),
+    )
 }
 
 fn order_state_from_place_ack(

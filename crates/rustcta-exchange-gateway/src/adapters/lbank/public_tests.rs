@@ -7,7 +7,11 @@ use serde_json::json;
 
 use crate::streams::StreamReconnectPolicy;
 
-use super::streams::{lbank_ping_payload, LBankWsControlMessage, LBankWsSessionEvent};
+use super::streams::{
+    lbank_ping_payload, lbank_public_order_book_subscribe_payload,
+    lbank_public_order_book_ws_policy, normalize_spot_ws_depth, LBankWsControlMessage,
+    LBankWsSessionEvent,
+};
 use super::test_support::{context, perp_symbol_scope, spawn_rest_server, spot_symbol_scope};
 use super::{LBankGatewayAdapter, LBankGatewayConfig};
 
@@ -141,6 +145,30 @@ async fn lbank_adapter_should_build_spot_public_stream_subscriptions() {
 #[test]
 fn lbank_public_ws_session_should_subscribe_and_handle_heartbeat() {
     let adapter = LBankGatewayAdapter::default_public().expect("adapter");
+    let subscription = PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("stream-session"),
+        symbol: spot_symbol_scope(),
+        kind: PublicStreamKind::OrderBookDelta,
+    };
+    let policy = lbank_public_order_book_ws_policy();
+    assert_eq!(policy.channel, "depth");
+    assert_eq!(policy.supported_depths, [10, 50, 100]);
+    assert_eq!(policy.default_depth, 100);
+    assert_eq!(policy.fixed_update_interval_ms, None);
+    assert_eq!(policy.sequence_field, None);
+    assert_eq!(policy.checksum, None);
+    assert_eq!(policy.resync_endpoint, "/v2/depth.do");
+    assert!(policy.resync_strategy.contains("REST depth snapshot"));
+    for depth in policy.supported_depths {
+        let payload =
+            lbank_public_order_book_subscribe_payload(&subscription, depth).expect("payload");
+        assert_eq!(payload["subscribe"], "depth");
+        assert_eq!(payload["depth"], depth.to_string());
+        assert_eq!(payload["pair"], "btc_usdt");
+    }
+    assert!(normalize_spot_ws_depth(20).is_err());
+
     let mut session = adapter
         .public_ws_session(PublicStreamSubscription {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -152,6 +180,7 @@ fn lbank_public_ws_session_should_subscribe_and_handle_heartbeat() {
 
     assert_eq!(session.url, "wss://www.lbkex.net/ws/V2/");
     assert_eq!(session.initial_requests()[0]["subscribe"], "depth");
+    assert_eq!(session.initial_requests()[0]["depth"], "100");
     session.on_connected(chrono::Utc::now());
     let ping_at = chrono::Utc
         .timestamp_millis_opt(1_700_000_000_000)
@@ -190,9 +219,9 @@ fn lbank_public_ws_session_should_subscribe_and_handle_heartbeat() {
     assert!(session.state().last_pong_at.is_some());
 
     let events = session
-        .handle_text_message(
-            r#"{"type":"depth","pair":"btc_usdt","data":{"asks":[["100.5","1.5"]],"bids":[["99.5","2.0"]],"timestamp":1700000000000}}"#,
-        )
+        .handle_text_message(include_str!(
+            "../../../../../tests/fixtures/exchanges/lbank/ws/public_spot_depth.json"
+        ))
         .expect("book");
     assert!(matches!(
         events.iter().find(|event| {
@@ -204,6 +233,25 @@ fn lbank_public_ws_session_should_subscribe_and_handle_heartbeat() {
         }),
         Some(LBankWsSessionEvent::Stream(_))
     ));
+    let LBankWsSessionEvent::Stream(items) = events
+        .iter()
+        .find(|event| {
+            matches!(
+                event,
+                LBankWsSessionEvent::Stream(items)
+                    if matches!(items.first(), Some(ExchangeStreamEvent::OrderBookSnapshot(_)))
+            )
+        })
+        .expect("stream event")
+    else {
+        unreachable!("matched stream event")
+    };
+    let Some(ExchangeStreamEvent::OrderBookSnapshot(snapshot)) = items.first() else {
+        unreachable!("matched order book snapshot")
+    };
+    assert_eq!(snapshot.order_book.bids[0].price, 65000.0);
+    assert_eq!(snapshot.order_book.asks[0].quantity, 0.15);
+    assert_eq!(snapshot.order_book.sequence, None);
 }
 
 #[tokio::test]

@@ -10,6 +10,13 @@
   },
   "auth": "bearer",
   "request_spec_required": true,
+  "source_boundary": {
+    "kind": "account_api_position_readback",
+    "account_scope": ["account_index"],
+    "ws_reconciliation_source": "account_all_positions",
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
   "expected_error": "lighter.positions_auth_token_unverified",
   "trade_enabled": false
 }

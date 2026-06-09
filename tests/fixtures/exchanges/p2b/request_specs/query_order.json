@@ -1,0 +1,26 @@
+{
+  "exchange": "p2b",
+  "operation": "p2b.query_order",
+  "request_spec_only": false,
+  "runtime_status": "guarded_native",
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/api/v2/account/order_history",
+  "auth": "api_key",
+  "credential_scope": "read_only",
+  "headers_shape": [
+    "X-TXC-APIKEY",
+    "X-TXC-PAYLOAD",
+    "X-TXC-SIGNATURE"
+  ],
+  "body": {
+    "market": "BTC_USDT",
+    "orderId": "12345",
+    "limit": "100",
+    "offset": "0",
+    "request": "/api/v2/account/order_history",
+    "nonce": "1698484860"
+  },
+  "runtime_guard": "P2B_PRIVATE_REST_ENABLED or P2PB2B_PRIVATE_REST_ENABLED plus API key/secret",
+  "unsupported_boundary": "client_order_id lookup remains unsupported; writes remain offline"
+}

@@ -1,6 +1,6 @@
 use rustcta_exchange_api::{
     BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest, ExchangeClient,
-    OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, RecentFillsRequest,
+    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, RecentFillsRequest,
     EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_exchange_api::{CapabilitySupport, ReconcileTrigger};
@@ -146,6 +146,48 @@ async fn bigone_private_capabilities_should_require_credentials() {
     assert!(reconcile.requires_query_order);
     assert!(reconcile.requires_open_orders);
     assert!(reconcile.requires_recent_fills);
+}
+
+#[tokio::test]
+async fn bigone_spot_get_fees_should_use_viewer_trading_fees() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "data": [
+            {
+                "asset_pair_name": "BTC-USDT",
+                "maker_fee_rate": "0.0012",
+                "taker_fee_rate": "0.0018"
+            }
+        ]
+    })])
+    .await;
+    let adapter = BigOneGatewayAdapter::new(private_config(base_url)).expect("adapter");
+
+    let response = adapter
+        .get_fees(FeesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fees"),
+            symbols: vec![spot_symbol_scope()],
+        })
+        .await
+        .expect("fees");
+
+    assert_eq!(response.fees.len(), 1);
+    assert_eq!(response.fees[0].maker_rate, "0.0012");
+    assert_eq!(response.fees[0].taker_rate, "0.0018");
+    assert_eq!(
+        response.fees[0].source.as_deref(),
+        Some("bigone.viewer.trading_fees")
+    );
+
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    request_spec("get_fees_trading_fees.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("fees request spec");
+    assert!(requests[0]
+        .header("authorization")
+        .is_some_and(|value| value.starts_with("Bearer ")));
+    assert!(!requests[0].raw_contains_secret());
 }
 
 #[tokio::test]
@@ -432,6 +474,7 @@ fn request_spec(name: &str) -> RequestSpec {
         "open_orders_spot.json" => include_str!("../../../../../tests/fixtures/exchanges/bigone/request_specs/open_orders_spot.json"),
         "recent_fills_spot.json" => include_str!("../../../../../tests/fixtures/exchanges/bigone/request_specs/recent_fills_spot.json"),
         "batch_cancel_contract.json" => include_str!("../../../../../tests/fixtures/exchanges/bigone/request_specs/batch_cancel_contract.json"),
+        "get_fees_trading_fees.json" => include_str!("../../../../../tests/fixtures/exchanges/bigone/request_specs/get_fees_trading_fees.json"),
         other => panic!("unknown BigONE request spec {other}"),
     })
     .expect("request spec json")

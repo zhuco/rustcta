@@ -25,8 +25,24 @@ pub fn parse_symbol_rules(
             )
         })?
         .iter()
-        .map(|value| parse_symbol_rule(exchange_id, market_type, value))
+        .map(
+            |value| match parse_symbol_rule(exchange_id, market_type, value) {
+                Ok(rule) => Ok(Some(rule)),
+                Err(error) if should_skip_symbol_rule_error(&error) => Ok(None),
+                Err(error) => Err(error),
+            },
+        )
+        .filter_map(Result::transpose)
         .collect()
+}
+
+fn should_skip_symbol_rule_error(error: &ExchangeApiError) -> bool {
+    match error {
+        ExchangeApiError::InvalidRequest { message } => {
+            message.contains("canonical_symbol") || message.contains("exchange_symbol")
+        }
+        _ => false,
+    }
 }
 
 fn parse_symbol_rule(

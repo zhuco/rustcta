@@ -8,7 +8,7 @@ use rustcta_exchange_api::{
     QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
     RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderType};
+use rustcta_types::{ExchangeErrorClass, MarketType, OrderSide, OrderType};
 use serde_json::{json, Value};
 
 use super::parser::normalize_gateio_symbol;
@@ -281,9 +281,16 @@ impl GateIoGatewayAdapter {
         } else {
             "/futures/usdt/positions".to_string()
         };
-        let value = self
+        let value = match self
             .send_signed_get("gateio.get_positions", &endpoint, &HashMap::new())
-            .await?;
+            .await
+        {
+            Ok(value) => value,
+            Err(error) if is_gateio_position_not_found(&error) && !request.symbols.is_empty() => {
+                Value::Array(Vec::new())
+            }
+            Err(error) => return Err(error),
+        };
         Ok(PositionsResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
@@ -567,6 +574,22 @@ fn gateio_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
     Ok(body)
 }
 
+fn is_gateio_position_not_found(error: &ExchangeApiError) -> bool {
+    match error {
+        ExchangeApiError::Exchange(error) => {
+            error.code.as_deref() == Some("POSITION_NOT_FOUND")
+                || error.class == ExchangeErrorClass::InsufficientPosition
+                || error
+                    .raw
+                    .as_ref()
+                    .and_then(|value| value.get("label"))
+                    .and_then(Value::as_str)
+                    == Some("POSITION_NOT_FOUND")
+        }
+        _ => false,
+    }
+}
+
 fn gateio_futures_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
     if request.quote_quantity.is_some() {
         return Err(ExchangeApiError::Unsupported {
@@ -741,4 +764,28 @@ fn non_empty(field: &str, value: &str) -> ExchangeApiResult<String> {
         });
     }
     Ok(value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use rustcta_types::{ExchangeError, ExchangeId};
+    use serde_json::json;
+
+    #[test]
+    fn gateio_position_not_found_error_should_be_treated_as_empty_position() {
+        let mut exchange_error = ExchangeError::new(
+            ExchangeId::new("gateio").expect("gateio exchange"),
+            ExchangeErrorClass::InsufficientPosition,
+            "Gate.io request failed: HTTP 400; label=POSITION_NOT_FOUND",
+            Utc::now(),
+        );
+        exchange_error.code = Some("POSITION_NOT_FOUND".to_string());
+        exchange_error.raw = Some(json!({"label": "POSITION_NOT_FOUND"}));
+
+        assert!(is_gateio_position_not_found(&ExchangeApiError::Exchange(
+            exchange_error
+        )));
+    }
 }

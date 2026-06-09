@@ -66,6 +66,49 @@ websocket:
     support: native
     url: wss://socket.coinex.com/v2/spot
     separate_connection: true
+    order_book:
+      support: native
+      channel: depth.subscribe
+      channels: [depth.subscribe, depth.update]
+      subscribe_method: depth.subscribe
+      update_method: depth.update
+      depths: [5, 10, 20, 50]
+      params_shape:
+        field: market_list
+        item: [market, limit, interval, is_full]
+      push_delay_ms: 200
+      full_refresh_interval_ms: 60000
+      limits: [5, 10, 20, 50]
+      default_limit: 50
+      merge_intervals:
+        - "0"
+        - "0.00000000001"
+        - "0.000000000001"
+        - "0.0000000001"
+        - "0.000000001"
+        - "0.00000001"
+        - "0.0000001"
+        - "0.000001"
+        - "0.00001"
+        - "0.0001"
+        - "0.001"
+        - "0.01"
+        - "0.1"
+        - "1"
+        - "10"
+        - "100"
+        - "1000"
+      default_merge_interval: "0"
+      full_incremental_semantics:
+        full: "is_full=true pushes complete subscribed depth about every 200ms when changed; full market depth refresh arrives about every 1 minute."
+        incremental: "is_full=false pushes changed levels about every 200ms when changed; quantity 0 deletes that price level."
+      checksum:
+        algorithm: crc32
+        encoding: signed_i32
+        string_order: bid_price:bid_amount...ask_price:ask_amount
+        source_field: depth.checksum
+        resync_on_mismatch: true
+      resync: "Build or rebuild from REST /spot/depth, then resubscribe. Rebuild after reconnect, stale stream, parser error, or checksum mismatch."
     heartbeat:
       method: server.ping
       direction: client_ping
@@ -80,6 +123,32 @@ websocket:
     renewal: relogin
     renewal_interval_ms: 1800000
     fallback: rest_reconciliation
+unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: coinex_futures_api_v2
+    source_boundary_fixture: tests/fixtures/exchanges/coinex/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current coinex adapter uses Spot v2 REST/WS hosts and must not route futures symbols through spot order, balance or stream paths."
+    required_endpoints:
+      market_metadata: [futures/perpetual markets, contract specifications, settlement currency and precision rules]
+      public_market_data: [futures/perpetual depth, futures/perpetual ticker, futures/perpetual deals]
+      private_account: [futures balances or margin account, positions, leverage and risk limits]
+      private_order_lifecycle: [futures/perpetual place order, futures/perpetual cancel order, futures/perpetual query/open orders, futures/perpetual fills]
+    unsafe_to_promote_without: [CoinEx Futures metadata and depth fixtures, position/leverage/risk parser coverage, futures signing/request specs, post-write order and fills reconciliation]
+    reason: "Official CoinEx Futures API is a separate product line; current coinex adapter only maps Spot."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: coinex_futures_api_v2
+    source_boundary_fixture: tests/fixtures/exchanges/coinex/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [futures/perpetual markets, contract specifications]
+      private_account: [futures balances or margin account, positions, leverage and risk limits]
+      private_order_lifecycle: [futures/perpetual place/cancel/query/open orders, futures/perpetual fills]
+    reason: "CoinEx Futures API requires separate market metadata, leverage/risk, position and order runtime wiring."
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -168,6 +237,48 @@ endpoints:
     rate_limit_bucket: coinex_orders
     weight: 1
     request_spec_required: true
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/coinex/batch_place_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order placement.
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/coinex/batch_cancel_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order cancel.
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/coinex/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinex.order_list_unsupported
   - operation: query_order
     product: spot
     transport: rest

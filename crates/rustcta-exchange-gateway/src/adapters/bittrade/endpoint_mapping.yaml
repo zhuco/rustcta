@@ -3,7 +3,7 @@ exchange: bittrade
 adapter: rustcta_exchange_gateway::adapters::bittrade
 metadata:
   status: validated
-  notes: "A-10 BitTrade Japan spot adapter. Official docs state leverage trading is not supported; private trading is offline request-spec only."
+  notes: "A-10 BitTrade Japan spot adapter. Official docs state leverage trading is not supported; private readback REST is guarded by BITTRADE_PRIVATE_REST_ENABLED plus credentials; private writes remain offline request-spec only."
 market_types:
   - spot
 products:
@@ -76,6 +76,22 @@ websocket:
       bbo: market.{symbol}.bbo
       trades: market.{symbol}.trade.detail
       candles: market.{symbol}.kline.{period}
+    order_book:
+      channels:
+        - market.{symbol}.depth.step0
+        - market.{symbol}.depth.step1
+        - market.{symbol}.depth.step2
+        - market.{symbol}.depth.step3
+        - market.{symbol}.depth.step4
+        - market.{symbol}.depth.step5
+      bbo_channel: market.{symbol}.bbo
+      depth_types: [step0, step1, step2, step3, step4, step5]
+      supported_depths: [1]
+      interval: no fixed ms
+      compression: gzip
+      bbo_sequence_field: seqId
+      checksum: not_published
+      resync: rest_order_book_snapshot
     heartbeat:
       direction: server_ping_client_pong
       interval_ms: 5000
@@ -132,7 +148,14 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/balance_get.json
+    response_parser:
+      status: planned
+    notes: Account-scoped balance request spec is present, but account-id discovery, parser, and readback reconciliation are not implemented; runtime returns bittrade.get_balances.offline_request_spec_only.
   - operation: place_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -146,6 +169,7 @@ endpoints:
       fixture: tests/fixtures/exchanges/bittrade/request_specs/place_limit_order.json
     notes: "Offline request-spec only; runtime does not expose live order placement."
   - operation: cancel_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -169,7 +193,50 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/bittrade/request_specs/batch_cancel_orders.json
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/bittrade/batch_place_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bittrade.batch_place_orders_unsupported
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /unsupported/bittrade/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bittrade.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/bittrade/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: bittrade.order_list_unsupported
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -179,7 +246,14 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/get_open_orders.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bittrade/open_orders_success.json
+    notes: "Guarded read-only private REST runtime; requires BITTRADE_PRIVATE_REST_ENABLED plus BITTRADE_API_KEY/BITTRADE_API_SECRET. Request requires symbol scope and sends signed query authentication. Writes are not promoted."
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -191,7 +265,12 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/bittrade/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bittrade/order_success.json
+    notes: "Guarded read-only private REST runtime by exchange_order_id; requires BITTRADE_PRIVATE_REST_ENABLED plus BITTRADE_API_KEY/BITTRADE_API_SECRET. client_order_id lookup remains unsupported."
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -201,6 +280,12 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/get_recent_fills.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bittrade/recent_fills_success.json
+    notes: "Guarded read-only private REST runtime; requires BITTRADE_PRIVATE_REST_ENABLED plus BITTRADE_API_KEY/BITTRADE_API_SECRET. Request requires symbol scope and context tenant/account for normalized Fill rows."
 streams:
   - operation: subscribe_public_order_book
     product: spot
@@ -221,11 +306,13 @@ streams:
 unsupported:
   - operation: leverage_or_margin_trading
     reason: "Official BitTrade API introduction states leverage trading is currently unsupported."
-  - operation: futures_or_perpetuals
-    reason: "No official BitTrade futures/perpetual product line is documented for this adapter."
+  - operation: contract_product
+    reason: "Current official/API profile documents no standard futures/perpetual/options product line for this adapter."
   - operation: fiat_funding
     reason: "Fiat deposit, withdrawal, bank transfer, and ledger writes are outside gateway runtime scope."
   - operation: live_private_write
     reason: "Private write endpoints are delivered as offline request-spec and signing vectors only."
   - operation: retail_broker_ordering
     reason: "BitTrade retail/sales-office APIs are documented separately and are not mapped into exchange spot order routing."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：官方/API 资料未核到 account-effective maker/taker fee endpoint；fee 页面不能直接映射 runtime readback。"

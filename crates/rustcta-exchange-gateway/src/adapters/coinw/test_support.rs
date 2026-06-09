@@ -130,6 +130,16 @@ pub(super) fn spot_symbol_scope() -> SymbolScope {
     }
 }
 
+pub(super) fn spot_pair_code_scope() -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Spot,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Spot, "78")
+            .expect("symbol"),
+    }
+}
+
 pub(super) fn perp_symbol_scope() -> SymbolScope {
     SymbolScope {
         exchange: exchange_id(),

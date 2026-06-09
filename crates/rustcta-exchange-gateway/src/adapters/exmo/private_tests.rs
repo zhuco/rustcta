@@ -1,7 +1,9 @@
 use rustcta_exchange_api::{
-    BalancesRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest,
-    PageCursor, PageRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
-    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient,
+    OpenOrdersRequest, OrderListConditionalLeg, OrderListLegType, OrderListRequest, PageCursor,
+    PageRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -45,6 +47,145 @@ async fn exmo_adapter_should_keep_private_operations_unsupported_without_credent
         .await
         .expect_err("private operation should be unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[tokio::test]
+async fn exmo_advanced_order_surfaces_should_remain_explicitly_unsupported() {
+    let adapter = ExmoGatewayAdapter::new(ExmoGatewayConfig {
+        api_key: Some("api-key".to_string()),
+        api_secret: Some("api-secret".to_string()),
+        enabled_private_rest: true,
+        ..ExmoGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_cancel_all_orders);
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol_scope(),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("order-1".to_string()),
+            new_client_order_id: None,
+            new_quantity: "0.2".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "exmo.amend_order"
+        }
+    ));
+
+    let list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("oco"),
+            symbol: symbol_scope(),
+            list_client_order_id: Some("oco-1".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.1".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some("12000".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("9000".to_string()),
+                stop_price: Some("9500".to_string()),
+                time_in_force: None,
+                client_order_id: Some("oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        list_error,
+        ExchangeApiError::Unsupported {
+            operation: "place_order_list"
+        }
+    ));
+
+    let place = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("batch-place-order"),
+        symbol: symbol_scope(),
+        client_order_id: Some("batch-place-1".to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: None,
+        quantity: "0.01".to_string(),
+        price: Some("10000".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![place],
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "exmo.batch_place_orders"
+        }
+    ));
+
+    let cancel = CancelOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("cancel"),
+        symbol: symbol_scope(),
+        client_order_id: None,
+        exchange_order_id: Some("order-1".to_string()),
+    };
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![cancel],
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "exmo.batch_cancel_orders"
+        }
+    ));
+
+    let cancel_all_error = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect_err("cancel all unsupported");
+    assert!(matches!(
+        cancel_all_error,
+        ExchangeApiError::Unsupported {
+            operation: "exmo.cancel_all_orders"
+        }
+    ));
 }
 
 #[test]

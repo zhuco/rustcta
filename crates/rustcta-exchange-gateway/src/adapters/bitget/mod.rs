@@ -26,6 +26,9 @@ mod public;
 mod public_tests;
 mod signing;
 #[cfg(test)]
+mod stream_tests;
+mod streams;
+#[cfg(test)]
 mod test_support;
 mod transport;
 
@@ -134,6 +137,7 @@ impl ExchangeClient for BitgetGatewayAdapter {
         capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
+        capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
@@ -168,17 +172,56 @@ impl ExchangeClient for BitgetGatewayAdapter {
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
         capabilities.max_recent_fill_limit = Some(100);
         capabilities.refresh_v2_from_legacy_flags();
-        capabilities.capabilities_v2.public_streams = CapabilitySupport::rest_fallback(
-            "public WebSocket is not wired in this gateway adapter; REST order-book snapshots provide resync",
-        );
+        capabilities.capabilities_v2.public_streams = if self.config.enabled_public_streams {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported("bitget public streams are disabled by configuration")
+        };
         capabilities.capabilities_v2.private_streams = CapabilitySupport::rest_fallback(
             "private WebSocket is not wired; reconciliation uses private REST readbacks",
         );
-        capabilities.capabilities_v2.stream_runtime.heartbeat_policy = HeartbeatPolicy::disabled();
+        capabilities.capabilities_v2.stream_runtime.heartbeat_policy = HeartbeatPolicy {
+            direction: HeartbeatDirection::ServerPing,
+            ping_interval_ms: 0,
+            pong_timeout_ms: 30_000,
+            stale_message_ms: 60_000,
+            requires_pong_payload_echo: false,
+        };
         capabilities.capabilities_v2.stream_runtime.public =
             capabilities.capabilities_v2.public_streams.clone();
         capabilities.capabilities_v2.stream_runtime.private =
             capabilities.capabilities_v2.private_streams.clone();
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .supports_subscribe = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .supports_unsubscribe = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .supports_public_subscribe = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .supports_public_unsubscribe = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .reconnect
+            .supported = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .reconnect
+            .requires_resubscribe = true;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .reconnect
+            .preserves_session = false;
         capabilities
             .capabilities_v2
             .stream_runtime
@@ -190,17 +233,27 @@ impl ExchangeClient for BitgetGatewayAdapter {
             .capabilities_v2
             .stream_runtime
             .heartbeat
-            .direction = rustcta_exchange_api::StreamHeartbeatDirection::None;
+            .direction = rustcta_exchange_api::StreamHeartbeatDirection::ServerPing;
         capabilities
             .capabilities_v2
             .stream_runtime
             .heartbeat
-            .required = false;
+            .required = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .supported = self.config.enabled_public_streams;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .timeout_ms = Some(30_000);
         capabilities
             .capabilities_v2
             .stream_runtime
             .heartbeat_policy
-            .direction = HeartbeatDirection::None;
+            .direction = HeartbeatDirection::ServerPing;
         capabilities.capabilities_v2.batch_place_orders = rustcta_exchange_api::BatchCapability {
             support: CapabilitySupport::composed(
                 "planner may compose sequential single-order REST calls",
@@ -340,11 +393,9 @@ impl ExchangeClient for BitgetGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "bitget.subscribe_public_stream",
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(

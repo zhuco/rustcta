@@ -15,9 +15,9 @@ use crate::types::{
     CrossArbOpportunityRowData, CrossArbPanelData, CrossArbPositionBundleRowData,
     CrossArbReadinessData, CrossArbRepairTaskRowData, CrossArbResultRowData,
     CrossArbSaveResultData, CrossArbSettingsFormData, CrossArbSourceData, Language,
-    SystemResourcePanelData,
+    StrategyLogPanelData, SystemResourcePanelData,
 };
-use crate::ui::{control_click, ControlActionTarget, Metric, Pager, StatusPill};
+use crate::ui::{control_click, ControlActionTarget, LogPager, Metric, Pager, StatusPill};
 use crate::utils::*;
 
 #[component]
@@ -26,6 +26,7 @@ pub(crate) fn CrossArbPanel(
     api_keys: Value,
     status: Value,
     processes: Value,
+    strategy_logs: Value,
     token: String,
     mut message: Signal<String>,
     lang: Language,
@@ -37,6 +38,10 @@ pub(crate) fn CrossArbPanel(
     let mut opp_page = use_signal(|| 0usize);
     let mut hedge_page = use_signal(|| 0usize);
     let mut symbol_page = use_signal(|| 0usize);
+    let mut console_tab = use_signal(|| "exchange".to_string());
+    let mut position_tab = use_signal(|| "positions".to_string());
+    let mut strategy_log_tab = use_signal(|| "all".to_string());
+    let mut strategy_log_page = use_signal(|| 0usize);
     let mut settings_dialog_open = use_signal(|| false);
     let source = CrossArbSourceData::from_dashboard(&cross_arb);
     let summary = source.summary.clone();
@@ -134,6 +139,8 @@ pub(crate) fn CrossArbPanel(
     let open_order_rows = CrossArbOpenOrderRowData::from_value_rows(&open_orders, lang);
     let arbitrage_result_rows = CrossArbResultRowData::from_value_rows(&arbitrage_results, lang);
     let repair_task_rows = CrossArbRepairTaskRowData::from_value_rows(&repair_tasks, lang);
+    let strategy_log_rows =
+        strategy_log_rows_for_category(&strategy_logs, &strategy_log_tab(), lang);
     let readiness =
         CrossArbReadinessData::from_values(&account_readiness, &strategy_readiness, lang);
     let panel_data = CrossArbPanelData::from_values(
@@ -149,12 +156,25 @@ pub(crate) fn CrossArbPanel(
     let opp_page_size = 24usize;
     let hedge_page_size = 18usize;
     let symbol_page_size = 40usize;
+    let strategy_log_panel_data = StrategyLogPanelData::from_value(&strategy_logs);
+    let strategy_log_page_size = strategy_log_panel_data.page_size;
     let opp_total_pages = page_count(opportunity_rows.len(), opp_page_size);
     let hedge_total_pages = page_count(position_bundle_rows.len(), hedge_page_size);
     let symbol_total_pages = page_count(symbols.len(), symbol_page_size);
+    let strategy_log_total_pages = page_count(strategy_log_rows.len(), strategy_log_page_size);
     let opp_start = page_start(opp_page(), opp_page_size, opportunity_rows.len());
     let hedge_start = page_start(hedge_page(), hedge_page_size, position_bundle_rows.len());
     let symbol_start = page_start(symbol_page(), symbol_page_size, symbols.len());
+    let strategy_log_start = page_start(
+        strategy_log_page(),
+        strategy_log_page_size,
+        strategy_log_rows.len(),
+    );
+    let strategy_log_source = strategy_log_source_text(&strategy_logs, lang);
+    let summary_execution_profile = initial_settings.execution_profile.clone();
+    let summary_hedge_notional = initial_settings.target_notional.clone();
+    let summary_max_positions = initial_settings.max_positions.clone();
+    let edit_form = initial_settings.clone();
     let load_settings_token = token.clone();
     let load_settings_api_keys = api_keys.clone();
     let load_settings_exchanges = exchanges.clone();
@@ -250,10 +270,10 @@ pub(crate) fn CrossArbPanel(
         let max_notional =
             parse_number_or_default(&max_hedge_notional(), target_notional).max(target_notional);
         let max_positions_value = parse_usize_or_default(&max_positions(), 10);
-        let min_open_spread_value = parse_number_or_default(&min_open_spread(), 0.005);
-        let min_net_edge_value = parse_number_or_default(&min_net_edge(), 0.005);
-        let close_profit_value = parse_number_or_default(&close_profit(), 0.0005);
-        let close_spread_value = parse_number_or_default(&close_spread(), 0.0005);
+        let min_open_spread_value = parse_pct_or_default(&min_open_spread(), 1.0);
+        let min_net_edge_value = parse_pct_or_default(&min_net_edge(), 0.2);
+        let close_profit_value = parse_pct_or_default(&close_profit(), 0.2);
+        let close_spread_value = parse_pct_or_default(&close_spread(), 0.2);
         let exchange_rows = exchange_settings();
         let enabled_exchange_count = exchange_rows
             .iter()
@@ -292,8 +312,14 @@ pub(crate) fn CrossArbPanel(
             "max_notional_per_exchange_usdt": max_notional * max_positions_value as f64,
             "max_total_notional_usdt": max_notional * max_positions_value as f64 * enabled_exchange_count,
             "min_open_raw_spread": min_open_spread_value,
+            "min_open_spread_pct": min_open_spread_value,
             "min_open_maker_taker_net_edge": min_net_edge_value,
+            "min_open_net_profit_pct": min_net_edge_value,
+            "min_open_net_edge_pct": min_net_edge_value,
+            "min_open_executable_depth_ratio": 1.2,
+            "close_min_net_profit_pct": close_profit_value,
             "lock_profit_dual_taker_pct": close_profit_value,
+            "expected_close_spread_pct": close_spread_value,
             "max_close_spread_pct": close_spread_value,
             "execution_profile": execution_profile()
         });
@@ -309,6 +335,25 @@ pub(crate) fn CrossArbPanel(
                     exchange_settings.set(exchange_form.exchanges);
                     match save_cross_arb_settings(&token_value, &body).await {
                         Ok(value) => {
+                            let settings_value = value
+                                .get("settings")
+                                .cloned()
+                                .unwrap_or_else(|| value.clone());
+                            let form = CrossArbSettingsFormData::from_settings(
+                                &settings_value,
+                                &api_keys_value,
+                                &seed_exchanges,
+                                lang,
+                            );
+                            symbol_text.set(form.symbols_text);
+                            hedge_notional.set(form.target_notional);
+                            max_hedge_notional.set(form.max_notional);
+                            max_positions.set(form.max_positions);
+                            min_open_spread.set(form.min_open_spread);
+                            min_net_edge.set(form.min_net_edge);
+                            close_profit.set(form.close_profit);
+                            close_spread.set(form.close_spread);
+                            execution_profile.set(form.execution_profile);
                             settings_dialog_open.set(false);
                             message.set(format!(
                                 "{} {}",
@@ -379,7 +424,7 @@ pub(crate) fn CrossArbPanel(
                 Metric { label: s(lang, "data_source"), value: panel_data.data_source.clone() }
                 Metric { label: s(lang, "event_count"), value: panel_data.valid_events.clone() }
                 Metric { label: s(lang, "parse_errors"), value: panel_data.parse_errors.clone() }
-                Metric { label: s(lang, "opportunity_count"), value: format!("{} / {}", panel_data.can_open_opportunities, opportunities.len()) }
+                Metric { label: s(lang, "opportunity_count"), value: format!("{} / {} / {}", panel_data.can_open_opportunities, panel_data.market_can_open_opportunities, opportunities.len()) }
                 Metric { label: s(lang, "signal_count"), value: format!("{} / {}", panel_data.open_signals, signals.len()) }
                 Metric { label: s(lang, "hedge_records"), value: hedge_records.len().to_string() }
                 Metric { label: s(lang, "repair_tasks"), value: repair_tasks.len().to_string() }
@@ -398,7 +443,22 @@ pub(crate) fn CrossArbPanel(
                     div { class: "row-actions",
                         span { class: readiness.strategy_class, "{readiness.strategy_label}" }
                         button { class: "button", onclick: load_settings, {s(lang, "load_config")} }
-                        button { class: "button primary", onclick: move |_| settings_dialog_open.set(true), {s(lang, "edit_config")} }
+                        button {
+                            class: "button primary",
+                            onclick: move |_| {
+                                symbol_text.set(edit_form.symbols_text.clone());
+                                hedge_notional.set(edit_form.target_notional.clone());
+                                max_hedge_notional.set(edit_form.max_notional.clone());
+                                max_positions.set(edit_form.max_positions.clone());
+                                min_open_spread.set(edit_form.min_open_spread.clone());
+                                min_net_edge.set(edit_form.min_net_edge.clone());
+                                close_profit.set(edit_form.close_profit.clone());
+                                close_spread.set(edit_form.close_spread.clone());
+                                execution_profile.set(edit_form.execution_profile.clone());
+                                settings_dialog_open.set(true);
+                            },
+                            {s(lang, "edit_config")}
+                        }
                     }
                 }
                 div { class: "settings-summary-strip",
@@ -408,15 +468,15 @@ pub(crate) fn CrossArbPanel(
                     }
                     div {
                         span { {s(lang, "execution_profile")} }
-                        strong { "{execution_profile()}" }
+                        strong { "{summary_execution_profile}" }
                     }
                     div {
                         span { {s(lang, "per_arb_notional")} }
-                        strong { "{hedge_notional()}" }
+                        strong { "{summary_hedge_notional}" }
                     }
                     div {
                         span { {s(lang, "max_positions")} }
-                        strong { "{max_positions()}" }
+                        strong { "{summary_max_positions}" }
                     }
                 }
             }
@@ -535,19 +595,19 @@ pub(crate) fn CrossArbPanel(
                                     input { value: "{max_positions()}", oninput: move |event| max_positions.set(event.value()) }
                                 }
                                 label { class: "form-field",
-                                    span { {s(lang, "raw_spread")} }
+                                    span { {s(lang, "open_raw_spread_pct")} }
                                     input { value: "{min_open_spread()}", oninput: move |event| min_open_spread.set(event.value()) }
                                 }
                                 label { class: "form-field",
-                                    span { {s(lang, "expected_edge")} }
+                                    span { {s(lang, "open_net_spread_pct")} }
                                     input { value: "{min_net_edge()}", oninput: move |event| min_net_edge.set(event.value()) }
                                 }
                                 label { class: "form-field",
-                                    span { {s(lang, "close_profit")} }
+                                    span { {s(lang, "close_profit_pct")} }
                                     input { value: "{close_profit()}", oninput: move |event| close_profit.set(event.value()) }
                                 }
                                 label { class: "form-field",
-                                    span { {s(lang, "close_spread")} }
+                                    span { {s(lang, "expected_close_spread_pct")} }
                                     input { value: "{close_spread()}", oninput: move |event| close_spread.set(event.value()) }
                                 }
                             }
@@ -562,315 +622,37 @@ pub(crate) fn CrossArbPanel(
                     }
                 }
             }
-            div { class: "panel exchange-status-panel",
-                h2 { {s(lang, "exchange_console")} }
-                div { class: "exchange-card-grid",
-                    for card in exchange_status_cards.iter() {
-                        div { class: "exchange-status-card",
-                            div { class: "exchange-card-head",
-                                strong { "{card.exchange}" }
-                                span { class: card.status_class, "{card.status_label}" }
-                            }
-                            dl {
-                                div { dt { {s(lang, "subscriptions")} } dd { "{card.subscriptions}" } }
-                                div { dt { {s(lang, "messages")} } dd { "{card.messages}" } }
-                                div { dt { {s(lang, "latency")} } dd { "{card.latency}" } }
-                                div { dt { {s(lang, "server_offset")} } dd { "{card.server_offset}" } }
-                                div { dt { {s(lang, "book_count")} } dd { "{card.book_count}" } }
-                                div { dt { {s(lang, "last_update")} } dd { "{card.last_update}" } }
-                                div { dt { {s(lang, "reconnects")} } dd { "{card.reconnects}" } }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "two spot-main",
-                div { class: "panel",
-                    h2 { {s(lang, "exchange_console")} }
-                    div { class: "table-wrap compact-table",
-                        table {
-                            thead { tr {
-                                th { {s(lang, "exchange")} } th { {s(lang, "status")} } th { {s(lang, "maker_volume")} } th { {s(lang, "taker_volume")} } th { {s(lang, "order_count")} } th { {s(lang, "taker_success_rate")} } th { {s(lang, "latency")} } th { {s(lang, "actions")} }
-                            } }
-                            tbody {
-                                for row in exchange_console_rows.iter() {
-                                    tr {
-                                        td { "{row.exchange}" }
-                                        td { span { class: "pill", {s(lang, "active")} } }
-                                        td { "{row.maker_volume}" }
-                                        td { "{row.taker_volume}" }
-                                        td { "{row.order_count}" }
-                                        td { "{row.taker_success_rate}" }
-                                        td { "{row.latency}" }
-                                        td {
-                                            div { class: "row-actions",
-                                                button { class: "mini-button", onclick: control_click(ControlActionTarget::Exchange { exchange: row.exchange.clone(), command: "pause" }, token.clone(), message, lang, "exchange_pause"), {s(lang, "stop")} }
-                                                button { class: "mini-button primary", onclick: control_click(ControlActionTarget::Exchange { exchange: row.exchange.clone(), command: "resume" }, token.clone(), message, lang, "exchange_resume"), {s(lang, "enable")} }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            div { class: "cross-arb-arbitrage-stack",
                 div { class: "panel",
                     div { class: "panel-title-row",
-                        h2 { {s(lang, "account_console")} }
-                        span { class: readiness.account_class, "{readiness.account_label}" }
+                        h2 { {s(lang, "contract_opportunities")} }
+                        Pager { page: opp_page(), total_pages: opp_total_pages, on_prev: move |_| opp_page.set(opp_page().saturating_sub(1)), on_next: move |_| opp_page.set((opp_page() + 1).min(opp_total_pages.saturating_sub(1))), lang }
                     }
-                    div { class: "table-wrap compact-table",
+                    div { class: "table-wrap compact-table fixed-opportunity-table",
                         table {
                             thead { tr {
-                                th { {s(lang, "exchange")} } th { {s(lang, "account")} } th { {s(lang, "credential_namespace")} } th { {s(lang, "credential_status")} } th { {s(lang, "status")} } th { {s(lang, "equity")} } th { {s(lang, "quote_equity")} } th { {s(lang, "update_time")} } th { {s(lang, "actions")} }
+                                th { {s(lang, "symbol")} } th { {s(lang, "route")} } th { {s(lang, "maker")} } th { {s(lang, "taker")} } th { {s(lang, "long_entry_price")} } th { {s(lang, "short_entry_price")} } th { {s(lang, "raw_book_prices")} } th { {s(lang, "raw_spread")} } th { {s(lang, "expected_edge")} } th { {s(lang, "target_notional")} } th { {s(lang, "executable_notional")} } th { {s(lang, "fees")} } th { {s(lang, "funding")} } th { {s(lang, "age_ms")} } th { {s(lang, "market_can_open")} } th { {s(lang, "can_open")} } th { {s(lang, "warnings")} }
                             } }
                             tbody {
-                                for row in account_rows.iter().take(40) {
-                                    {
-                                        let credential_exchange = row.credential_exchange.clone();
-                                        let credential_account = row.credential_account.clone();
-                                        let credential_namespace = row.credential_namespace.clone();
-                                        rsx! {
+                                for row in opportunity_rows.iter().skip(opp_start).take(opp_page_size) {
                                     tr {
-                                        td { "{row.exchange}" }
-                                        td { "{row.account_id}" }
-                                        td { "{row.credential_namespace}" }
-                                        td { span { class: row.credential_class, "{row.credential_text}" } }
-                                        td { span { class: row.status_class, "{row.status_text}" } }
-                                        td { "{row.total}" }
-                                        td { "{row.available}" }
-                                        td { "{row.recorded_at}" }
-                                        td {
-                                            if !row.credentials_ready {
-                                                button {
-                                                    class: "mini-button primary",
-                                                    onclick: move |_| {
-                                                        api_key_exchange.set(credential_exchange.clone());
-                                                        api_key_account.set(credential_account.clone());
-                                                        api_key_namespace.set(credential_namespace.clone());
-                                                        save_active_view(ControlPanelView::ApiKeys);
-                                                        active_view.set(ControlPanelView::ApiKeys);
-                                                        message.set(t(lang, "api_keys_loaded_for_edit").to_string());
-                                                    },
-                                                    {s(lang, "configure_credentials")}
-                                                }
-                                            } else {
-                                                span { class: "muted", "-" }
-                                            }
-                                        }
-                                    }
-                                        }
-                                    }
-                                }
-                                if balance_rows.is_empty() {
-                                    for exchange in exchanges.iter() {
-                                        tr {
-                                            td { "{exchange}" }
-                                            td { "default" }
-                                            td { "-" }
-                                            td { span { class: "pill warn", {s(lang, "offline")} } }
-                                            td { "$0.00" }
-                                            td { "$0.00" }
-                                            td { "-" }
-                                            td { "-" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "panel",
-                div { class: "panel-title-row",
-                    h2 { {s(lang, "contract_opportunities")} }
-                    Pager { page: opp_page(), total_pages: opp_total_pages, on_prev: move |_| opp_page.set(opp_page().saturating_sub(1)), on_next: move |_| opp_page.set((opp_page() + 1).min(opp_total_pages.saturating_sub(1))), lang }
-                }
-                div { class: "table-wrap compact-table",
-                    table {
-                        thead { tr {
-                            th { {s(lang, "symbol")} } th { {s(lang, "route")} } th { {s(lang, "maker")} } th { {s(lang, "taker")} } th { {s(lang, "raw_spread")} } th { {s(lang, "expected_edge")} } th { {s(lang, "target_notional")} } th { {s(lang, "executable_notional")} } th { {s(lang, "fees")} } th { {s(lang, "funding")} } th { {s(lang, "age_ms")} } th { {s(lang, "can_open")} } th { {s(lang, "warnings")} }
-                        } }
-                        tbody {
-                            for row in opportunity_rows.iter().skip(opp_start).take(opp_page_size) {
-                                tr {
-                                    td { "{row.canonical_symbol}" }
-                                    td { "{row.route}" }
-                                    td { "{row.maker}" }
-                                    td { "{row.taker}" }
-                                    td { class: profit_class(row.raw_open_spread), "{row.raw_open_spread_text}" }
-                                    td { class: profit_class(row.maker_taker_net_edge), "{row.maker_taker_net_edge_text}" }
-                                    td { "{row.target_notional_usdt}" }
-                                    td { "{row.executable_notional_usdt}" }
-                                    td { "{row.fees}" }
-                                    td { "{row.expected_funding_usdt}" }
-                                    td { "{row.book_age_ms}" }
-                                    td { StatusPill { value: row.can_open, lang } }
-                                    td { "{row.reject_reasons}" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "two spot-main",
-                div { class: "panel",
-                    div { class: "panel-title-row",
-                        h2 { {s(lang, "coin_console")} }
-                        Pager { page: symbol_page(), total_pages: symbol_total_pages, on_prev: move |_| symbol_page.set(symbol_page().saturating_sub(1)), on_next: move |_| symbol_page.set((symbol_page() + 1).min(symbol_total_pages.saturating_sub(1))), lang }
-                    }
-                    div { class: "table-wrap compact-table",
-                        table {
-                            thead { tr {
-                                th { {s(lang, "symbol")} } th { {s(lang, "status")} } th { {s(lang, "occupied_capital")} } th { {s(lang, "arb_exchanges")} } th { {s(lang, "trade_volume")} } th { {s(lang, "est_profit")} } th { {s(lang, "realized_pnl")} } th { {s(lang, "actions")} }
-                            } }
-                            tbody {
-                                for symbol in symbols.iter().skip(symbol_start).take(symbol_page_size) {
-                                    tr {
-                                        td { "{symbol}" }
-                                        td { span { class: "pill", {s(lang, "active")} } }
-                                        td { "{format_usdt(cross_arb_symbol_capital(&opportunities, symbol))}" }
-                                        td { "{cross_arb_symbol_exchanges(&opportunities, symbol)}" }
-                                        td { "{format_usdt(cross_arb_symbol_volume(&private_events, symbol))}" }
-                                        td { class: profit_class(cross_arb_symbol_est(&signals, symbol)), "{signed_usdt(cross_arb_symbol_est(&signals, symbol))}" }
-                                        td { "{cross_arb_symbol_realized_pct(&hedge_records, symbol)}" }
-                                        td {
-                                            div { class: "row-actions",
-                                                button { class: "mini-button", onclick: control_click(ControlActionTarget::Symbol { symbol: symbol.clone(), command: "pause" }, token.clone(), message, lang, "symbol_pause"), {s(lang, "pause")} }
-                                                button { class: "mini-button primary", onclick: control_click(ControlActionTarget::Symbol { symbol: symbol.clone(), command: "resume" }, token.clone(), message, lang, "symbol_resume"), {s(lang, "start")} }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                div { class: "panel",
-                    div { class: "panel-title-row",
-                        h2 { {s(lang, "market_snapshots")} }
-                        button { class: "mini-button", onclick: load_market_snapshots, {s(lang, "load_market_snapshots")} }
-                    }
-                    div { class: "table-wrap compact-table",
-                        table {
-                            thead { tr {
-                                th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "bid")} } th { {s(lang, "ask")} } th { {s(lang, "age_ms")} } th { {s(lang, "sequence")} } th { {s(lang, "recorded_at")} }
-                            } }
-                            tbody {
-                                for row in CrossArbMarketSnapshotRowData::from_value_rows(&market_snapshot_rows(), lang).iter().take(120) {
-                                    tr {
-                                        td { "{row.exchange}" }
-                                        td { "{row.symbol}" }
-                                        td { "{row.best_bid}" }
-                                        td { "{row.best_ask}" }
-                                        td { "{row.book_age_ms}" }
-                                        td { "{row.sequence}" }
-                                        td { "{row.recorded_at}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                div { class: "panel",
-                    div { class: "panel-title-row",
-                        h2 { {s(lang, "contract_rules")} }
-                        button { class: "mini-button", onclick: load_instruments, {s(lang, "load_contract_rules")} }
-                    }
-                    div { class: "runtime-strip cross-runtime-strip",
-                        div {
-                            span { {s(lang, "known_symbols")} }
-                            strong { "{panel_data.instrument_known_symbols} / {panel_data.instrument_symbol_count}" }
-                        }
-                        div {
-                            span { {s(lang, "feasible_symbols")} }
-                            strong { "{panel_data.instrument_feasible_symbols} / {panel_data.instrument_symbol_count}" }
-                        }
-                        div {
-                            span { {s(lang, "feasible_instruments")} }
-                            strong { "{panel_data.instrument_feasible_instruments} / {panel_data.instrument_known_instruments}" }
-                        }
-                        div {
-                            span { {s(lang, "required_notional_max")} }
-                            strong { "{panel_data.instrument_required_notional_max}" }
-                        }
-                    }
-                    div { class: "table-wrap compact-table",
-                        table {
-                            thead { tr {
-                                th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "exchange_symbol")} } th { {s(lang, "price_tick")} } th { {s(lang, "quantity_step")} } th { {s(lang, "min_qty")} } th { {s(lang, "min_notional")} } th { {s(lang, "required_notional")} } th { {s(lang, "headroom")} } th { {s(lang, "feasibility")} } th { {s(lang, "status")} }
-                            } }
-                            tbody {
-                                for row in CrossArbInstrumentRowData::from_value_rows(&instrument_rows(), lang).iter().take(120) {
-                                    tr {
-                                        td { "{row.exchange}" }
                                         td { "{row.canonical_symbol}" }
-                                        td { "{row.exchange_symbol}" }
-                                        td { "{row.price_tick}" }
-                                        td { "{row.quantity_step}" }
-                                        td { "{row.min_qty}" }
-                                        td { "{row.min_notional}" }
-                                        td { "{row.required_notional}" }
-                                        td { class: profit_class(row.headroom_value), "{row.headroom}" }
-                                        td { span { class: row.feasibility_class, "{row.feasibility_label}" } }
-                                        td { "{row.status}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "panel",
-                div { class: "panel-title-row",
-                    h2 { {s(lang, "positions")} }
-                    Pager { page: hedge_page(), total_pages: hedge_total_pages, on_prev: move |_| hedge_page.set(hedge_page().saturating_sub(1)), on_next: move |_| hedge_page.set((hedge_page() + 1).min(hedge_total_pages.saturating_sub(1))), lang }
-                }
-                div { class: "table-wrap compact-table",
-                    table {
-                        thead { tr {
-                            th { "Bundle" } th { {s(lang, "symbol")} } th { {s(lang, "long_exchange")} } th { {s(lang, "short_exchange")} } th { {s(lang, "status")} } th { {s(lang, "expected_edge")} } th { {s(lang, "close_now")} } th { {s(lang, "close_threshold")} } th { {s(lang, "close_ready")} } th { {s(lang, "close_route")} } th { {s(lang, "update_time")} }
-                        } }
-                        tbody {
-                            for row in position_bundle_rows.iter().skip(hedge_start).take(hedge_page_size) {
-                                tr {
-                                    td { "{row.bundle_id}" }
-                                    td { "{row.symbol}" }
-                                    td { "{row.long_exchange}" }
-                                    td { "{row.short_exchange}" }
-                                    td { "{row.status}" }
-                                    td { class: profit_class(row.entry_net_edge_pct), "{row.entry_net_edge_pct_text}" }
-                                    td { class: profit_class(row.close_profit_now), "{row.close_profit_now_text}" }
-                                    td { "{row.close_threshold_pct}" }
-                                    td { StatusPill { value: row.closeable, lang } }
-                                    td { "{row.close_route}" }
-                                    td { "{row.updated_at}" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "two spot-main",
-                div { class: "panel",
-                    h2 { {s(lang, "open_orders")} }
-                    div { class: "table-wrap compact-table",
-                        table {
-                            thead { tr {
-                                th { {s(lang, "source")} } th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "side")} } th { {s(lang, "price")} } th { {s(lang, "remaining_qty")} } th { {s(lang, "notional")} } th { {s(lang, "status")} } th { {s(lang, "order_ref")} }
-                            } }
-                            tbody {
-                                for row in open_order_rows.iter().take(40) {
-                                    tr {
-                                        td { "{row.source}" }
-                                        td { "{row.exchange}" }
-                                        td { "{row.symbol}" }
-                                        td { "{row.side}" }
-                                        td { "{row.price}" }
-                                        td { "{row.remaining_qty}" }
-                                        td { "{row.notional}" }
-                                        td { "{row.status}" }
-                                        td { "{row.order_ref}" }
+                                        td { "{row.route}" }
+                                        td { "{row.maker}" }
+                                        td { "{row.taker}" }
+                                        td { class: "numeric-cell", "{row.long_entry_price}" }
+                                        td { class: "numeric-cell", "{row.short_entry_price}" }
+                                        td { class: "numeric-cell", "{row.raw_book_prices}" }
+                                        td { class: profit_class(row.raw_open_spread), "{row.raw_open_spread_text}" }
+                                        td { class: profit_class(row.maker_taker_net_edge), "{row.maker_taker_net_edge_text}" }
+                                        td { "{row.target_notional_usdt}" }
+                                        td { "{row.executable_notional_usdt}" }
+                                        td { "{row.fees}" }
+                                        td { "{row.expected_funding_usdt}" }
+                                        td { "{row.book_age_ms}" }
+                                        td { StatusPill { value: row.market_can_open, lang } }
+                                        td { StatusPill { value: row.can_open, lang } }
+                                        td { class: "reason-cell", ReasonTags { text: row.reject_reasons.clone(), lang } }
                                     }
                                 }
                             }
@@ -884,17 +666,19 @@ pub(crate) fn CrossArbPanel(
                         div { span { {s(lang, "win_rate")} } strong { "{panel_data.win_rate}" } }
                         div { span { {s(lang, "cumulative_profit")} } strong { class: profit_class(panel_data.realized_profit_usdt), "{signed_usdt(panel_data.realized_profit_usdt)}" } }
                     }
-                    div { class: "table-wrap compact-table",
+                    div { class: "table-wrap compact-table fixed-result-table",
                         table {
                             thead { tr {
-                                th { "Bundle" } th { {s(lang, "symbol")} } th { {s(lang, "route")} } th { {s(lang, "target_notional")} } th { {s(lang, "realized_pnl")} } th { {s(lang, "cumulative_profit")} } th { {s(lang, "update_time")} }
+                                th { "Bundle" } th { {s(lang, "status")} } th { {s(lang, "symbol")} } th { {s(lang, "route")} } th { {s(lang, "open_close_price")} } th { {s(lang, "target_notional")} } th { {s(lang, "realized_pnl")} } th { {s(lang, "cumulative_profit")} } th { {s(lang, "update_time")} }
                             } }
                             tbody {
                                 for row in arbitrage_result_rows.iter().take(40) {
                                     tr {
                                         td { "{row.bundle_id}" }
+                                        td { "{row.lifecycle}" }
                                         td { "{row.symbol}" }
                                         td { "{row.route}" }
+                                        td { "{row.prices}" }
                                         td { "{row.target_notional_usdt}" }
                                         td { class: profit_class(row.realized_profit_usdt), "{row.realized_pnl}" }
                                         td { class: profit_class(row.cumulative_profit_usdt), "{row.cumulative_profit}" }
@@ -906,39 +690,385 @@ pub(crate) fn CrossArbPanel(
                     }
                 }
             }
-            div { class: "two spot-main",
-                div { class: "panel",
-                    h2 { {s(lang, "repair_tasks_panel")} }
-                    div { class: "table-wrap compact-table",
-                        table {
-                            thead { tr {
-                                th { {s(lang, "status")} } th { {s(lang, "exchange")} } th { {s(lang, "side")} } th { {s(lang, "qty")} } th { {s(lang, "failures")} } th { {s(lang, "warnings")} }
-                            } }
-                            tbody {
-                                for row in repair_task_rows.iter().take(40) {
-                                    tr {
-                                        td { "{row.status}" }
-                                        td { "{row.failed_exchange}" }
-                                        td { "{row.side}" }
-                                        td { "{row.quantity}" }
-                                        td { "{row.attempt_count}" }
-                                        td { "{row.last_error}" }
+            div { class: "panel tab-panel fixed-tab-panel cross-console-tabs",
+                div { class: "tab-bar",
+                    button { class: if console_tab() == "exchange" { "tab-button active" } else { "tab-button" }, onclick: move |_| console_tab.set("exchange".to_string()), {s(lang, "exchange_console")} }
+                    button { class: if console_tab() == "account" { "tab-button active" } else { "tab-button" }, onclick: move |_| console_tab.set("account".to_string()), {s(lang, "account_console")} }
+                    button { class: if console_tab() == "coin" { "tab-button active" } else { "tab-button" }, onclick: move |_| console_tab.set("coin".to_string()), {s(lang, "coin_console")} }
+                }
+                if console_tab() == "exchange" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "exchange-card-grid compact-exchange-card-grid",
+                            for card in exchange_status_cards.iter() {
+                                div { class: "exchange-status-card",
+                                    div { class: "exchange-card-head",
+                                        strong { "{card.exchange}" }
+                                        span { class: card.status_class, "{card.status_label}" }
+                                    }
+                                    dl {
+                                        div { dt { {s(lang, "subscriptions")} } dd { "{card.subscriptions}" } }
+                                        div { dt { {s(lang, "messages")} } dd { "{card.messages}" } }
+                                        div { dt { {s(lang, "latency")} } dd { "{card.latency}" } }
+                                        div { dt { {s(lang, "server_offset")} } dd { "{card.server_offset}" } }
+                                        div { dt { {s(lang, "book_count")} } dd { "{card.book_count}" } }
+                                        div { dt { {s(lang, "last_update")} } dd { "{card.last_update}" } }
+                                        div { dt { {s(lang, "reconnects")} } dd { "{card.reconnects}" } }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "exchange")} } th { {s(lang, "status")} } th { {s(lang, "maker_volume")} } th { {s(lang, "taker_volume")} } th { {s(lang, "order_count")} } th { {s(lang, "taker_success_rate")} } th { {s(lang, "latency")} } th { {s(lang, "actions")} }
+                                } }
+                                tbody {
+                                    for row in exchange_console_rows.iter() {
+                                        tr {
+                                            td { "{row.exchange}" }
+                                            td { span { class: "pill", {s(lang, "active")} } }
+                                            td { "{row.maker_volume}" }
+                                            td { "{row.taker_volume}" }
+                                            td { "{row.order_count}" }
+                                            td { "{row.taker_success_rate}" }
+                                            td { "{row.latency}" }
+                                            td {
+                                                div { class: "row-actions",
+                                                    button { class: "mini-button", onclick: control_click(ControlActionTarget::Exchange { exchange: row.exchange.clone(), command: "pause" }, token.clone(), message, lang, "exchange_pause"), {s(lang, "stop")} }
+                                                    button { class: "mini-button primary", onclick: control_click(ControlActionTarget::Exchange { exchange: row.exchange.clone(), command: "resume" }, token.clone(), message, lang, "exchange_resume"), {s(lang, "enable")} }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                div { class: "panel",
-                    h2 { {s(lang, "runtime_health")} }
-                    div { class: "runtime-strip cross-runtime-strip",
-                        div { span { "Fill" } strong { "{event_summary.fill_events}" } }
-                        div { span { "Balance" } strong { "{event_summary.balance_events}" } }
-                        div { span { "Error" } strong { "{event_summary.error_events}" } }
+                if console_tab() == "account" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "panel-title-row tab-title-row",
+                            span { class: readiness.account_class, "{readiness.account_label}" }
+                        }
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "exchange")} } th { {s(lang, "account")} } th { {s(lang, "credential_namespace")} } th { {s(lang, "credential_status")} } th { {s(lang, "status")} } th { {s(lang, "equity")} } th { {s(lang, "quote_equity")} } th { {s(lang, "update_time")} } th { {s(lang, "actions")} }
+                                } }
+                                tbody {
+                                    for row in account_rows.iter().take(40) {
+                                        {
+                                            let credential_exchange = row.credential_exchange.clone();
+                                            let credential_account = row.credential_account.clone();
+                                            let credential_namespace = row.credential_namespace.clone();
+                                            rsx! {
+                                        tr {
+                                            td { "{row.exchange}" }
+                                            td { "{row.account_id}" }
+                                            td { "{row.credential_namespace}" }
+                                            td { span { class: row.credential_class, "{row.credential_text}" } }
+                                            td { span { class: row.status_class, "{row.status_text}" } }
+                                            td { "{row.total}" }
+                                            td { "{row.available}" }
+                                            td { "{row.recorded_at}" }
+                                            td {
+                                                if !row.credentials_ready {
+                                                    button {
+                                                        class: "mini-button primary",
+                                                        onclick: move |_| {
+                                                            api_key_exchange.set(credential_exchange.clone());
+                                                            api_key_account.set(credential_account.clone());
+                                                            api_key_namespace.set(credential_namespace.clone());
+                                                            save_active_view(ControlPanelView::ApiKeys);
+                                                            active_view.set(ControlPanelView::ApiKeys);
+                                                            message.set(t(lang, "api_keys_loaded_for_edit").to_string());
+                                                        },
+                                                        {s(lang, "configure_credentials")}
+                                                    }
+                                                } else {
+                                                    span { class: "muted", "-" }
+                                                }
+                                            }
+                                        }
+                                            }
+                                        }
+                                    }
+                                    if balance_rows.is_empty() {
+                                        for exchange in exchanges.iter() {
+                                            tr {
+                                                td { "{exchange}" }
+                                                td { "default" }
+                                                td { "-" }
+                                                td { span { class: "pill warn", {s(lang, "offline")} } }
+                                                td { span { class: "pill warn", {s(lang, "offline")} } }
+                                                td { "$0.00" }
+                                                td { "$0.00" }
+                                                td { "-" }
+                                                td { "-" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    div { class: "symbol-cloud",
-                        for exchange in exchanges.iter() {
-                            span { class: "chip active", "{exchange}" }
+                }
+                if console_tab() == "coin" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "panel-title-row tab-title-row",
+                            Pager { page: symbol_page(), total_pages: symbol_total_pages, on_prev: move |_| symbol_page.set(symbol_page().saturating_sub(1)), on_next: move |_| symbol_page.set((symbol_page() + 1).min(symbol_total_pages.saturating_sub(1))), lang }
+                        }
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "symbol")} } th { {s(lang, "status")} } th { {s(lang, "occupied_capital")} } th { {s(lang, "arb_exchanges")} } th { {s(lang, "trade_volume")} } th { {s(lang, "est_profit")} } th { {s(lang, "realized_pnl")} } th { {s(lang, "actions")} }
+                                } }
+                                tbody {
+                                    for symbol in symbols.iter().skip(symbol_start).take(symbol_page_size) {
+                                        tr {
+                                            td { "{symbol}" }
+                                            td { span { class: "pill", {s(lang, "active")} } }
+                                            td { "{format_usdt(cross_arb_symbol_capital(&opportunities, symbol))}" }
+                                            td { "{cross_arb_symbol_exchanges(&opportunities, symbol)}" }
+                                            td { "{format_usdt(cross_arb_symbol_volume(&private_events, symbol))}" }
+                                            td { class: profit_class(cross_arb_symbol_est(&signals, symbol)), "{signed_usdt(cross_arb_symbol_est(&signals, symbol))}" }
+                                            td { "{cross_arb_symbol_realized_pct(&hedge_records, symbol)}" }
+                                            td {
+                                                div { class: "row-actions",
+                                                    button { class: "mini-button", onclick: control_click(ControlActionTarget::Symbol { symbol: symbol.clone(), command: "pause" }, token.clone(), message, lang, "symbol_pause"), {s(lang, "pause")} }
+                                                    button { class: "mini-button primary", onclick: control_click(ControlActionTarget::Symbol { symbol: symbol.clone(), command: "resume" }, token.clone(), message, lang, "symbol_resume"), {s(lang, "start")} }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "panel tab-panel fixed-tab-panel cross-position-tabs",
+                div { class: "tab-bar",
+                    button { class: if position_tab() == "positions" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("positions".to_string()), {s(lang, "positions")} }
+                    button { class: if position_tab() == "orders" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("orders".to_string()), {s(lang, "open_orders")} }
+                    button { class: if position_tab() == "repair" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("repair".to_string()), {s(lang, "repair_tasks_panel")} }
+                    button { class: if position_tab() == "market" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("market".to_string()), {s(lang, "market_snapshots")} }
+                    button { class: if position_tab() == "rules" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("rules".to_string()), {s(lang, "contract_rules")} }
+                }
+                if position_tab() == "positions" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "panel-title-row tab-title-row",
+                            Pager { page: hedge_page(), total_pages: hedge_total_pages, on_prev: move |_| hedge_page.set(hedge_page().saturating_sub(1)), on_next: move |_| hedge_page.set((hedge_page() + 1).min(hedge_total_pages.saturating_sub(1))), lang }
+                        }
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { "Bundle" } th { {s(lang, "symbol")} } th { {s(lang, "long_exchange")} } th { {s(lang, "short_exchange")} } th { {s(lang, "status")} } th { {s(lang, "entry_price")} } th { {s(lang, "expected_edge")} } th { {s(lang, "close_price")} } th { {s(lang, "close_now")} } th { {s(lang, "close_threshold")} } th { {s(lang, "close_ready")} } th { {s(lang, "close_route")} } th { {s(lang, "update_time")} }
+                                } }
+                                tbody {
+                                    for row in position_bundle_rows.iter().skip(hedge_start).take(hedge_page_size) {
+                                        tr {
+                                            td { "{row.bundle_id}" }
+                                            td { "{row.symbol}" }
+                                            td { "{row.long_exchange}" }
+                                            td { "{row.short_exchange}" }
+                                            td { "{row.status}" }
+                                            td { "{row.entry_prices}" }
+                                            td { class: profit_class(row.entry_net_edge_pct), "{row.entry_net_edge_pct_text}" }
+                                            td { "{row.close_prices}" }
+                                            td { class: profit_class(row.close_profit_now), "{row.close_profit_now_text}" }
+                                            td { "{row.close_threshold_pct}" }
+                                            td { StatusPill { value: row.closeable, lang } }
+                                            td { "{row.close_route}" }
+                                            td { "{row.updated_at}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if position_tab() == "orders" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "source")} } th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "side")} } th { {s(lang, "price")} } th { {s(lang, "remaining_qty")} } th { {s(lang, "notional")} } th { {s(lang, "status")} } th { {s(lang, "order_ref")} }
+                                } }
+                                tbody {
+                                    for row in open_order_rows.iter().take(40) {
+                                        tr {
+                                            td { "{row.source}" }
+                                            td { "{row.exchange}" }
+                                            td { "{row.symbol}" }
+                                            td { "{row.side}" }
+                                            td { "{row.price}" }
+                                            td { "{row.remaining_qty}" }
+                                            td { "{row.notional}" }
+                                            td { "{row.status}" }
+                                            td { "{row.order_ref}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if position_tab() == "repair" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "status")} } th { {s(lang, "exchange")} } th { {s(lang, "side")} } th { {s(lang, "qty")} } th { {s(lang, "failures")} } th { {s(lang, "warnings")} }
+                                } }
+                                tbody {
+                                    for row in repair_task_rows.iter().take(40) {
+                                        tr {
+                                            td { "{row.status}" }
+                                            td { "{row.failed_exchange}" }
+                                            td { "{row.side}" }
+                                            td { "{row.quantity}" }
+                                            td { "{row.attempt_count}" }
+                                            td { class: "reason-cell", ReasonTags { text: row.last_error.clone(), lang } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if position_tab() == "market" {
+                    div { class: "tab-content fixed-tab-content",
+                        div { class: "panel-title-row tab-title-row",
+                            button { class: "mini-button", onclick: load_market_snapshots, {s(lang, "load_market_snapshots")} }
+                        }
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "bid")} } th { {s(lang, "ask")} } th { {s(lang, "age_ms")} } th { {s(lang, "sequence")} } th { {s(lang, "recorded_at")} }
+                                } }
+                                tbody {
+                                    for row in CrossArbMarketSnapshotRowData::from_value_rows(&market_snapshot_rows(), lang).iter().take(120) {
+                                        tr {
+                                            td { "{row.exchange}" }
+                                            td { "{row.symbol}" }
+                                            td { "{row.best_bid}" }
+                                            td { "{row.best_ask}" }
+                                            td { "{row.book_age_ms}" }
+                                            td { "{row.sequence}" }
+                                            td { "{row.recorded_at}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if position_tab() == "rules" {
+                    div { class: "tab-content fixed-tab-content rules-tab-content",
+                        div { class: "panel-title-row tab-title-row",
+                            button { class: "mini-button", onclick: load_instruments, {s(lang, "load_contract_rules")} }
+                        }
+                        div { class: "runtime-strip cross-runtime-strip",
+                            div {
+                                span { {s(lang, "known_symbols")} }
+                                strong { "{panel_data.instrument_known_symbols} / {panel_data.instrument_symbol_count}" }
+                            }
+                            div {
+                                span { {s(lang, "feasible_symbols")} }
+                                strong { "{panel_data.instrument_feasible_symbols} / {panel_data.instrument_symbol_count}" }
+                            }
+                            div {
+                                span { {s(lang, "feasible_instruments")} }
+                                strong { "{panel_data.instrument_feasible_instruments} / {panel_data.instrument_known_instruments}" }
+                            }
+                            div {
+                                span { {s(lang, "required_notional_max")} }
+                                strong { "{panel_data.instrument_required_notional_max}" }
+                            }
+                        }
+                        div { class: "table-wrap compact-table fixed-tab-table",
+                            table {
+                                thead { tr {
+                                    th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "exchange_symbol")} } th { {s(lang, "price_tick")} } th { {s(lang, "quantity_step")} } th { {s(lang, "min_qty")} } th { {s(lang, "min_notional")} } th { {s(lang, "required_notional")} } th { {s(lang, "headroom")} } th { {s(lang, "feasibility")} } th { {s(lang, "status")} }
+                                } }
+                                tbody {
+                                    for row in CrossArbInstrumentRowData::from_value_rows(&instrument_rows(), lang).iter().take(120) {
+                                        tr {
+                                            td { "{row.exchange}" }
+                                            td { "{row.canonical_symbol}" }
+                                            td { "{row.exchange_symbol}" }
+                                            td { "{row.price_tick}" }
+                                            td { "{row.quantity_step}" }
+                                            td { "{row.min_qty}" }
+                                            td { "{row.min_notional}" }
+                                            td { "{row.required_notional}" }
+                                            td { class: profit_class(row.headroom_value), "{row.headroom}" }
+                                            td { span { class: row.feasibility_class, "{row.feasibility_label}" } }
+                                            td { "{row.status}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "panel",
+                h2 { {s(lang, "runtime_health")} }
+                div { class: "runtime-strip cross-runtime-strip",
+                    div { span { "Fill" } strong { "{event_summary.fill_events}" } }
+                    div { span { "Balance" } strong { "{event_summary.balance_events}" } }
+                    div { span { "Error" } strong { "{event_summary.error_events}" } }
+                }
+                div { class: "symbol-cloud",
+                    for exchange in exchanges.iter() {
+                        span { class: "chip active", "{exchange}" }
+                    }
+                }
+            }
+            div { class: "panel wide-log-panel",
+                div { class: "panel-title-row",
+                    div {
+                        h2 { {s(lang, "strategy_all_logs")} }
+                        p { class: "muted", "{s(lang, \"log_source\")}: {strategy_log_source}" }
+                    }
+                    LogPager {
+                        page: strategy_log_page(),
+                        total_pages: strategy_log_total_pages,
+                        on_prev: move |_| strategy_log_page.set(strategy_log_page().saturating_sub(1)),
+                        on_next: move |_| strategy_log_page.set((strategy_log_page() + 1).min(strategy_log_total_pages.saturating_sub(1))),
+                        on_jump: move |page: usize| strategy_log_page.set(page.min(strategy_log_total_pages.saturating_sub(1))),
+                        lang,
+                    }
+                }
+                div { class: "tab-bar log-tab-bar",
+                    for (key, label_key) in [
+                        ("all", "log_all"),
+                        ("error", "log_error"),
+                        ("warn", "log_warn"),
+                        ("trade", "log_trade"),
+                        ("control", "log_control"),
+                        ("balance", "log_balance"),
+                        ("market", "log_market"),
+                        ("info", "log_info"),
+                    ] {
+                        button {
+                            class: if strategy_log_tab() == key { "tab-button active" } else { "tab-button" },
+                            onclick: move |_| {
+                                strategy_log_tab.set(key.to_string());
+                                strategy_log_page.set(0);
+                            },
+                            "{s(lang, label_key)} {strategy_log_count(&strategy_logs, key)}"
+                        }
+                    }
+                }
+                div { class: "log-list strategy-log-list",
+                    for row in strategy_log_rows.iter().skip(strategy_log_start).take(strategy_log_page_size) {
+                        div { class: "log-line {row.class_name}",
+                            span { "{row.timestamp}" }
+                            strong { "{row.source}" }
+                            p { "{row.message}" }
                         }
                     }
                 }
@@ -959,6 +1089,27 @@ pub(crate) fn CrossArbAccountSelect(
             onchange: move |event| on_change.call(event.value()),
             for option in options.iter() {
                 option { value: "{option.value}", "{option.label}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn ReasonTags(text: String, lang: Language) -> Element {
+    let title = reason_title(&text);
+    let tags = compact_reason_tags(&text, lang);
+    let more_count = tags.len().saturating_sub(3);
+    rsx! {
+        div { class: "reason-tags", title: "{title}",
+            if tags.is_empty() {
+                span { class: "muted", "-" }
+            } else {
+                for tag in tags.iter().take(3) {
+                    span { class: "reason-tag", "{tag}" }
+                }
+                if more_count > 0 {
+                    span { class: "reason-tag reason-more", "+{more_count}" }
+                }
             }
         }
     }
@@ -1099,6 +1250,146 @@ fn enabled_exchange_summary(rows: &[CrossArbExchangeFormData]) -> String {
     }
 }
 
+fn compact_reason_tags(text: &str, lang: Language) -> Vec<String> {
+    split_reason_text(text)
+        .into_iter()
+        .map(|reason| localized_reason_label(&reason, lang))
+        .fold(Vec::new(), |mut tags, tag| {
+            if !tags.iter().any(|existing| existing == &tag) {
+                tags.push(tag);
+            }
+            tags
+        })
+}
+
+fn split_reason_text(text: &str) -> Vec<String> {
+    text.split([';', '\n'])
+        .map(str::trim)
+        .filter(|item| !item.is_empty() && *item != "-")
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn reason_title(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        "-".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn localized_reason_label(reason: &str, lang: Language) -> String {
+    let lower = reason.trim().to_ascii_lowercase();
+    let label = if lower.contains("agreement_required") {
+        ("需开通协议", "Agreement needed")
+    } else if lower.contains("close-only") || lower == "close_only" {
+        ("只平仓", "Close-only")
+    } else if lower.contains("max_consecutive_losses") || lower.contains("consecutive loss") {
+        ("亏损保护", "Loss guard")
+    } else if lower.contains("same symbol already has an active open bundle") {
+        ("同币种已有仓位", "Symbol occupied")
+    } else if lower.contains("open route") && lower.contains("cooling down") {
+        ("路线冷却", "Route cooldown")
+    } else if lower.contains("symbol is cooling down") {
+        ("币种冷却", "Symbol cooldown")
+    } else if lower.contains("market data provider is not connected") {
+        ("行情未连接", "Market data down")
+    } else if lower.contains("startup position takeover") {
+        ("接管未启用", "Takeover off")
+    } else if lower.contains("start_paused_new_entries") || lower.contains("new entries are paused")
+    {
+        ("开仓暂停", "Entry paused")
+    } else if lower.contains("runtime deadline") {
+        ("运行到期", "Runtime ended")
+    } else if lower.contains("manual intervention") {
+        ("需人工处理", "Manual action")
+    } else if lower.contains("all live routes are disabled") {
+        ("路线禁用", "Routes disabled")
+    } else if lower.contains("new entries disabled on")
+        || lower.contains("new entries disabled by config")
+        || lower.contains("disabled_exchange")
+        || lower.contains("disabled by config")
+    {
+        ("配置禁开", "Entry disabled")
+    } else if lower.contains("display-only row") || lower.contains("not evaluated") {
+        ("待评估", "Pending")
+    } else if lower.contains("live top-of-book is stale")
+        || lower.contains("snapshot is stale")
+        || lower.contains("top-of-book is stale")
+    {
+        ("行情过期", "Stale book")
+    } else if lower.contains("top-of-book executable depth") {
+        ("深度不足", "Depth low")
+    } else if lower.contains("raw spread") && lower.contains("below") {
+        ("价差不足", "Spread low")
+    } else if lower.contains("raw spread") && lower.contains("above") {
+        ("价差过大", "Spread high")
+    } else if lower.contains("expected net edge") && lower.contains("below") {
+        ("净价差不足", "Net edge low")
+    } else if lower.contains("net profit") && lower.contains("below") {
+        ("净收益不足", "Profit low")
+    } else if lower.contains("notional") && lower.contains("below exchange minimum") {
+        ("金额过小", "Notional low")
+    } else if lower.contains("quantity") && lower.contains("below exchange minimum") {
+        ("数量过小", "Qty low")
+    } else if lower.contains("minimum") {
+        ("低于最小下单", "Below minimum")
+    } else if lower.contains("private rest is not enabled") {
+        ("下单 REST 未启用", "REST off")
+    } else if lower.contains("private websocket") {
+        ("用户 WS 未启用", "Private WS off")
+    } else if lower.contains("place_order is not supported") {
+        ("不支持下单", "Place order off")
+    } else if lower.contains("cancel_order is not supported") {
+        ("不支持撤单", "Cancel off")
+    } else if lower.contains("adapter is not loaded") {
+        ("适配器未加载", "Adapter missing")
+    } else if lower.contains("raw intents") {
+        ("下单通道未接", "Order route off")
+    } else if lower.contains("not filled") {
+        ("未完全成交", "Not filled")
+    } else if lower.contains("ioc") && (lower.contains("cancelled") || lower.contains("canceled")) {
+        ("IOC 取消", "IOC cancelled")
+    } else if lower.contains("cancelled") || lower.contains("canceled") {
+        ("订单取消", "Cancelled")
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        ("请求超时", "Timeout")
+    } else if lower.contains("insufficient") || lower.contains("balance") {
+        ("余额不足", "Balance low")
+    } else if lower.contains("authentication")
+        || lower.contains("credential")
+        || lower.contains("api key")
+    {
+        ("API 认证异常", "API auth")
+    } else if lower.contains("rate limit") || lower.contains("too many requests") {
+        ("限频", "Rate limit")
+    } else if lower.contains("network") || lower.contains("connection") || lower.contains("connect")
+    {
+        ("连接异常", "Connection")
+    } else {
+        return fallback_reason_label(reason, lang);
+    };
+    if lang.is_zh() {
+        label.0.to_string()
+    } else {
+        label.1.to_string()
+    }
+}
+
+fn fallback_reason_label(reason: &str, lang: Language) -> String {
+    let trimmed = reason.trim();
+    if trimmed.is_ascii() {
+        if lang.is_zh() {
+            "待排查".to_string()
+        } else {
+            "Check needed".to_string()
+        }
+    } else {
+        trimmed.chars().take(12).collect()
+    }
+}
+
 fn optional_exchange_config_error(error: &str) -> bool {
     error.contains("HTTP 404")
         || error.contains("strategy_config_not_configured")
@@ -1189,6 +1480,18 @@ fn parse_number_or_default(value: &str, default: f64) -> f64 {
         .ok()
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(default)
+}
+
+fn parse_pct_or_default(value: &str, default_pct: f64) -> f64 {
+    value
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value / 100.0)
+        .unwrap_or(default_pct / 100.0)
 }
 
 fn parse_usize_or_default(value: &str, default: usize) -> usize {

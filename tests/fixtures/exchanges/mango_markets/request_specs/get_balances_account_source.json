@@ -1,0 +1,61 @@
+{
+  "exchange": "mango_markets",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "boundary": "solana_mango_account_balance_source_only",
+  "runtime_enabled": false,
+  "transport": "solana_rpc",
+  "method": "POST",
+  "path": "/",
+  "auth": "none",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "body": {
+    "jsonrpc": "2.0",
+    "id": "mango-markets-balance-account-scan",
+    "method": "getAccountInfo",
+    "params": [
+      "mango-account-public-key-fixture",
+      {
+        "encoding": "base64",
+        "commitment": "confirmed"
+      }
+    ]
+  },
+  "source": {
+    "program": "Mango v4",
+    "account_type": "MangoAccount",
+    "balance_containers": [
+      "token_positions",
+      "serum3_orders",
+      "perp_positions",
+      "health_cache"
+    ],
+    "requires": [
+      "mango_account_public_key",
+      "group_public_key",
+      "bank_or_token_index"
+    ]
+  },
+  "decoded_sample": {
+    "mango_account": "mango-account-public-key-fixture",
+    "collateral_value": "5040.125000",
+    "borrow_value": "120.000000",
+    "account_equity": "4920.125000",
+    "health_ratio": "1.82"
+  },
+  "runtime_gap": [
+    "slot and commitment freshness",
+    "MangoAccount owner verification",
+    "token-position and borrow decoding",
+    "health parser",
+    "indexer/on-chain reconciliation"
+  ],
+  "fixture_policy": {
+    "contains_private_key": false,
+    "contains_wallet_signature": false,
+    "contains_real_mango_account": false,
+    "live_call_allowed": false
+  }
+}

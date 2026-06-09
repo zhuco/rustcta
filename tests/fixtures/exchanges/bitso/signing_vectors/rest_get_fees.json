@@ -1,0 +1,12 @@
+{
+  "name": "bitso_rest_get_fees_fixture",
+  "algorithm": "hmac_sha256_hex",
+  "credential_label": "fixture-key",
+  "credential_material": "fixture-credential",
+  "nonce": "1700000000000",
+  "method": "GET",
+  "request_path": "/api/v3/fees",
+  "body": "",
+  "payload": "1700000000000GET/api/v3/fees",
+  "expected_digest_shape": "hex64"
+}

@@ -20,6 +20,7 @@ auth:
   private_stream: unsupported; account ownership and health/reconciliation are not audited
 rate_limits:
   mango_markets_rpc_scan: { scope: ip, interval_ms: 1000, limit: 5 }
+  mango_markets_account_source: { scope: account, interval_ms: 1000, limit: 1 }
   mango_markets_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   group_scan: { mode: none }
@@ -32,13 +33,61 @@ batch:
   cancel: { support: unsupported, reason: mango_markets.batch_cancel_orders_require_atomic_transaction_audit }
 websocket:
   public:
-    support: spec_only
+    support: unsupported
+    reason: "Current profile does not support a unified exchange public order book WebSocket; only Solana RPC accountSubscribe payload shape is confirmed."
     helper_only: true
     heartbeat: { mode: solana_rpc_ws, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 90000 }
+    account_subscribe:
+      support: spec_only
+      channel: accountSubscribe
+      note: "Solana accountSubscribe reports account slot/context changes; it is not an exchange orderbook channel and has no orderbook sequence/checksum contract."
+    order_book:
+      support: unsupported
+      reason: mango_markets.account_subscribe_is_not_unified_orderbook_ws
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Mango group/OpenBook spot market sources exist, but this adapter scope is Mango margin/perpetual Solana scan and MangoAccount source boundaries only; remaining Spot/OpenBook runtime work is group spot-market decoding, OpenBook market/bids/asks/event-queue public account parsers, MangoAccount spot open-order/private balance ownership checks, spot order lifecycle transaction builders, slot/reorg handling, and indexer reconciliation."
+    official_gap: spot_openbook_product
+    source_boundary_fixture: tests/fixtures/exchanges/mango_markets/request_specs/product_line_source_boundary.json
+    current_scope: "Mango group/perp market and MangoAccount source-boundary fixtures only."
+    runtime_gap: "No OpenBook/spot market account decoder, book-side/event-queue parser, spot open-order account scanner, or Solana transaction builder is wired."
+    required_sources: [mango_group_spot_markets, openbook_market_accounts, openbook_bids_asks, openbook_event_queue, mango_account_spot_open_orders]
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: protocol_group_market_fee_params
+    source_fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_fees_source_boundary.json
+    reason: "Mango group/market fee parameters are recorded as an offline protocol source; shared get_fees runtime remains project-unimplemented pending group decoding, account context, slot/reorg guard, and FeeRateSnapshot mapping."
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_balances_account_source.json
+    reason: "Official private account/balance readback exists via MangoAccount collateral, borrows, health, and token positions, but shared get_balances runtime is project-unimplemented pending Solana account decoding and indexer reconciliation."
+  - operation: get_positions
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_positions_account_source.json
+    reason: "Official/API/SDK position readback exists via MangoAccount PerpPosition state, but shared get_positions runtime is project-unimplemented pending Solana/MangoAccount decoding, PerpPosition parser, health/PnL/funding fields, slot/reorg handling, and indexer reconciliation."
 endpoints:
+  - operation: get_fees
+    product: mixed
+    market_types: [margin, perpetual]
+    transport: rest
+    method: GET
+    path: /mango-v4/group-market-fee-params
+    auth: none
+    rate_limit_bucket: solana_rpc
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: protocol group/market fee params are fixture-backed only; slot-checked account and market decoding is not wired."
+    official_doc: https://github.com/blockworks-foundation/mango-v4
+    request_spec:
+      fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_fees_source_boundary.json
   - operation: get_symbol_rules
     product: perpetual
     market_types: [perpetual]
@@ -77,61 +126,82 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/mango_markets/balances
-    auth: unsupported
-    rate_limit_bucket: mango_markets_unsupported
-    weight: 0
-    request_spec_required: false
+    path: solana-rpc://getAccountInfo/mango_account
+    auth: none
+    rate_limit_bucket: mango_markets_account_source
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: mango_markets.balances_require_mango_account_health_audit
+    support: spec_only
+    reason: "Solana RPC/MangoAccount source boundary only; shared get_balances runtime remains project-unimplemented pending collateral/borrow/token-position decoding, health parser, slot/reorg handling, and indexer reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_balances_account_source.json }
+    notes: "No live MangoAccount decoding, ownership check, account stream or indexer reconciliation is executed by this adapter."
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/mango_markets/positions
-    auth: unsupported
-    rate_limit_bucket: mango_markets_unsupported
-    weight: 0
-    request_spec_required: false
+    path: solana-rpc://getAccountInfo/mango_account
+    auth: none
+    rate_limit_bucket: mango_markets_account_source
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: mango_markets.positions_require_mango_account_perp_audit
+    support: spec_only
+    reason: "Solana RPC/MangoAccount source boundary only; shared get_positions runtime remains project-unimplemented pending MangoAccount ownership/account decoding, PerpPosition parser, health/PnL/funding fields, slot/reorg handling, and indexer reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_positions_account_source.json }
+    response_parser: { status: fixture_only, parser: parse_position_source_boundary, fixture: tests/fixtures/exchanges/mango_markets/request_specs/get_positions_account_source.json }
+    notes: "No live MangoAccount decoding, ownership check, account stream or indexer reconciliation is executed by this adapter. Parser coverage validates the source-boundary shape, not decoded live positions."
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/mango_markets/place_order
-    auth: unsupported
+    path: solana_tx/mango_v4_place_perp_order
+    auth: signed
     rate_limit_bucket: mango_markets_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: mango_markets.place_order_requires_solana_wallet_transaction_signing_audit
   - operation: cancel_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/mango_markets/cancel_order
-    auth: unsupported
+    path: solana_tx/mango_v4_cancel_order
+    auth: signed
     rate_limit_bucket: mango_markets_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: mango_markets.cancel_order_requires_solana_wallet_transaction_signing_audit
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: solana_account/mango_account_order
+    auth: none
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: mango_markets.query_order_requires_mango_account_open_orders_event_queue_and_slot_reconciliation
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
@@ -182,30 +252,30 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/mango_markets/open_orders
-    auth: unsupported
+    path: solana_account/mango_account_open_orders
+    auth: none
     rate_limit_bucket: mango_markets_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: mango_markets.open_orders_require_mango_account_and_book_scan
   - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/mango_markets/recent_fills
-    auth: unsupported
+    path: solana_account/event_queue_fills
+    auth: none
     rate_limit_bucket: mango_markets_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: mango_markets.recent_fills_require_event_queue_and_indexer_audit
 streams:
   - operation: public_account_subscribe

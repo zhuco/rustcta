@@ -1,0 +1,16 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "cancel_all_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/matcher/orderbook/cancel",
+  "auth": "waves_public_key_signature",
+  "body": {
+    "sender": "8QUefk3K8xW6bYzY1gEoQf2rN9WAVESPublicKeyFixture",
+    "timestamp": 1700000000000,
+    "signature": "<curve25519_cancel_all_signature>"
+  },
+  "strict_body": true,
+  "expected_error_until_promoted": "wavesexchange.cancel_all_orders_requires_waves_public_key_signature"
+}

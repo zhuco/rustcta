@@ -1,0 +1,19 @@
+{
+  "exchange": "bsx",
+  "operation": "query_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders/bsx-order-1001",
+  "auth": "signed",
+  "headers": {
+    "BSX-KEY": { "match": "exact", "value": "test-api-key" },
+    "BSX-SIGNATURE": { "match": "present" },
+    "BSX-TIMESTAMP": { "match": "present" },
+    "BSX-ACCOUNT": { "match": "exact", "value": "0xtestwallet" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": ["secret", "private"]
+}

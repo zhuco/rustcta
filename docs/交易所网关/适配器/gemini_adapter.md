@@ -9,6 +9,16 @@ developer docs expose derivatives REST endpoints for perpetual contracts and
 derivatives-specific account operations. Region/product eligibility must be
 handled separately before implementation.
 
+2026-06-09 产品线边界收窄：`contract_product`、`derivatives_product` 和
+`perpetual_product` 均保留 `project_unimplemented`，并绑定
+`tests/fixtures/exchanges/gemini/request_specs/product_line_source_boundary.json`。
+当前 Spot adapter 不复用到 derivatives/perpetual；后续必须先加 region/product
+eligibility guard、derivatives symbol metadata、account/position/risk parser 和
+separate private order runtime。
+状态建议：继续保留 `contract_product` / `derivatives_product` /
+`perpetual_product = 项目未实现`；Gemini Derivatives/Perpetual 官方 endpoint 线索
+存在，但需要区域和产品资格 guard，不能由 Spot runtime 直接启用。
+
 ## Implemented Surface
 
 - Public REST: symbol details and order book snapshots.
@@ -27,14 +37,15 @@ handled separately before implementation.
 | Private WS | order-events auth headers |
 | Order types | limit, post-only |
 | Market/quote-market | Unsupported |
-| Batch | not advertised; composed batch behavior is not exposed as a capability |
+| Amend/order-list/OCO/OTO | Unsupported; no shared spot runtime mapping |
+| Batch | Unsupported; not advertised, and composed batch behavior is not exposed as a capability |
 | Fees/positions/reduce-only | Unsupported |
 
 ## Official WebSocket Order Book Detail
 
 官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Gemini public WS stream host 是 `wss://ws.gemini.com`，支持 `{symbol}@bookTicker`、`{symbol}@depth5/10/20`、`{symbol}@depth5/10/20@100ms`、`{symbol}@depth` 和 `{symbol}@depth@100ms`。
 
-`bookTicker` 是 real-time L1/BBO；partial depth 支持 5/10/20 档，1s 或 100ms；diff depth 支持 1s 或 100ms，可用 snapshot 参数获取初始全量或 top N。partial 有 `lastUpdateId`，diff 有 `U/u`，未见 checksum；断档后用 REST order book 或 snapshot 连接参数重建。
+`bookTicker` 是 real-time L1/BBO；partial depth 支持 5/10/20 档，1s 或 100ms；diff depth 支持 1s 或 100ms，可用 snapshot 参数获取初始全量或 top N。partial 有 `lastUpdateId`，diff 有 `U/u`，未见 checksum；断档后用 REST order book 或 snapshot 连接参数重建。YAML 已结构化记录 `{symbol}@bookTicker`、`{symbol}@depth5/10/20@100ms|1s`、`{symbol}@depth@100ms|1s`、100ms 最快推流、1/5/10/20 档、`lastUpdateId/U/u` 和 REST `/v1/book/{symbol}` 重建边界。
 
 ## Endpoint Mapping
 
@@ -58,7 +69,7 @@ The adapter tags public REST as `rest_ip`, private account reads as `key`, and o
 
 ## Unsupported Boundary
 
-Auction, block trading, travel-rule, withdrawals, deposits, fiat transfers, custody/clearing workflows, staking, and other funding/compliance surfaces are documented Unsupported and are not connected to runtime. Derivatives/Perpetuals are 项目未实现 in this spot adapter. Positions, market orders, quote-market orders, fees, and reduce-only are also Unsupported in the current shared spot runtime. The executable boundary fixture is `tests/fixtures/exchanges/gemini/unsupported_boundary.json`.
+Auction, block trading, travel-rule, withdrawals, deposits, fiat transfers, custody/clearing workflows, staking, and other funding/compliance surfaces are documented Unsupported and are not connected to runtime. Derivatives/Perpetuals are 项目未实现 in this spot adapter. Positions, market orders, quote-market orders, fees, and reduce-only are also Unsupported in the current shared spot runtime. P4 advanced order capabilities are explicit unsupported boundaries: `amend_order`, `place_order_list`/OCO/OTO, `batch_place_orders`, and `batch_cancel_orders` are not exposed. The executable boundary fixture is `tests/fixtures/exchanges/gemini/unsupported_boundary.json`; its `advanced_order_boundaries` block pins the mapping/runtime guard reasons and keeps composed batch/amend/order-list promotion disabled.
 
 ## Official References
 
@@ -80,3 +91,7 @@ cargo test -p rustcta-exchange-gateway gemini --lib --message-format short
 ```
 
 `cargo build` is intentionally not part of Task 14 validation.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前 shared spot runtime 中 fees 明确 Unsupported。

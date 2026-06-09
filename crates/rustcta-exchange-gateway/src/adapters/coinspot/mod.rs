@@ -7,10 +7,11 @@ use rustcta_exchange_api::{
     CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
     CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
     ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability, OpenOrdersRequest,
-    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -336,6 +337,13 @@ impl ExchangeClient for CoinspotGatewayAdapter {
         request: AmendOrderRequest,
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.unsupported_amend_order(request)
+    }
+
+    async fn place_order_list(
+        &self,
+        request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        self.unsupported_order_list(request)
     }
 
     async fn cancel_all_orders(

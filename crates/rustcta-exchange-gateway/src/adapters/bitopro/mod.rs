@@ -2,16 +2,18 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use reqwest::Method;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
-    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, BatchAtomicity,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchExecutionMode,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
+    ExchangeApiError, ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest,
+    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
+    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -135,6 +137,43 @@ impl BitoproGatewayAdapter {
             )
             .await
     }
+
+    async fn send_signed_delete(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_signed_delete(
+                self.config.api_key.as_deref().unwrap_or_default(),
+                self.config.api_secret.as_deref().unwrap_or_default(),
+                self.config.api_identity.as_deref().unwrap_or_default(),
+                endpoint,
+                params,
+            )
+            .await
+    }
+
+    async fn send_signed_json(
+        &self,
+        operation: &'static str,
+        method: Method,
+        endpoint: &str,
+        body: &serde_json::Value,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_signed_json(
+                self.config.api_key.as_deref().unwrap_or_default(),
+                self.config.api_secret.as_deref().unwrap_or_default(),
+                method,
+                endpoint,
+                body,
+            )
+            .await
+    }
 }
 
 #[async_trait]
@@ -174,14 +213,14 @@ impl ExchangeClient for BitoproGatewayAdapter {
         capabilities.supports_balances = self.config.private_rest_enabled();
         capabilities.supports_positions = false;
         capabilities.supports_fees = false;
-        capabilities.supports_place_order = false;
-        capabilities.supports_cancel_order = false;
-        capabilities.supports_cancel_all_orders = false;
+        capabilities.supports_place_order = self.config.private_rest_enabled();
+        capabilities.supports_cancel_order = self.config.private_rest_enabled();
+        capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
         capabilities.supports_query_order = self.config.private_rest_enabled();
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
-        capabilities.supports_batch_place_order = false;
-        capabilities.supports_batch_cancel_order = false;
+        capabilities.supports_batch_place_order = self.config.private_rest_enabled();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_quote_market_order = false;
         capabilities.supports_amend_order = false;
         capabilities.supports_order_list = false;
@@ -194,6 +233,7 @@ impl ExchangeClient for BitoproGatewayAdapter {
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
         capabilities.max_recent_fill_limit = Some(1000);
+        apply_bitopro_capabilities_v2(&mut capabilities, self.config.private_rest_enabled());
         capabilities
     }
 
@@ -235,9 +275,7 @@ impl ExchangeClient for BitoproGatewayAdapter {
         &self,
         request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("bitopro.place_order.offline_request_spec_only")
+        self.place_order_impl(request).await
     }
 
     async fn place_quote_market_order(
@@ -253,9 +291,7 @@ impl ExchangeClient for BitoproGatewayAdapter {
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("bitopro.cancel_order.offline_request_spec_only")
+        self.cancel_order_impl(request).await
     }
 
     async fn amend_order(
@@ -280,24 +316,21 @@ impl ExchangeClient for BitoproGatewayAdapter {
         &self,
         request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitopro.batch_place_orders.offline_request_spec_only")
+        self.batch_place_orders_impl(request).await
     }
 
     async fn batch_cancel_orders(
         &self,
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitopro.batch_cancel_orders.offline_request_spec_only")
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn cancel_all_orders(
         &self,
         request: CancelAllOrdersRequest,
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitopro.cancel_all_orders.offline_request_spec_only")
+        self.cancel_all_orders_impl(request).await
     }
 
     async fn query_order(
@@ -340,4 +373,44 @@ fn validation_error(error: rustcta_types::ValidationError) -> ExchangeApiError {
     ExchangeApiError::InvalidRequest {
         message: error.to_string(),
     }
+}
+
+fn apply_bitopro_capabilities_v2(
+    capabilities: &mut ExchangeClientCapabilities,
+    private_rest_enabled: bool,
+) {
+    let batch_support = if private_rest_enabled {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported(
+            "bitopro batch write runtime requires explicit private REST credentials",
+        )
+    };
+    capabilities.capabilities_v2.batch_place_orders = BatchCapability {
+        support: batch_support.clone(),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::NonAtomic,
+        max_items: Some(10),
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: true,
+        supports_partial_failure: true,
+    };
+    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+        support: batch_support,
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::NonAtomic,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: false,
+        supports_partial_failure: true,
+    };
+    capabilities.capabilities_v2.cancel_all_orders = if private_rest_enabled {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported(
+            "bitopro cancel-all runtime requires explicit private REST credentials",
+        )
+    };
 }

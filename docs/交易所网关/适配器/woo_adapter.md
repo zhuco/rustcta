@@ -144,3 +144,7 @@ workspace warnings.
 ## Official Position Detail
 
 仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。WOO X V3 `GET /v3/futures/positions` 已由当前项目 `get_positions` runtime 和 positions fixture 覆盖。
+
+## Fee Boundary
+
+WOO X `GET /v3/trade/tradingFee` 可作为费率来源；当前已补 `request_specs/get_fees_trading_fee.json` 离线 request-spec 边界。shared `get_fees` runtime 仍属项目未实现/未启用；补齐前需确认 private REST credential guard、symbol/product parser 和 `FeeRateSnapshot` promotion。

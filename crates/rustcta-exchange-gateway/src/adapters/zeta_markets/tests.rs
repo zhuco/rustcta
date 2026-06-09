@@ -144,6 +144,7 @@ fn capabilities_should_expose_scan_only_public_rest() {
     assert_eq!(boundary["venue_ceased_operations"], true);
     assert_eq!(boundary["trade_enabled"], false);
     assert_eq!(boundary["private_write_enabled"], false);
+    assert_eq!(boundary["balance_read_boundary"]["support"], "spec_only");
 }
 
 #[tokio::test]
@@ -221,6 +222,22 @@ fn request_specs_should_match_public_rest_builders() {
     request_spec("public_orderbook")
         .assert_matches(&public_orderbook)
         .expect("public orderbook spec");
+
+    let balances_source: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/zeta_markets/request_specs/get_balances_margin_account_source.json"
+    ))
+    .expect("balances source boundary");
+    assert_eq!(balances_source["operation"], "get_balances");
+    assert_eq!(balances_source["support"], "spec_only");
+    assert_eq!(balances_source["status"], "project_unimplemented");
+
+    let positions_source: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/zeta_markets/request_specs/get_positions_margin_account_source.json"
+    ))
+    .expect("positions source boundary");
+    assert_eq!(positions_source["operation"], "get_positions");
+    assert_eq!(positions_source["support"], "spec_only");
+    assert_eq!(positions_source["venue_ceased_operations"], true);
 }
 
 #[test]

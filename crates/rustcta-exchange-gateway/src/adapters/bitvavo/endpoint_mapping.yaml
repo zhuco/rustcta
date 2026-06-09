@@ -5,6 +5,16 @@ websocket:
     support: native
     url: wss://ws.bitvavo.com/v2/
     channels: [book, trades, ticker, candles]
+    order_book:
+      channel: book
+      subscribe_action: subscribe
+      push_interval: event_driven_no_fixed_ms
+      depth: initialized_by_rest_get_book_depth_5_10_25_100
+      depth_boundary: "depth: unspecified for live book deltas; no fixed depth is documented on the WS book channel"
+      sequence: nonce_must_increment_by_one
+      checksum: unsupported
+      delta_semantics: absolute_level_size_zero_removes_price
+      resync_on: [connect, reconnect, nonce_gap]
     resync: rest_order_book_snapshot
   private:
     support: native
@@ -12,6 +22,9 @@ websocket:
     auth: authenticate
     channels: [account]
     fallback: rest_reconciliation
+unsupported:
+  - operation: contract_product
+    reason: "交易所不支持合约：current Bitvavo official API surface is spot markets/trading; no standard futures/perpetual/options product line is exposed for this adapter."
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -143,3 +156,19 @@ endpoints:
     atomicity: non_atomic
     testnet: false
     official_doc: https://docs.bitvavo.com/docs/rest-api/get-trades/
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    transport: websocket
+    channel: book
+    auth: none
+    support: native
+    interval: event_driven_no_fixed_ms
+    depth: rest_snapshot_depth_5_10_25_100_then_unbounded_delta
+    depth_boundary: "depth: unspecified for live book deltas; no fixed depth is documented on the WS book channel"
+    sequence: nonce_plus_one
+    checksum: unsupported
+    fixture: tests/fixtures/exchanges/bitvavo/ws/public_book.json
+    resync:
+      endpoint_operation: get_order_book
+      mode: public_rest_snapshot_after_connect_reconnect_or_nonce_gap

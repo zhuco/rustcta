@@ -1,9 +1,25 @@
 {
   "exchange": "p2b",
-  "public_streams": "unsupported_unverified",
+  "public_streams": "native_depth_subscribe",
   "private_streams": "unsupported_unverified",
+  "order_book": {
+    "channel": "depth.subscribe",
+    "update_method": "depth.update",
+    "limits": {
+      "min": 1,
+      "max": 100,
+      "default": 100
+    },
+    "incremental_interval_ms": 1000,
+    "full_refresh_interval_ms": 60000,
+    "full_flag": "params[0]",
+    "sequence": "unsupported_no_official_sequence",
+    "checksum": "unsupported",
+    "zero_quantity": "delete_price_level",
+    "resync": "REST /api/v2/public/book side=buy and side=sell snapshot, reconnect, then resubscribe"
+  },
   "heartbeat": {
-    "mode": "server_ping_available_unimplemented",
+    "mode": "client_server_ping_available",
     "request": {
       "method": "server.ping",
       "params": [],

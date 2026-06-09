@@ -1,0 +1,32 @@
+{
+  "exchange": "mango_markets",
+  "operation": "mango_markets.get_fees",
+  "boundary_type": "protocol_account_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "mango_group_market_fee_params",
+    "source_url": "https://github.com/blockworks-foundation/mango-v4",
+    "last_reviewed": "2026-06-09",
+    "products": ["margin", "perpetual"],
+    "effective_fee_kind": "protocol_market_fee_params_with_account_context",
+    "account_effective_fee_requires": [
+      "mango_group_account_decoder",
+      "perp_or_spot_market_fee_params",
+      "mango_account_context",
+      "slot_reorg_guard"
+    ]
+  },
+  "default_or_override_strategy": {
+    "protocol_params_allowed_for_backtest_only": true,
+    "production_requires_slot_checked_group_and_account_sources": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "mango_markets.fees_protocol_source_only",
+  "remaining_work": [
+    "group_fee_param_decoder",
+    "market_fee_scope_mapping",
+    "account_context_reconciliation",
+    "shared_get_fees_response_mapping"
+  ]
+}

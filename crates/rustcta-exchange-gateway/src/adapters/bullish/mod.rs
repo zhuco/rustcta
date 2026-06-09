@@ -2,9 +2,10 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    CancelOrderResponse, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
+    EndpointTransport, ExchangeApiError, ExchangeApiResult, ExchangeClient,
     ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
     OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
     PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamCapabilities,
@@ -139,6 +140,11 @@ impl ExchangeClient for BullishGatewayAdapter {
             vec![OrderType::Market, OrderType::Limit, OrderType::PostOnly];
         capabilities.max_order_book_depth = Some(200);
         capabilities.max_recent_fill_limit = Some(100);
+        capabilities.capabilities_v2.stream_runtime = streams::bullish_stream_runtime_capability(
+            self.config.enabled_public_streams,
+            capabilities.supports_private_streams,
+        );
+        apply_bullish_capabilities_v2(&mut capabilities);
         capabilities
     }
 
@@ -198,7 +204,7 @@ impl ExchangeClient for BullishGatewayAdapter {
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("bullish.quote_market_order_unverified")
+        self.unsupported("bullish.quote_market_order_unsupported")
     }
 
     async fn cancel_order(
@@ -216,7 +222,7 @@ impl ExchangeClient for BullishGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("bullish.amend_order_unverified")
+        self.unsupported("bullish.amend_order_offline_request_spec_only")
     }
 
     async fn place_order_list(
@@ -225,7 +231,7 @@ impl ExchangeClient for BullishGatewayAdapter {
     ) -> ExchangeApiResult<OrderListResponse> {
         self.ensure_exchange(&request.symbol().exchange)?;
         self.ensure_supported_market_type(request.symbol().market_type)?;
-        self.unsupported("bullish.order_list_unverified")
+        self.unsupported("bullish.order_list_unsupported")
     }
 
     async fn batch_place_orders(
@@ -233,7 +239,7 @@ impl ExchangeClient for BullishGatewayAdapter {
         request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bullish.batch_place_orders_unverified")
+        self.unsupported("bullish.batch_place_orders_unsupported")
     }
 
     async fn batch_cancel_orders(
@@ -241,7 +247,7 @@ impl ExchangeClient for BullishGatewayAdapter {
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bullish.batch_cancel_orders_unverified")
+        self.unsupported("bullish.batch_cancel_orders_unsupported")
     }
 
     async fn cancel_all_orders(
@@ -249,7 +255,7 @@ impl ExchangeClient for BullishGatewayAdapter {
         request: CancelAllOrdersRequest,
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bullish.cancel_all_orders_unverified")
+        self.unsupported("bullish.cancel_all_orders_offline_request_spec_only")
     }
 
     async fn query_order(
@@ -295,5 +301,96 @@ impl ExchangeClient for BullishGatewayAdapter {
 fn validation_error(error: impl std::fmt::Display) -> ExchangeApiError {
     ExchangeApiError::InvalidRequest {
         message: error.to_string(),
+    }
+}
+
+fn apply_bullish_capabilities_v2(capabilities: &mut ExchangeClientCapabilities) {
+    capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
+    capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
+        "bullish private REST has signed request-spec fixtures only; JWT lifecycle, nonce-window guard, dry-run safety and reconciliation are not enabled",
+    );
+    capabilities.capabilities_v2.public_streams = if capabilities.supports_public_streams {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported("bullish public streams disabled by config")
+    };
+    capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
+        "bullish private stream auth is not promoted beyond documented endpoint boundary",
+    );
+    capabilities.capabilities_v2.batch_place_orders =
+        BatchCapability::unsupported("bullish has no native shared batch-place endpoint");
+    capabilities.capabilities_v2.batch_cancel_orders =
+        BatchCapability::unsupported("bullish has no native shared batch-cancel endpoint");
+    capabilities.capabilities_v2.cancel_all_orders = CapabilitySupport::unsupported(
+        "bullish cancel-all command request spec exists, but live private write runtime remains disabled",
+    );
+    capabilities.capabilities_v2.credential_scopes =
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade];
+    capabilities.capabilities_v2.endpoints = bullish_capability_endpoints();
+}
+
+fn bullish_capability_endpoints() -> Vec<EndpointCapability> {
+    vec![
+        bullish_endpoint(
+            "bullish.amend_order",
+            CapabilitySupport::unsupported(
+                "bullish V1AmendOrder request-spec/signing boundary exists; live runtime awaits JWT lifecycle, nonce guard, response parser and reconciliation",
+            ),
+            Some("/trading-api/v2/command"),
+            EndpointAuth::Jwt,
+            vec![CredentialScope::Trade],
+        ),
+        bullish_endpoint(
+            "bullish.cancel_all_orders",
+            CapabilitySupport::unsupported(
+                "bullish V1CancelAllOrdersByMarket request-spec/signing boundary exists; live runtime awaits JWT lifecycle, nonce guard, response parser and reconciliation",
+            ),
+            Some("/trading-api/v2/command"),
+            EndpointAuth::Jwt,
+            vec![CredentialScope::Trade],
+        ),
+        bullish_endpoint(
+            "bullish.batch_place_orders",
+            CapabilitySupport::unsupported("bullish has no native shared batch-place endpoint"),
+            None,
+            EndpointAuth::None,
+            vec![CredentialScope::Trade],
+        ),
+        bullish_endpoint(
+            "bullish.batch_cancel_orders",
+            CapabilitySupport::unsupported("bullish has no native shared batch-cancel endpoint"),
+            None,
+            EndpointAuth::None,
+            vec![CredentialScope::Trade],
+        ),
+        bullish_endpoint(
+            "bullish.place_order_list",
+            CapabilitySupport::unsupported("bullish has no native shared OCO/OTO order-list endpoint"),
+            None,
+            EndpointAuth::None,
+            vec![CredentialScope::Trade],
+        ),
+    ]
+}
+
+fn bullish_endpoint(
+    operation: &str,
+    support: CapabilitySupport,
+    path: Option<&str>,
+    auth: EndpointAuth,
+    credential_scopes: Vec<CredentialScope>,
+) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support,
+        market_types: vec![MarketType::Spot, MarketType::Perpetual, MarketType::Futures],
+        transport: EndpointTransport::Rest,
+        method: path.map(|_| "POST".to_string()),
+        path: path.map(str::to_string),
+        auth,
+        credential_scopes,
+        rate_limit_bucket: Some("bullish_private_command".to_string()),
+        weight: Some(1),
+        supports_testnet: true,
     }
 }

@@ -6,7 +6,7 @@ metadata:
   status: validated
   source: MyOKX / OKX V5 API docs and CCXT myokx profile
   last_reviewed: "2026-06-08"
-  notes: MyOKX is wired as an OKX EEA Spot profile. Runtime private trading stays disabled until regional credential scope is audited.
+  notes: MyOKX is wired as an OKX EEA Spot profile. Private REST reuses the OKX V5 runtime when explicit MyOKX credentials and enable flag are configured.
 market_types: [spot]
 products: [spot]
 rest:
@@ -19,23 +19,23 @@ base_urls:
   business_ws: wss://wseea.okx.com:8443/ws/v5/business
 auth:
   public_rest: none
-  private_rest: unsupported_until_eea_credential_scope_audit
+  private_rest: hmac_with_explicit_eea_credential_gate
   inherited_shape: OK-ACCESS-SIGN = base64(HMAC_SHA256(timestamp + method + requestPath + body))
 rate_limits:
   public_market: { scope: ip, retry_after: http_429_or_code_50011, default_weight: 1 }
-  private_account: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
-  private_trade: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+  private_account: { scope: uid, retry_after: http_429_or_code_50011, default_weight: 1 }
+  private_trade: { scope: uid, retry_after: http_429_or_code_50011, default_weight: 1 }
 reconciliation:
   private_stream_fallback: rest_reconciliation_after_private_enablement
   public_stream_resync: rest_order_book_snapshot
   unknown_order_policy: unsupported_private_trading
 batch:
   place_orders:
-    support: unsupported
-    reason: MyOKX private trading is disabled in this profile.
+    support: native
+    reason: OKX V5 batch-order runtime is inherited through the EEA host after explicit credential/profile enablement.
   cancel_orders:
-    support: unsupported
-    reason: MyOKX private trading is disabled in this profile.
+    support: native
+    reason: OKX V5 batch-cancel runtime is inherited through the EEA host after explicit credential/profile enablement.
   cancel_all_orders:
     support: unsupported
     atomicity: unsupported
@@ -44,9 +44,58 @@ websocket:
   public:
     support: payload_spec
     url: wss://wseea.okx.com:8443/ws/v5/public
-    channels: [books, books5, trades, tickers, candle1m]
+    channels: [bbo-tbt, books5, books, trades, tickers, candle1m]
+    public_channels:
+      - bbo-tbt.depth1.10ms.sequence_checksum.resync_REST
+      - books5.depth5.100ms.sequence_checksum.resync_REST
+      - books.depth400.100ms.sequence_checksum.resync_REST
+      - books-l2-tbt.depth400.10ms.login_or_vip
+      - books50-l2-tbt.depth50.10ms.login_or_vip
     subscribe_payload_fixture: tests/fixtures/exchanges/myokx/ws/public_books_subscribe.json
     parser_fixture: tests/fixtures/exchanges/myokx/ws/public_books_snapshot.json
+    order_book:
+      host_scope: OKX EEA public v5 host for the MyOKX regional profile
+      channels:
+        bbo_tbt:
+          channel: bbo-tbt
+          interval_ms: 10
+          depth_per_side: 1
+          access: public_no_login
+        books5:
+          channel: books5
+          interval_ms: 100
+          depth_per_side: 5
+          access: public_no_login
+        books:
+          channel: books
+          interval_ms: 100
+          depth_per_side: 400
+          access: public_no_login
+        books_l2_tbt:
+          channel: books-l2-tbt
+          interval_ms: 10
+          depth_per_side: 400
+          access: login_or_vip_required
+        books50_l2_tbt:
+          channel: books50-l2-tbt
+          interval_ms: 10
+          depth_per_side: 50
+          access: login_or_vip_required
+      sequence:
+        fields: [seqId, prevSeqId]
+        continuity: prevSeqId_links_to_previous_seqId
+        gap_policy: rest_snapshot_resync
+      checksum:
+        supported: true
+        field: checksum
+        algorithm: okx_crc32_order_book_checksum
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
+        path: /api/v5/market/books
+      limitations:
+        - regional_host_scope_wseea_okx_com
+        - tbt_depth_channels_require_login_or_vip_eligibility
     heartbeat: { mode: server_ping_client_pong, pong_payload: pong, idle_timeout_ms: 30000 }
     resync: rest_order_book_snapshot
   private:
@@ -57,34 +106,56 @@ websocket:
     parser_fixture: tests/fixtures/exchanges/myokx/ws/private_orders_unsupported.json
     fallback: rest_reconciliation_after_private_enablement
 unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    official_gap: regional_non_spot_product_scope
+    boundary: project_unimplemented_product_line
+    scope: myokx_margin_swap_futures_options_events
+    source_boundary_fixture: tests/fixtures/exchanges/myokx/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [eea_domain, credential_scope, product_eligibility, account_mode, product_metadata, order_lifecycle, positions_reconciliation]
+    reason: "Regional MyOKX Spot/Margin, Swap, Futures, Options, and Events surfaces are not wired by this spot-first profile pending EEA scope audit; do not mark these OKX v5 regional product lines unsupported."
   - operation: market_type_perpetual
-    reason: CCXT myokx profile and this gateway task treat MyOKX as Spot-only.
+    status: project_unimplemented
+    official_gap: okx_v5_swap_instruments
+    boundary: project_unimplemented_product_line
+    scope: myokx_swap_perpetual
+    source_boundary_fixture: tests/fixtures/exchanges/myokx/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [eea_domain, credential_scope, product_eligibility, swap_instruments, positions_reconciliation, order_lifecycle]
+    reason: Official MyOKX / OKX V5 regional docs expose SWAP instruments, but this EEA profile wires Spot public REST only pending regional product-scope and credential audit.
   - operation: market_type_futures
-    reason: CCXT myokx profile and this gateway task treat MyOKX as Spot-only.
+    status: project_unimplemented
+    official_gap: okx_v5_futures_instruments
+    boundary: project_unimplemented_product_line
+    scope: myokx_futures
+    source_boundary_fixture: tests/fixtures/exchanges/myokx/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [eea_domain, credential_scope, product_eligibility, futures_instruments, positions_reconciliation, order_lifecycle]
+    reason: Official MyOKX / OKX V5 regional docs expose FUTURES instruments, but this EEA profile wires Spot public REST only pending regional product-scope and credential audit.
   - operation: market_type_options
-    reason: CCXT myokx profile and this gateway task treat MyOKX as Spot-only.
-  - operation: get_balances
-    reason: Private REST read is disabled until EEA credential permissions are audited.
-  - operation: get_fees
-    reason: Private REST account fee read is disabled until EEA credential permissions are audited.
+    status: project_unimplemented
+    official_gap: okx_v5_options_instruments
+    boundary: project_unimplemented_product_line
+    scope: myokx_options
+    source_boundary_fixture: tests/fixtures/exchanges/myokx/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [eea_domain, credential_scope, product_eligibility, options_instruments, positions_reconciliation, order_lifecycle]
+    reason: Official MyOKX / OKX V5 regional docs expose OPTION instruments, but this EEA profile wires Spot public REST only pending regional product-scope and credential audit.
+  - operation: event_contract_product
+    status: project_unimplemented
+    official_gap: okx_event_contract_product
+    boundary: project_unimplemented_product_line
+    scope: myokx_event_contracts
+    source_boundary_fixture: tests/fixtures/exchanges/myokx/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [eea_domain, credential_scope, product_eligibility, event_contract_instruments, event_order_lifecycle, settlement_reconciliation]
+    reason: Official OKX regional materials expose Event Contract concepts, but event-contract instruments/orders/positions are not wired in this EEA profile pending product-scope and credential audit.
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: okx_v5_margin_account_semantics
+    boundary: project_unimplemented_product_line
+    scope: myokx_margin
+    source_boundary_fixture: tests/fixtures/exchanges/myokx/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [eea_domain, credential_scope, product_eligibility, account_mode, margin_risk_policy, balances_positions_reconciliation]
+    reason: Official MyOKX / OKX V5 regional docs expose Spot/Margin account semantics, but margin product handling is not wired in this regional profile pending EEA scope, eligibility, and risk-mode audit.
   - operation: get_positions
     reason: MyOKX profile is Spot-only and private REST is disabled.
-  - operation: place_order
-    reason: Private write is disabled until EEA credential permissions are audited.
-  - operation: place_quote_market_order
-    reason: Private write is disabled until EEA credential permissions are audited.
-  - operation: cancel_order
-    reason: Private write is disabled until EEA credential permissions are audited.
-  - operation: cancel_all_orders
-    reason: Private write is disabled until EEA credential permissions are audited.
-  - operation: amend_order
-    reason: Private write is disabled until EEA credential permissions are audited.
-  - operation: query_order
-    reason: Private order readback is disabled until EEA credential permissions are audited.
-  - operation: get_open_orders
-    reason: Private order readback is disabled until EEA credential permissions are audited.
-  - operation: get_recent_fills
-    reason: Private fills readback is disabled until EEA credential permissions are audited.
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -111,75 +182,81 @@ endpoints:
   - operation: get_balances
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/get_balances
-    auth: none
+    method: GET
+    path: /api/v5/account/balance
+    auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_account
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private REST read is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Guarded runtime reuses OKX V5 signed account balance against the MyOKX EEA host when regional private REST credentials and explicit enable flag are configured; default no-credential profile still returns Unsupported."
+    official_doc: https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-balance
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/myokx/request_specs/get_balances_account_balance.json }
+    response_parser: { status: implemented, parser: rustcta_exchange_gateway::adapters::okx::types::parse_balances }
   - operation: get_fees
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/get_fees
-    auth: none
+    method: GET
+    path: /api/v5/account/trade-fee
+    auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_account
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private REST account fee read is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Guarded runtime reuses OKX V5 signed account trade-fee against the MyOKX EEA host when regional private REST credentials and explicit enable flag are configured; default no-credential profile still returns Unsupported."
+    official_doc: https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-fee-rates
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/myokx/request_specs/get_fees_trade_fee.json, test: crates/rustcta-exchange-gateway/src/adapters/myokx/tests.rs }
+    response_parser: { status: implemented, parser: rustcta_exchange_gateway::adapters::okx::types::parse_fees, test: crates/rustcta-exchange-gateway/src/adapters/myokx/tests.rs }
   - operation: place_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/place_order
-    auth: none
+    method: POST
+    path: /api/v5/trade/order
+    auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: private_trade
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private REST write is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed create-order runtime on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."
   - operation: place_quote_market_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/place_quote_market_order
-    auth: none
+    method: POST
+    path: /api/v5/trade/order
+    auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: private_trade
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private REST write is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed quote-market order runtime on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."
   - operation: cancel_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/cancel_order
-    auth: none
+    method: POST
+    path: /api/v5/trade/cancel-order
+    auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: private_trade
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private REST write is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed cancel-order runtime on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."
   - operation: cancel_all_orders
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/cancel_all_orders
-    auth: none
+    method: POST
+    path: /api/v5/trade/cancel-batch-orders
+    auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: private_trade
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private REST write is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 open-orders readback plus batch-cancel runtime on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."
   - operation: amend_order
     product: spot
     transport: rest
@@ -195,36 +272,36 @@ endpoints:
   - operation: query_order
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/query_order
-    auth: none
+    method: GET
+    path: /api/v5/trade/order
+    auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_account
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private order readback is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed order readback on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."
   - operation: get_open_orders
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/get_open_orders
-    auth: none
+    method: GET
+    path: /api/v5/trade/orders-pending
+    auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_account
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private order readback is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed open-order readback on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."
   - operation: get_recent_fills
     product: spot
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/myokx/get_recent_fills
-    auth: none
+    method: GET
+    path: /api/v5/trade/fills-history
+    auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_account
-    weight: 0
-    request_spec_required: false
-    support: unsupported
-    reason: Private fills readback is disabled pending EEA credential scope audit.
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Reuses OKX V5 signed fills-history readback on the MyOKX EEA host; guarded by explicit MYOKX credentials and private REST enable flag."

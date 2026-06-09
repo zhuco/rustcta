@@ -8,6 +8,6 @@
   "auth": "bearer",
   "request_spec_required": true,
   "requires_signed_tx": true,
-  "expected_error": "lighter.send_tx_batch_signing_unverified",
+  "expected_error": "lighter.batch_place_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard",
   "trade_enabled": false
 }

@@ -1,0 +1,7 @@
+{
+  "frame": "42[\"depth-update\",{\"channelName\":\"B-BTC_USDT@orderbook@20\",\"data\":{\"bids\":[[\"64000.00\",\"0.5000\"],[\"63950.00\",\"0\"]],\"asks\":[[\"64100.00\",\"0.4000\"]],\"timestamp\":1725000000000}}]",
+  "event": "depth-update",
+  "channelName": "B-BTC_USDT@orderbook@20",
+  "sequence": null,
+  "checksum": null
+}

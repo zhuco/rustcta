@@ -1,12 +1,15 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
-    EndpointTransport, ExchangeClientCapabilities, HistoryCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HeartbeatCapability, HeartbeatDirection, HeartbeatPolicy, HistoryCapability,
+    ReconnectCapability, StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
 pub(super) fn apply_toolchain_capabilities(
     capabilities: &mut ExchangeClientCapabilities,
     private_rest_enabled: bool,
+    public_streams_enabled: bool,
 ) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
     capabilities.capabilities_v2.private_rest = if private_rest_enabled {
@@ -14,16 +17,46 @@ pub(super) fn apply_toolchain_capabilities(
     } else {
         CapabilitySupport::unsupported("Binance private REST requires enabled API key and secret")
     };
-    capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
-        "Binance public WS runtime is not wired in this adapter yet",
-    );
+    capabilities.capabilities_v2.public_streams = if public_streams_enabled {
+        CapabilitySupport::rest_fallback(
+            "Binance public WS depth/bookTicker subscription is mapped; REST depth snapshot remains the resync source",
+        )
+    } else {
+        CapabilitySupport::unsupported("Binance public streams disabled by config")
+    };
     capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
         "Binance private user data stream is not wired; use REST reconciliation through account, open orders, query order, and myTrades",
     );
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported("Binance batch place order is not implemented");
-    capabilities.capabilities_v2.batch_cancel_orders =
-        BatchCapability::unsupported("Binance batch cancel order is not implemented");
+    capabilities.capabilities_v2.stream_runtime = stream_runtime(public_streams_enabled);
+    capabilities.capabilities_v2.batch_place_orders = if private_rest_enabled {
+        BatchCapability {
+            support: CapabilitySupport::native(),
+            mode: BatchExecutionMode::Native,
+            atomicity: BatchAtomicity::Partial,
+            max_items: Some(5),
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+            ..BatchCapability::default()
+        }
+    } else {
+        BatchCapability::unsupported("Binance USD-M batch place requires private REST credentials")
+    };
+    capabilities.capabilities_v2.batch_cancel_orders = if private_rest_enabled {
+        BatchCapability {
+            support: CapabilitySupport::native(),
+            mode: BatchExecutionMode::Native,
+            atomicity: BatchAtomicity::Partial,
+            max_items: Some(10),
+            same_symbol_required: true,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+            ..BatchCapability::default()
+        }
+    } else {
+        BatchCapability::unsupported("Binance USD-M batch cancel requires private REST credentials")
+    };
     capabilities.capabilities_v2.cancel_all_orders = if private_rest_enabled {
         CapabilitySupport::native()
     } else {
@@ -66,6 +99,55 @@ pub(super) fn apply_toolchain_capabilities(
     };
     capabilities.capabilities_v2.endpoints = endpoint_capabilities(private_rest_enabled);
     capabilities.apply_v2_to_legacy_flags();
+}
+
+fn stream_runtime(public_streams_enabled: bool) -> StreamRuntimeCapability {
+    StreamRuntimeCapability {
+        public: if public_streams_enabled {
+            CapabilitySupport::rest_fallback(
+                "REST depth snapshot required after reconnect or sequence gap",
+            )
+        } else {
+            CapabilitySupport::unsupported("public streams disabled")
+        },
+        private: CapabilitySupport::unsupported("private user data stream is not wired"),
+        supports_subscribe: public_streams_enabled,
+        supports_unsubscribe: public_streams_enabled,
+        supports_public_subscribe: public_streams_enabled,
+        supports_public_unsubscribe: public_streams_enabled,
+        supports_private_subscribe: false,
+        supports_private_unsubscribe: false,
+        heartbeat: HeartbeatCapability {
+            supported: true,
+            required: true,
+            direction: StreamHeartbeatDirection::ServerPing,
+            interval_ms: Some(20_000),
+            timeout_ms: Some(60_000),
+        },
+        reconnect: ReconnectCapability {
+            supported: true,
+            requires_resubscribe: true,
+            preserves_session: false,
+            max_reconnect_attempts: None,
+        },
+        resync: StreamResyncCapability {
+            order_book: true,
+            balances: false,
+            positions: false,
+            orders: false,
+        },
+        heartbeat_policy: HeartbeatPolicy {
+            direction: HeartbeatDirection::ServerPing,
+            ping_interval_ms: 20_000,
+            pong_timeout_ms: 60_000,
+            stale_message_ms: 60_000,
+            requires_pong_payload_echo: true,
+        },
+        reconnect_requires_login: false,
+        reconnect_requires_resubscribe: true,
+        orderbook_requires_snapshot_after_reconnect: true,
+        ..StreamRuntimeCapability::default()
+    }
 }
 
 fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> {
@@ -207,6 +289,14 @@ fn private_endpoint_specs() -> Vec<PrivateEndpointSpec> {
             1,
         ),
         private_endpoint(
+            "batch_place_orders",
+            "POST",
+            "/fapi/v1/batchOrders",
+            vec![MarketType::Perpetual],
+            Trade,
+            5,
+        ),
+        private_endpoint(
             "place_quote_market_order",
             "POST",
             "/api/v3/order",
@@ -226,6 +316,14 @@ fn private_endpoint_specs() -> Vec<PrivateEndpointSpec> {
             "cancel_order",
             "DELETE",
             "/fapi/v1/order",
+            vec![MarketType::Perpetual],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "batch_cancel_orders",
+            "DELETE",
+            "/fapi/v1/batchOrders",
             vec![MarketType::Perpetual],
             Trade,
             1,

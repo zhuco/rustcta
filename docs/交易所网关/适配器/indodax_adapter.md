@@ -31,7 +31,7 @@ Boundaries:
 - Runtime support is limited to `MarketType::Spot`.
 - Official P6 product-line verification found only IDR spot public/private API
   surfaces; standard futures/perpetual/options are `交易所不支持合约`.
-- Public/private streams are unsupported; the adapter is REST-only. 当前官方 PDF/GitHub API 未见公共订单簿 WS，写 `交易所不支持公共 WS 行情`。
+- Public/private streams are unsupported; the adapter is REST-only. 当前官方 PDF/GitHub API 未见公共订单簿 WS，写 `交易所不支持公共 WS 行情`，并在 YAML 记录 `websocket.public.support: unsupported`。
 - Client order IDs, amend orders, order lists, cancel-all, positions, leverage/margin, reduce-only, post-only, stop orders, IOC/FOK, transfers, deposits, withdrawals, fiat banking, and payment APIs are explicitly unsupported.
 - Fiat IDR is treated only as a spot quote asset in balances/orders; fiat payment and withdrawal flows are not represented in runtime APIs.
 - Generic cancel and batch-cancel are unsupported because Indodax `cancelOrder` requires buy/sell side context that `CancelOrderRequest` does not carry.
@@ -41,3 +41,10 @@ Validation:
 - `python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/indodax/endpoint_mapping.yaml`
 - `python3 -m json.tool tests/fixtures/exchanges/indodax/...`
 - `cargo test -p rustcta-exchange-gateway indodax --lib --message-format short` once unrelated parallel adapters compile.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：当前 Indodax TAPI profile 不暴露稳定 fee runtime。
+## P2 Core Trading Boundary (2026-06-09)
+
+P2 core cancel_order is an explicit unsupported shared-runtime boundary. Native Indodax cancelOrder requires buy/sell side, and the shared CancelOrderRequest has no side field; the internal helper no longer defaults to buy.

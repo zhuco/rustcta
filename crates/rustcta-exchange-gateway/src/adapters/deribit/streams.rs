@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use super::parser::{
     normalize_deribit_symbol, parse_error, parse_orderbook_snapshot, symbol_scope_from_instrument,
+    value_as_u64,
 };
 use super::private_parser::{parse_order_state, parse_positions};
 use super::DeribitGatewayAdapter;
@@ -34,12 +35,36 @@ pub enum DeribitPublicStreamMessage {
     Heartbeat,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeribitBookStreamOptions {
+    pub group: &'static str,
+    pub depth: u32,
+    pub interval: &'static str,
+}
+
+impl Default for DeribitBookStreamOptions {
+    fn default() -> Self {
+        Self {
+            group: "none",
+            depth: 20,
+            interval: "100ms",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeribitBookChangeIds {
+    pub change_id: u64,
+    pub prev_change_id: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeribitPublicWsSession {
     pub url: String,
     exchange_id: ExchangeId,
     symbol: SymbolScope,
     subscribe_payload: Value,
+    last_change_id: Option<u64>,
     state: StreamRuntimeState,
 }
 
@@ -146,6 +171,7 @@ impl DeribitPublicWsSession {
             exchange_id,
             symbol: subscription.symbol,
             subscribe_payload,
+            last_change_id: None,
             state,
         })
     }
@@ -164,6 +190,7 @@ impl DeribitPublicWsSession {
     }
 
     pub fn on_connected(&mut self, now: DateTime<Utc>) {
+        self.last_change_id = None;
         self.state.on_connected(now);
     }
 
@@ -190,6 +217,9 @@ impl DeribitPublicWsSession {
         if matches!(message, DeribitPublicStreamMessage::Heartbeat) {
             self.state.on_pong(Utc::now());
         }
+        if matches!(message, DeribitPublicStreamMessage::OrderBook(_)) {
+            self.apply_order_book_change_ids(&value);
+        }
         let mut events = vec![DeribitWsSessionEvent::Public(message.clone())];
         match message {
             DeribitPublicStreamMessage::OrderBook(snapshot) => {
@@ -213,6 +243,15 @@ impl DeribitPublicWsSession {
             DeribitPublicStreamMessage::SubscriptionAck { .. } => {}
         }
         Ok(events)
+    }
+
+    fn apply_order_book_change_ids(&mut self, value: &Value) {
+        if let Some(change_ids) = deribit_book_change_ids(value) {
+            if !deribit_change_id_is_contiguous(self.last_change_id, change_ids) {
+                self.state.on_sequence_gap();
+            }
+            self.last_change_id = Some(change_ids.change_id);
+        }
     }
 }
 
@@ -448,7 +487,10 @@ fn deribit_public_channel(subscription: &PublicStreamSubscription) -> ExchangeAp
     let symbol = normalize_deribit_symbol(&subscription.symbol)?;
     match &subscription.kind {
         PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta => {
-            Ok(format!("book.{symbol}.100ms"))
+            deribit_public_order_book_channel_for_symbol(
+                &symbol,
+                DeribitBookStreamOptions::default(),
+            )
         }
         PublicStreamKind::Trades => Ok(format!("trades.{symbol}.100ms")),
         PublicStreamKind::Ticker => Ok(format!("ticker.{symbol}.100ms")),
@@ -456,6 +498,73 @@ fn deribit_public_channel(subscription: &PublicStreamSubscription) -> ExchangeAp
             "chart.trades.{symbol}.{}",
             normalize_interval(interval)
         )),
+    }
+}
+
+pub fn deribit_public_order_book_channel(
+    subscription: &PublicStreamSubscription,
+    options: DeribitBookStreamOptions,
+) -> ExchangeApiResult<String> {
+    ensure_exchange_api_schema(subscription.schema_version)?;
+    let symbol = normalize_deribit_symbol(&subscription.symbol)?;
+    deribit_public_order_book_channel_for_symbol(&symbol, options)
+}
+
+fn deribit_public_order_book_channel_for_symbol(
+    symbol: &str,
+    options: DeribitBookStreamOptions,
+) -> ExchangeApiResult<String> {
+    validate_deribit_book_stream_options(options)?;
+    Ok(format!(
+        "book.{symbol}.{}.{}.{}",
+        options.group, options.depth, options.interval
+    ))
+}
+
+fn validate_deribit_book_stream_options(
+    options: DeribitBookStreamOptions,
+) -> ExchangeApiResult<()> {
+    if !matches!(
+        options.group,
+        "none" | "1" | "2" | "5" | "10" | "25" | "100" | "250"
+    ) {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("unsupported deribit book group `{}`", options.group),
+        });
+    }
+    if !matches!(options.depth, 1 | 10 | 20) {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("unsupported deribit book depth `{}`", options.depth),
+        });
+    }
+    if !matches!(options.interval, "raw" | "100ms" | "agg2") {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("unsupported deribit book interval `{}`", options.interval),
+        });
+    }
+    Ok(())
+}
+
+pub fn deribit_book_change_ids(value: &Value) -> Option<DeribitBookChangeIds> {
+    let params = value.get("params").unwrap_or(value);
+    let channel = params.get("channel").and_then(Value::as_str)?;
+    if !channel.starts_with("book.") {
+        return None;
+    }
+    let data = params.get("data").unwrap_or(params);
+    Some(DeribitBookChangeIds {
+        change_id: value_as_u64(data.get("change_id")?)?,
+        prev_change_id: data.get("prev_change_id").and_then(value_as_u64),
+    })
+}
+
+pub fn deribit_change_id_is_contiguous(
+    previous_change_id: Option<u64>,
+    current: DeribitBookChangeIds,
+) -> bool {
+    match (previous_change_id, current.prev_change_id) {
+        (Some(previous), Some(prev_change_id)) => previous == prev_change_id,
+        _ => true,
     }
 }
 

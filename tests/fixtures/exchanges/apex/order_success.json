@@ -1,0 +1,20 @@
+{
+  "code": "0",
+  "data": {
+    "id": "offline-order-id",
+    "clientOrderId": "offline-client-id",
+    "symbol": "BTC-USDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "timeInForce": "GOOD_TIL_CANCEL",
+    "status": "PARTIALLY_FILLED",
+    "size": "0.010",
+    "price": "65000",
+    "filledSize": "0.004",
+    "avgPrice": "64990",
+    "reduceOnly": false,
+    "postOnly": true,
+    "createdAt": 1780886400000,
+    "updatedAt": 1780886460000
+  }
+}

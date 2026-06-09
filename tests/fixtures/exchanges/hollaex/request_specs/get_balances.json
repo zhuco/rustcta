@@ -27,5 +27,18 @@
   "forbid_header_values_containing": [
     "test-secret"
   ],
-  "signing_vector": "hollaex/get_balances_hmac_sha256"
+  "signing_vector": "hollaex/get_balances_hmac_sha256",
+  "response_sample": {
+    "BTC": {
+      "available": 0.01,
+      "balance": 0.012,
+      "hold": 0.002
+    },
+    "USDT": {
+      "available": 100,
+      "balance": 100,
+      "hold": 0
+    }
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns hollaex.get_balances_spec_only until HMAC private runtime, parser, white-label profile guard, and reconciliation are promoted."
 }

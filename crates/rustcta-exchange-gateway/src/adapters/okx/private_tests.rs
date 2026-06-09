@@ -1,8 +1,8 @@
 use rustcta_exchange_api::{
-    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
-    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
+    OpenOrdersRequest, PlaceOrderRequest, PositionsRequest, QueryOrderRequest,
+    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -12,7 +12,8 @@ use crate::signing_spec::SigningVector;
 
 use super::test_support::{
     assert_signed_okx_request, assert_signed_okx_request_method, context, exchange_id,
-    perpetual_symbol_scope, private_config, spawn_rest_server, symbol_scope,
+    futures_symbol_scope, option_symbol_scope, perpetual_symbol_scope, private_config,
+    spawn_rest_server, symbol_scope,
 };
 use super::{OkxGatewayAdapter, OkxGatewayConfig};
 
@@ -476,6 +477,116 @@ async fn okx_adapter_should_route_private_order_mutations() {
     assert_eq!(body["newSz"], "0.015");
 }
 
+#[tokio::test]
+async fn okx_adapter_should_route_native_batch_place_and_cancel_with_partial_reports() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [
+                {"ordId": "5001", "clOrdId": "BATCH1", "sCode": "0", "sMsg": ""},
+                {"ordId": "", "clOrdId": "BATCH2", "sCode": "51008", "sMsg": "Insufficient balance"}
+            ]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [
+                {"ordId": "5001", "clOrdId": "BATCH1", "sCode": "0", "sMsg": ""},
+                {"ordId": "5002", "clOrdId": "BATCH2", "sCode": "51603", "sMsg": "Order does not exist"}
+            ]
+        }),
+    ])
+    .await;
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_batch_place_order);
+    assert!(capabilities.supports_batch_cancel_order);
+
+    let first_order = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("batch-place-1"),
+        symbol: symbol_scope(),
+        client_order_id: Some("BATCH1".to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: Some(TimeInForce::GTC),
+        quantity: "0.01".to_string(),
+        price: Some("65000".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+    let second_order = PlaceOrderRequest {
+        client_order_id: Some("BATCH2".to_string()),
+        price: Some("64000".to_string()),
+        ..first_order.clone()
+    };
+
+    let placed = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![first_order, second_order],
+        })
+        .await
+        .expect("batch place");
+    assert_eq!(placed.orders.len(), 1);
+    let place_report = placed.report.expect("place report");
+    assert_eq!(place_report.total_items, 2);
+    assert_eq!(place_report.succeeded_count(), 1);
+    assert_eq!(place_report.failed_count(), 1);
+    assert!(place_report.requires_reconciliation());
+    assert_eq!(
+        place_report.results[1].client_order_id.as_deref(),
+        Some("BATCH2")
+    );
+
+    let cancelled = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("batch-cancel-1"),
+                    symbol: symbol_scope(),
+                    client_order_id: Some("BATCH1".to_string()),
+                    exchange_order_id: Some("5001".to_string()),
+                },
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("batch-cancel-2"),
+                    symbol: symbol_scope(),
+                    client_order_id: Some("BATCH2".to_string()),
+                    exchange_order_id: Some("5002".to_string()),
+                },
+            ],
+        })
+        .await
+        .expect("batch cancel");
+    assert_eq!(cancelled.cancelled_count, 1);
+    let cancel_report = cancelled.report.expect("cancel report");
+    assert_eq!(cancel_report.total_items, 2);
+    assert_eq!(cancel_report.succeeded_count(), 1);
+    assert_eq!(cancel_report.failed_count(), 1);
+    assert!(cancel_report.requires_reconciliation());
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    assert_signed_okx_request_method(&requests[0], "POST", "/api/v5/trade/batch-orders");
+    load_request_spec("okx/request_specs/batch_place_orders.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("batch place request spec");
+    assert_signed_okx_request_method(&requests[1], "POST", "/api/v5/trade/cancel-batch-orders");
+    load_request_spec("okx/request_specs/batch_cancel_orders.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("batch cancel request spec");
+}
+
 fn load_request_spec(path: &str) -> RequestSpec {
     let path = format!(
         "{}/../../tests/fixtures/exchanges/{path}",
@@ -533,6 +644,205 @@ async fn okx_adapter_should_place_perpetual_order_as_swap() {
     assert_eq!(body["reduceOnly"], true);
     assert_eq!(body["posSide"], "net");
     assert!(body.get("tgtCcy").is_none());
+}
+
+#[tokio::test]
+async fn okx_adapter_should_load_futures_positions_and_place_futures_order() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{
+                "instType": "FUTURES",
+                "instId": "BTC-USD-240329",
+                "posSide": "net",
+                "pos": "-2",
+                "avgPx": "65000",
+                "markPx": "64000",
+                "liqPx": "70000",
+                "upl": "2000",
+                "lever": "10"
+            }]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "4001", "clOrdId": "FUT1", "sCode": "0", "sMsg": ""}]
+        }),
+    ])
+    .await;
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let futures_symbol = futures_symbol_scope();
+
+    let positions = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("futures-positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Futures),
+            symbols: vec![futures_symbol.exchange_symbol.clone()],
+        })
+        .await
+        .expect("positions");
+
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].market_type, MarketType::Futures);
+    assert_eq!(
+        positions.positions[0].side,
+        rustcta_types::PositionSide::Short
+    );
+    assert_eq!(positions.positions[0].quantity, 2.0);
+    assert_eq!(positions.positions[0].entry_price, Some(65000.0));
+    assert_eq!(positions.positions[0].mark_price, Some(64000.0));
+    assert_eq!(positions.positions[0].leverage, Some(10.0));
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("futures-place"),
+            symbol: futures_symbol.clone(),
+            client_order_id: Some("FUT1".to_string()),
+            side: OrderSide::Buy,
+            position_side: Some(rustcta_types::PositionSide::Net),
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "1".to_string(),
+            price: Some("64500".to_string()),
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        })
+        .await
+        .expect("futures place");
+
+    assert_eq!(placed.order.market_type, MarketType::Futures);
+    assert!(placed.order.reduce_only);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+
+    assert_signed_okx_request(&requests[0], "/api/v5/account/positions");
+    load_request_spec("okx/request_specs/get_positions_futures.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("positions request spec");
+    assert_eq!(
+        requests[0].query.get("instType").map(String::as_str),
+        Some("FUTURES")
+    );
+    assert_eq!(
+        requests[0].query.get("instId").map(String::as_str),
+        Some("BTC-USD-240329")
+    );
+
+    assert_signed_okx_request_method(&requests[1], "POST", "/api/v5/trade/order");
+    load_request_spec("okx/request_specs/place_order_futures.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("futures place request spec");
+    let body = requests[1].body.as_ref().expect("futures place body");
+    assert_eq!(body["instId"], "BTC-USD-240329");
+    assert_eq!(body["tdMode"], "cross");
+    assert_eq!(body["side"], "buy");
+    assert_eq!(body["ordType"], "limit");
+    assert_eq!(body["sz"], "1");
+    assert_eq!(body["px"], "64500");
+    assert_eq!(body["reduceOnly"], true);
+    assert_eq!(body["posSide"], "net");
+}
+
+#[tokio::test]
+async fn okx_adapter_should_load_option_positions_and_place_option_order() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{
+                "instType": "OPTION",
+                "instId": "BTC-USD-240329-65000-C",
+                "posSide": "long",
+                "pos": "1",
+                "avgPx": "0.08",
+                "markPx": "0.09",
+                "upl": "0.01",
+                "lever": "1"
+            }]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "6001", "clOrdId": "OPT1", "sCode": "0", "sMsg": ""}]
+        }),
+    ])
+    .await;
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let option_symbol = option_symbol_scope();
+
+    let positions = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("option-positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Option),
+            symbols: vec![option_symbol.exchange_symbol.clone()],
+        })
+        .await
+        .expect("positions");
+
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].market_type, MarketType::Option);
+    assert_eq!(
+        positions.positions[0].side,
+        rustcta_types::PositionSide::Long
+    );
+    assert_eq!(positions.positions[0].quantity, 1.0);
+    assert_eq!(positions.positions[0].entry_price, Some(0.08));
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("option-place"),
+            symbol: option_symbol.clone(),
+            client_order_id: Some("OPT1".to_string()),
+            side: OrderSide::Buy,
+            position_side: Some(rustcta_types::PositionSide::Long),
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "1".to_string(),
+            price: Some("0.09".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect("option place");
+
+    assert_eq!(placed.order.market_type, MarketType::Option);
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("6001"));
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+
+    assert_signed_okx_request(&requests[0], "/api/v5/account/positions");
+    load_request_spec("okx/request_specs/get_positions_option.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("option positions request spec");
+    assert_eq!(
+        requests[0].query.get("instType").map(String::as_str),
+        Some("OPTION")
+    );
+    assert_eq!(
+        requests[0].query.get("instId").map(String::as_str),
+        Some("BTC-USD-240329-65000-C")
+    );
+
+    assert_signed_okx_request_method(&requests[1], "POST", "/api/v5/trade/order");
+    load_request_spec("okx/request_specs/place_order_option.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("option place request spec");
+    let body = requests[1].body.as_ref().expect("option place body");
+    assert_eq!(body["instId"], "BTC-USD-240329-65000-C");
+    assert_eq!(body["tdMode"], "cross");
+    assert_eq!(body["posSide"], "long");
+    assert_eq!(body["px"], "0.09");
 }
 
 #[tokio::test]

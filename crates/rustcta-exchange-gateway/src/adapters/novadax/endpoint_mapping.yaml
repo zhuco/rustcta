@@ -1,12 +1,12 @@
 schema_version: 1
 exchange: novadax
 adapter: NovadaxGatewayAdapter
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: draft
   source: docs/novadax_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: NovaDAX Brazil spot adapter. BRL markets normalize to BASE_QUOTE. Live private REST remains offline request-spec only.
+  last_reviewed: "2026-06-09"
+  notes: NovaDAX Brazil spot adapter. BRL markets normalize to BASE_QUOTE. Single and batch order lifecycle runtime is credential-gated and mock-tested; cancel-all-by-symbol remains offline pending over-cancel safety.
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -22,20 +22,66 @@ pagination:
   fills: { mode: page_limit, max_limit: 100 }
 reconciliation:
   private_state: rest_fallback
-  notes: Private WebSocket is not promoted; use REST request-spec readbacks for balances, orders, and fills.
+  notes: Private WebSocket is not promoted; use guarded REST readbacks for orders and fills when private REST is explicitly enabled.
 batch:
-  place: { support: native_spec_only, native_batch: true, atomicity: partial }
-  cancel: { support: native_spec_only, native_batch: true, atomicity: partial }
+  place: { support: native, native_batch: true, atomicity: partial, runtime: credential_gated_mock_tested }
+  cancel: { support: native, native_batch: true, atomicity: partial, runtime: credential_gated_mock_tested }
 websocket:
   public:
     support: payload_helper
     transport: socket_io
-    channels: ["MARKET.{symbol}.DEPTH", "MARKET.{symbol}.TRADE", "MARKET.{symbol}.TICKER"]
+    channels: ["MARKET.{symbol}.DEPTH.LEVEL0", "MARKET.{symbol}.TRADE", "MARKET.{symbol}.TICKER"]
+    public_channels:
+      - MARKET.{symbol}.DEPTH.LEVEL0.1s.no_sequence.no_checksum.resync_resubscribe_full_replace
+    order_book:
+      protocol: socket_io
+      subscribe_action: SUBSCRIBE
+      channel: MARKET.{symbol}.DEPTH.LEVEL0
+      push_interval: 1s
+      interval_ms: 1000
+      depth_level: LEVEL0
+      update_semantics: full_state_replace
+      sequence:
+        fields: []
+        continuity: unsupported_no_official_sequence
+      checksum:
+        supported: false
+        field: null
+        risk: no official checksum documented
+      resync:
+        mode: reconnect_and_resubscribe
+        strategy: treat next DEPTH.LEVEL0 payload as full replacement snapshot
     heartbeat: { mode: socket_io_ping_pong, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: official_vip_fee_table
+    reason: "NovaDAX fees/limits VIP table is recorded as an offline config source; shared get_fees runtime remains project-unimplemented pending refresh policy, VIP level mapping, and account-effective fee boundary."
+    boundary_fixture: tests/fixtures/exchanges/novadax/request_specs/get_fees_config_source.json
 endpoints:
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /en-US/taxas-e-limites
+    auth: none
+    rate_limit_bucket: novadax_public
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: public fees/limits VIP table is fixture-backed as config source only; order fill fee amount is not treated as fee-rate runtime."
+    official_doc: https://www.novadax.com.br/en-US/taxas-e-limites
+    request_spec:
+      fixture: tests/fixtures/exchanges/novadax/request_specs/get_fees_config_source.json
   - operation: symbol_rules
     product: spot
     market_types: [spot]
@@ -49,7 +95,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
   - operation: order_book
     product: spot
     market_types: [spot]
@@ -63,7 +109,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
   - operation: balances
     product: spot
     market_types: [spot]
@@ -79,6 +125,9 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: spec_only
+    reason: "NovaDAX account balance readback is fixture-backed, but shared get_balances runtime remains disabled pending HMAC read-only auth smoke, balance parser normalization, permission guard, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/novadax/request_specs/get_balances.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/novadax/balances.json }
   - operation: place_order
     product: spot
     market_types: [spot]
@@ -93,7 +142,10 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: spec_only
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/novadax/request_specs/place_order_limit_brl.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/order_ack.json }
+    notes: "Credential-gated HMAC private REST runtime; default config returns Unsupported until NOVADAX_PRIVATE_REST_ENABLED plus API key/secret are configured. Mock tests cover signed request body and order ack parsing; no live write success is asserted."
   - operation: batch_place_orders
     product: spot
     market_types: [spot]
@@ -108,7 +160,9 @@ endpoints:
     native_batch: true
     atomicity: partial
     testnet: false
-    support: spec_only
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/order_ack.json }
+    notes: "Credential-gated private REST runtime is covered by mock signed request tests; no live write success is asserted."
   - operation: cancel_order
     product: spot
     market_types: [spot]
@@ -123,7 +177,10 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: spec_only
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/novadax/request_specs/cancel_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/order_ack.json }
+    notes: "Credential-gated HMAC private REST runtime; requires exchange_order_id and explicit private REST enablement. Mock tests cover signed cancel body and cancelled-state fallback; no live write success is asserted."
   - operation: batch_cancel_orders
     product: spot
     market_types: [spot]
@@ -138,7 +195,9 @@ endpoints:
     native_batch: true
     atomicity: partial
     testnet: false
-    support: spec_only
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/order_ack.json }
+    notes: "Credential-gated private REST runtime is covered by mock signed request tests; no live write success is asserted."
   - operation: cancel_all_orders
     product: spot
     market_types: [spot]
@@ -154,6 +213,9 @@ endpoints:
     atomicity: non_atomic
     testnet: false
     support: spec_only
+    reason: "NovaDAX cancel-all-by-symbol is fixture-backed offline; runtime stays disabled pending symbol/account guard, over-cancel safety policy, parser, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/novadax/request_specs/cancel_all_by_symbol.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/novadax/order_ack.json }
   - operation: query_order
     product: spot
     market_types: [spot]
@@ -168,7 +230,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/novadax/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/order_ack.json }
+    notes: "Credential-gated signed GET runtime; requires exchange_order_id because current NovaDAX lookup fixture is id based."
   - operation: open_orders
     product: spot
     market_types: [spot]
@@ -183,7 +248,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/novadax/request_specs/get_open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/open_orders.json }
+    notes: "Credential-gated signed GET runtime; requires symbol scope, uses page=1 and caps limit at 100."
   - operation: recent_fills
     product: spot
     market_types: [spot]
@@ -198,4 +266,7 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/novadax/request_specs/get_recent_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/novadax/fills.json }
+    notes: "Credential-gated signed GET runtime; requires symbol, tenant_id and account_id, maps fills into shared Fill records, and caps requested limit at 100."

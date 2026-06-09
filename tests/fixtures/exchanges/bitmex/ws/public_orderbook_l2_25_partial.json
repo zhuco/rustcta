@@ -1,0 +1,35 @@
+{
+  "table": "orderBookL2_25",
+  "action": "partial",
+  "keys": [
+    "symbol",
+    "id",
+    "side"
+  ],
+  "types": {
+    "symbol": "symbol",
+    "id": "long",
+    "side": "symbol",
+    "size": "long",
+    "price": "float",
+    "timestamp": "timestamp"
+  },
+  "data": [
+    {
+      "symbol": "XBTUSD",
+      "id": 8799999950,
+      "side": "Buy",
+      "size": 1000,
+      "price": 100.5,
+      "timestamp": "2026-06-09T00:00:00.000Z"
+    },
+    {
+      "symbol": "XBTUSD",
+      "id": 8800000050,
+      "side": "Sell",
+      "size": 800,
+      "price": 101.5,
+      "timestamp": "2026-06-09T00:00:00.000Z"
+    }
+  ]
+}

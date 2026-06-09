@@ -1,0 +1,11 @@
+[
+  {
+    "instrument_name": "BTC-USDT-PERPETUAL",
+    "size": "0.25",
+    "average_price": "64000",
+    "mark_price": "64125.5",
+    "liquid_price": "51200",
+    "floating_profit_loss": "31.375",
+    "leverage": "10"
+  }
+]

@@ -17,6 +17,20 @@ pub struct BitflyerWsSubscriptionSpec {
     pub unsubscribe_payload: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitflyerPublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub protocol: &'static str,
+    pub snapshot_channel_template: &'static str,
+    pub delta_channel_template: &'static str,
+    pub fixed_update_interval_ms: Option<u64>,
+    pub depth: Option<u32>,
+    pub sequence_field: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub rest_snapshot_endpoint: &'static str,
+    pub resync_strategy: &'static str,
+}
+
 pub fn bitflyer_private_stream_capabilities(enabled: bool) -> PrivateStreamCapabilities {
     if enabled {
         PrivateStreamCapabilities {
@@ -35,6 +49,21 @@ pub fn bitflyer_private_stream_capabilities(enabled: bool) -> PrivateStreamCapab
     }
 }
 
+pub fn bitflyer_public_order_book_ws_policy() -> BitflyerPublicOrderBookWsPolicy {
+    BitflyerPublicOrderBookWsPolicy {
+        url: "wss://ws.lightstream.bitflyer.com/json-rpc",
+        protocol: "json_rpc_2",
+        snapshot_channel_template: "lightning_board_snapshot_{product_code}",
+        delta_channel_template: "lightning_board_{product_code}",
+        fixed_update_interval_ms: None,
+        depth: None,
+        sequence_field: None,
+        checksum: None,
+        rest_snapshot_endpoint: "/v1/getboard",
+        resync_strategy: "subscribe to lightning_board_snapshot_{product_code}, then apply lightning_board_{product_code}; on disconnect, stale stream or suspected loss, rebuild from REST GET /v1/getboard and fresh WS snapshot because no sequence/checksum is documented",
+    }
+}
+
 pub fn public_subscription_spec(
     subscription: &PublicStreamSubscription,
     url: &str,
@@ -49,9 +78,8 @@ pub fn public_subscription_spec(
     }
     let product = normalize_product_code(&subscription.symbol.exchange_symbol.symbol)?;
     let channel = match &subscription.kind {
-        PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta => {
-            format!("lightning_board_{product}")
-        }
+        PublicStreamKind::OrderBookSnapshot => format!("lightning_board_snapshot_{product}"),
+        PublicStreamKind::OrderBookDelta => format!("lightning_board_{product}"),
         PublicStreamKind::Trades => format!("lightning_executions_{product}"),
         PublicStreamKind::Ticker => format!("lightning_ticker_{product}"),
         PublicStreamKind::Candles { .. } => {

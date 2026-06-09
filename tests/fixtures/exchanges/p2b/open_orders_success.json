@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "result": [
+    {
+      "id": "12345",
+      "market": "BTC_USDT",
+      "side": "buy",
+      "type": "limit",
+      "amount": "0.02000000",
+      "left": "0.01000000",
+      "price": "64000.00",
+      "status": "open",
+      "createdAt": 1698484860
+    }
+  ]
+}

@@ -16,6 +16,7 @@ use rustcta_types::{ExchangeId, MarketType, OrderType};
 
 use super::GatewayAdapter;
 use crate::GatewayExchangeStatus;
+use signing::{node_write_project_unimplemented, AMEND_PROJECT_UNIMPLEMENTED};
 
 mod config;
 mod parser;
@@ -26,6 +27,7 @@ mod signing;
 mod streams;
 #[cfg(test)]
 mod tests;
+mod toolchain;
 mod transport;
 
 pub use config::DydxGatewayConfig;
@@ -173,6 +175,12 @@ impl ExchangeClient for DydxGatewayAdapter {
         capabilities.max_order_book_depth = None;
         capabilities.order_book = rustcta_exchange_api::OrderBookCapability::snapshot_only(None);
         capabilities.max_recent_fill_limit = Some(100);
+        toolchain::apply_capabilities(
+            &mut capabilities,
+            private_read,
+            self.config.enabled_public_streams,
+            private_streams,
+        );
         capabilities
     }
 
@@ -232,9 +240,9 @@ impl ExchangeClient for DydxGatewayAdapter {
         &self,
         _request: AmendOrderRequest,
     ) -> ExchangeApiResult<AmendOrderResponse> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "dydx.amend_requires_node_tx_signing",
-        })
+        Err(node_write_project_unimplemented(
+            AMEND_PROJECT_UNIMPLEMENTED,
+        ))
     }
 
     async fn place_order_list(

@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::private::YobitPrivateRequestSpec;
+
 #[derive(Clone)]
 pub struct YobitRest {
     exchange_id: ExchangeId,
@@ -48,6 +50,29 @@ impl YobitRest {
                 self.rest_base_url.trim_end_matches('/'),
                 build_path(endpoint, params)
             ))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_post(
+        &self,
+        spec: &YobitPrivateRequestSpec,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                spec.path
+            ))
+            .header("Key", &spec.headers.api_key)
+            .header("Sign", &spec.headers.signature)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(spec.body.clone())
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

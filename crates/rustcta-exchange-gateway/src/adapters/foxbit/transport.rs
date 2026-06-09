@@ -8,6 +8,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::foxbit_signed_headers;
+
 #[derive(Clone)]
 pub struct FoxbitRest {
     exchange_id: ExchangeId,
@@ -40,22 +42,7 @@ impl FoxbitRest {
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> ExchangeApiResult<Value> {
-        let mut url = format!("{}{}", self.rest_base_url.trim_end_matches('/'), endpoint);
-        if !params.is_empty() {
-            let query = params
-                .iter()
-                .map(|(key, value)| {
-                    format!(
-                        "{}={}",
-                        urlencoding::encode(key),
-                        urlencoding::encode(value)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            url.push('?');
-            url.push_str(&query);
-        }
+        let (url, _) = build_url(self.rest_base_url.trim_end_matches('/'), endpoint, params);
         let response =
             self.http
                 .get(url)
@@ -64,6 +51,48 @@ impl FoxbitRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_get(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        receive_window_ms: Option<u64>,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        if api_key.trim().is_empty() || api_secret.trim().is_empty() {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "foxbit.private_rest_missing_credentials",
+            });
+        }
+        let (url, query_string) =
+            build_url(self.rest_base_url.trim_end_matches('/'), endpoint, params);
+        let timestamp_ms = Utc::now().timestamp_millis().to_string();
+        let mut request = self
+            .http
+            .get(url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json");
+        for (key, value) in foxbit_signed_headers(
+            api_key,
+            api_secret,
+            &timestamp_ms,
+            "GET",
+            endpoint,
+            &query_string,
+            "",
+            receive_window_ms,
+        ) {
+            request = request.header(key, value);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }
@@ -139,4 +168,30 @@ pub fn signed_request_spec(
         spec.insert("body".to_string(), body);
     }
     Value::Object(spec)
+}
+
+fn build_url(base_url: &str, endpoint: &str, params: &HashMap<String, String>) -> (String, String) {
+    let mut url = format!("{base_url}{endpoint}");
+    let query_string = encode_params(params);
+    if !query_string.is_empty() {
+        url.push('?');
+        url.push_str(&query_string);
+    }
+    (url, query_string)
+}
+
+fn encode_params(params: &HashMap<String, String>) -> String {
+    let mut pairs = params.iter().collect::<Vec<_>>();
+    pairs.sort_by(|left, right| left.0.cmp(right.0));
+    pairs
+        .into_iter()
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&")
 }

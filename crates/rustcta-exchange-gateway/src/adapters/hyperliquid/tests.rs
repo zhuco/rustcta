@@ -1,12 +1,15 @@
 use chrono::Utc;
-use rustcta_exchange_api::{RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION};
+use rustcta_exchange_api::{
+    ExchangeApiError, ExchangeClient, FeesRequest, RequestContext, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
+};
 use rustcta_types::{AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, TenantId};
 use serde_json::Value;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::private_parser::{parse_balances, parse_fills, parse_open_orders, parse_positions};
 use super::signing::{action_hash, sign_l1_action, signing_address_from_private_key};
-use super::streams;
+use super::{streams, HyperliquidGatewayAdapter, HyperliquidGatewayConfig};
 
 fn exchange_id() -> ExchangeId {
     ExchangeId::new("hyperliquid").unwrap()
@@ -137,4 +140,27 @@ fn hyperliquid_ws_fixture_should_match_payload_helper() {
     )
     .unwrap();
     assert_eq!(payload, expected);
+}
+
+#[tokio::test]
+async fn hyperliquid_fees_should_remain_source_boundary_only() {
+    let adapter =
+        HyperliquidGatewayAdapter::new(HyperliquidGatewayConfig::default()).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_fees);
+
+    let error = adapter
+        .get_fees(FeesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: RequestContext::new(Utc::now()),
+            symbols: vec![btc_scope()],
+        })
+        .await
+        .expect_err("fees source boundary only");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "hyperliquid.fee_schedule_source_boundary_only"
+        }
+    ));
 }

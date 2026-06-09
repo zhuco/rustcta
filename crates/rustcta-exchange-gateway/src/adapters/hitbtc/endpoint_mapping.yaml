@@ -5,7 +5,7 @@ metadata:
   status: validated
   source: https://api.hitbtc.com/
   last_reviewed: "2026-06-08"
-  notes: "A-23 canonical HitBTC v3 family adapter. Runtime is G1 public spot REST; private REST and WS are offline request-spec/parser boundaries only."
+  notes: "A-23 canonical HitBTC v3 family adapter. Runtime is G1 public spot REST plus guarded advanced private REST for replace/order-list; other private REST and WS remain offline request-spec/parser boundaries."
 market_types: [spot]
 products: [spot]
 rest:
@@ -16,6 +16,7 @@ base_urls:
   wallet_ws: wss://api.hitbtc.com/api/3/ws/wallet
 auth:
   rest_hs256: "Authorization: HS256 base64(api_key:hmac_sha256(method+path+query+body+timestamp+window):timestamp:window)"
+  rest_basic: "Official v3 examples also allow HTTP Basic apiKey:secretKey for private read endpoints; gateway fixtures use HS256 to avoid secret transport."
   ws_hs256: "login params with type=HS256, api_key, timestamp, optional window and HMAC-SHA256(timestamp+window)"
 rate_limits:
   buckets:
@@ -55,8 +56,45 @@ websocket:
     timeout_ms: 10000
   public_subscribe:
     method: subscribe
-    channel: orderbook/D5/1000ms
+    channel: orderbook/D5/100ms
+    channels:
+      - orderbook/D5/100ms
+      - orderbook/D10/100ms
+      - orderbook/D20/100ms
+      - orderbook/D5/500ms
+      - orderbook/D10/500ms
+      - orderbook/D20/500ms
+      - orderbook/D5/1000ms
+      - orderbook/D10/1000ms
+      - orderbook/D20/1000ms
+      - orderbook/top/100ms
+      - orderbook/top/500ms
+      - orderbook/top/1000ms
+      - orderbook/full
     fixture: tests/fixtures/exchanges/hitbtc/ws/orderbook_partial.json
+  public_channels:
+    - orderbook/D5/100ms
+    - orderbook/D10/100ms
+    - orderbook/D20/100ms
+    - orderbook/top/100ms
+    - orderbook/full
+  order_book:
+    channels:
+      partial_depth_5: { channel: orderbook/D5/100ms, interval_ms: 100, depth_per_side: 5 }
+      partial_depth_10: { channel: orderbook/D10/100ms, interval_ms: 100, depth_per_side: 10 }
+      partial_depth_20: { channel: orderbook/D20/100ms, interval_ms: 100, depth_per_side: 20 }
+      top_bbo: { channel: orderbook/top/100ms, interval_ms: 100, depth_per_side: 1 }
+      full_book: { channel: orderbook/full, interval_ms: real_time, depth_per_side: full }
+    interval_options_ms: [100, 500, 1000]
+    sequence:
+      fields: [s]
+      continuity: monotonic_sequence_per_symbol
+      gap_policy: rest_snapshot_resync
+    checksum: none
+    resync:
+      mode: rest_snapshot_rebuild
+      endpoint_operation: get_order_book
+      path: /public/orderbook/{symbol}
   private_auth:
     method: login
     auth: hmac
@@ -64,8 +102,49 @@ websocket:
 unsupported:
   - operation: hitbtc_family_profile_deduplication
     reason: "This task implements the canonical HitBTC adapter without refactoring Bequant/FMFW.io profile adapters into shared family core code."
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, margin]
+    boundary: project_unimplemented_product_line
+    official_gap: hitbtc_margin_futures_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/hitbtc/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current HitBTC adapter remains a Spot runtime plus offline source specs; futures/margin must not reuse spot order, balance or book routing without explicit product scope guards."
+    required_endpoints:
+      market_metadata: [margin/futures instruments, contract specifications, settlement and precision rules]
+      public_market_data: [margin/futures order book, margin/futures ticker, margin/futures trades]
+      private_account: [margin/futures balances, positions, risk or leverage limits]
+      private_order_lifecycle: [margin/futures place order, margin/futures cancel order, margin/futures query/open orders, margin/futures fills]
+    unsafe_to_promote_without: [margin/futures metadata separated from spot symbols, position/margin/risk parser coverage, derivatives private order request specs, post-write query/open/fills reconciliation]
+    reason: "Official HitBTC futures/margin derivatives surfaces exist, but this spot adapter has not implemented the contract product line."
+  - operation: margin_product
+    status: project_unimplemented
+    product_lines: [margin]
+    boundary: project_unimplemented_product_line
+    official_gap: hitbtc_margin_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/hitbtc/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      private_account: [margin balances, positions, risk or leverage limits]
+      private_order_lifecycle: [margin place/cancel/query/open orders, margin fills]
+    reason: "Official margin account/order surfaces exist in the HitBTC v3 family, but margin balances, positions, risk and order paths are not wired."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures]
+    boundary: project_unimplemented_product_line
+    official_gap: hitbtc_futures_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/hitbtc/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [futures instruments, contract specifications, settlement and precision rules]
+      private_account: [futures balances, positions, risk or leverage limits]
+      private_order_lifecycle: [futures place/cancel/query/open orders, futures fills]
+    reason: "Official futures surfaces exist in the HitBTC v3 family, but contract metadata, positions, fees and trading runtime remain offline/project-unimplemented."
   - operation: private_rest_runtime
-    reason: "Private REST is request-spec/signing-vector only for this task."
+    reason: "Private REST runtime is enabled for guarded Spot core trading, balance readback, fee readback, and advanced replace/order-list behind explicit HITBTC_PRIVATE_REST_ENABLED credentials; private WS remains an offline boundary."
+  - operation: batch_place_orders
+    reason: "No shared native batch place runtime mapping is enabled for this adapter; runtime returns Unsupported."
+  - operation: batch_cancel_orders
+    status: unsupported
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/batch_cancel_orders.json
+    reason: "HitBTC v3 exposes DELETE /spot/order cancel-all/filter-by-symbol semantics and the request-spec fixture is pinned, but this is not a lossless shared batch_cancel_orders cancel-list operation; using it would over-cancel matching open orders."
   - operation: public_ws_runtime
     reason: "Public WS payloads and parser fixtures are present, but no production supervisor is wired."
   - operation: private_ws_runtime
@@ -105,6 +184,66 @@ endpoints:
     testnet: false
     support: native
     official_doc: https://api.hitbtc.com/#order-books
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /spot/fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: hitbtc_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Official personal Spot trading commission endpoint is enabled as guarded HS256 private REST runtime behind HITBTC_PRIVATE_REST_ENABLED plus API key/secret."
+    official_doc: https://api.hitbtc.com/#get-all-trading-commissions
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/get_fees_spot.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/hitbtc/parser/spot_fees.json }
+    notes: "Runtime maps symbol plus make_rate/take_rate decimals into maker/taker fee snapshots; source requires read-only account permission and remains Spot-scoped."
+  - operation: get_fees
+    product: futures
+    market_types: [futures]
+    transport: rest
+    method: GET
+    path: /futures/fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: hitbtc_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "Official personal Futures trading commission endpoint is mapped as an offline request-spec boundary; this spot adapter keeps contract runtime project-unimplemented."
+    official_doc: https://api.hitbtc.com/#get-all-trading-commissions-2
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/get_fees_futures.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hitbtc/parser/futures_fees.json }
+    notes: "Parser should map contract symbol plus make_rate/take_rate decimals into maker/taker fee snapshots only when the futures product scope is explicitly enabled."
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /spot/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: hitbtc_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Credential-gated read-only Spot balance runtime is implemented via HS256 private REST; funds movement and wallet transfers remain outside gateway scope."
+    official_doc: https://api.hitbtc.com/#get-spot-balances
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/hitbtc/private_tests.rs::hitbtc_request_specs_should_match_offline_private_builders, fixture: tests/fixtures/exchanges/hitbtc/request_specs/get_balances.json }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/hitbtc/private_tests.rs::hitbtc_private_parser_should_parse_order_ack_fixture, fixture: tests/fixtures/exchanges/hitbtc/parser/spot_balances.json }
+    notes: "Default profile still fail-closes without HITBTC_PRIVATE_REST_ENABLED plus API key/secret; runtime uses read-only account scope and filters requested assets locally."
   - operation: place_order
     product: spot
     transport: rest
@@ -118,8 +257,8 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime write path remains Unsupported."
+    support: native
+    reason: "P2 core runtime: signed HS256 Spot order create is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover request body/header shape and parser readback. No live success is assumed."
     official_doc: https://api.hitbtc.com/#create-new-spot-order
     request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/place_order.json
   - operation: cancel_order
@@ -135,10 +274,99 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime cancel path remains Unsupported."
+    support: native
+    reason: "P2 core runtime: signed HS256 Spot cancel by client_order_id is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover DELETE path/header and cancel parser. No live success is assumed."
     official_doc: https://api.hitbtc.com/#cancel-spot-order
     request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/order/{client_order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: hitbtc_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "P2 core runtime: signed HS256 single-order readback is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret and feeds query/reconciliation parser tests."
+    official_doc: https://api.hitbtc.com/#get-spot-order
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/query_order.json
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /spot/order/{client_order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: hitbtc_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: native
+    reason: "P4 advanced order runtime: signed HS256 PATCH replace is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover request body/header shape and parser fixture. No live success is assumed."
+    official_doc: https://api.hitbtc.com/#replace-spot-order
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/amend_order_replace.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hitbtc/parser/amend_order_ack.json }
+    notes: "Signing vector: tests/fixtures/exchanges/hitbtc/signing_vectors/amend_order_replace_hs256.json"
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /spot/order/list
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: hitbtc_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: native
+    reason: "P4 advanced order runtime: signed HS256 order-list POST is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret; mock REST tests cover request body/header shape and parser fixture. No live success is assumed."
+    official_doc: https://api.hitbtc.com/#create-new-spot-order-list
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/place_order_list_otoco.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hitbtc/parser/order_list_otoco_ack.json }
+    notes: "Signing vector: tests/fixtures/exchanges/hitbtc/signing_vectors/place_order_list_otoco_hs256.json"
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/hitbtc/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: hitbtc_order_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "P4 advanced order boundary: no shared native batch place request-spec/runtime mapping is enabled."
+    official_doc: https://api.hitbtc.com/
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: hitbtc_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: unsupported
+    reason: "P4 advanced order boundary: official cancel-all/filter-by-symbol endpoint is fixture/signing/parser-backed for audit, but shared batch_cancel_orders requires a specific cancel list. Promoting this route would over-cancel all matching open orders, so this operation is explicitly unsupported for the shared gateway."
+    official_doc: https://api.hitbtc.com/#cancel-all-spot-orders
+    request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/batch_cancel_orders.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/hitbtc/parser/batch_cancel_orders_ack.json }
+    notes: "Signing vector: tests/fixtures/exchanges/hitbtc/signing_vectors/batch_cancel_orders_hs256.json"
   - operation: get_open_orders
     product: spot
     transport: rest
@@ -152,8 +380,8 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: "Private readback endpoint mapped for reconciliation but not enabled at runtime."
+    support: native
+    reason: "P2 core runtime: signed HS256 open-order readback is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret and supports REST reconciliation."
     official_doc: https://api.hitbtc.com/#get-all-active-spot-orders
     request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/get_open_orders.json
   - operation: get_recent_fills
@@ -169,21 +397,37 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: "Private trade history endpoint mapped for reconciliation but not enabled at runtime."
+    support: native
+    reason: "P2 core runtime: signed HS256 trade-history readback is guarded by HITBTC_PRIVATE_REST_ENABLED plus API key/secret and parses recent fills for reconciliation."
     official_doc: https://api.hitbtc.com/#spot-trades-history
     request_spec_fixture: tests/fixtures/exchanges/hitbtc/request_specs/get_recent_fills.json
 streams:
   - operation: public_orderbook_snapshot
-    channel: orderbook/D5/1000ms
+    channel: orderbook/D5/100ms
+    transport: websocket
+    auth: none
+    channels:
+      - orderbook/D5/100ms
+      - orderbook/D10/100ms
+      - orderbook/D20/100ms
+      - orderbook/top/100ms
+      - orderbook/full
     scope: public
     support: spec_only
     heartbeat: server_ping_30s
+    interval_ms: 100
+    supported_intervals_ms: [100, 500, 1000]
+    depth: [1, 5, 10, 20]
+    sequence: [s]
+    checksum: none
     resync:
       endpoint_operation: get_order_book
+      mode: rest_snapshot_rebuild
     parser_fixture: tests/fixtures/exchanges/hitbtc/ws/orderbook_partial.json
   - operation: private_trading_reports
     channel: spot_subscribe
+    transport: websocket
+    auth: hmac
     scope: private
     support: spec_only
     auth: hs256_login

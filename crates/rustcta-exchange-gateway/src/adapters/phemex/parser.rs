@@ -502,7 +502,7 @@ fn parse_levels(
             &Value::Null,
         )
     })?;
-    levels
+    Ok(levels
         .iter()
         .map(|level| {
             let array = level.as_array().ok_or_else(|| {
@@ -521,9 +521,17 @@ fn parse_levels(
                     parse_error(exchange_id.clone(), "invalid level quantity", level)
                 })?
             };
-            OrderBookLevel::new(price, quantity).map_err(validation_error)
+            if quantity <= 0.0 {
+                return Ok(None);
+            }
+            OrderBookLevel::new(price, quantity)
+                .map(Some)
+                .map_err(validation_error)
         })
-        .collect()
+        .collect::<ExchangeApiResult<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
 fn response_data(value: &Value) -> &Value {

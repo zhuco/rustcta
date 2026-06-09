@@ -1,0 +1,13 @@
+{
+  "exchange": "hitbtc",
+  "name": "place_order_list_otoco_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/api/3/spot/order/list",
+  "payload": "POST/api/3/spot/order/list{\"contingency_type\":\"oneTriggerOneCancelOther\",\"orders\":[{\"client_order_id\":\"cli-hitbtc-otoco-primary\",\"post_only\":false,\"price\":\"0.046016\",\"quantity\":\"0.063\",\"side\":\"buy\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-hitbtc-otoco-tp\",\"post_only\":false,\"price\":\"0.050000\",\"quantity\":\"0.063\",\"side\":\"sell\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-hitbtc-otoco-sl\",\"post_only\":false,\"quantity\":\"0.063\",\"side\":\"sell\",\"stop_price\":\"0.044050\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"stopMarket\"}]}171000000000010000",
+  "expected_signature": "a0287ef83c6d2207e8c3ecfdd9b61eb687b0c8230b394b05f3df4d136574c28d",
+  "payload_format": "raw_payload",
+  "body": "{\"contingency_type\":\"oneTriggerOneCancelOther\",\"orders\":[{\"client_order_id\":\"cli-hitbtc-otoco-primary\",\"post_only\":false,\"price\":\"0.046016\",\"quantity\":\"0.063\",\"side\":\"buy\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-hitbtc-otoco-tp\",\"post_only\":false,\"price\":\"0.050000\",\"quantity\":\"0.063\",\"side\":\"sell\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"limit\"},{\"client_order_id\":\"cli-hitbtc-otoco-sl\",\"post_only\":false,\"quantity\":\"0.063\",\"side\":\"sell\",\"stop_price\":\"0.044050\",\"symbol\":\"ETHBTC\",\"time_in_force\":\"GTC\",\"type\":\"stopMarket\"}]}"
+}

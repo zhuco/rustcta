@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v1/users/transactions/trade",
+  "auth": "btcturk_hmac_sha256_base64",
+  "headers": {
+    "X-PCK": "<redacted-api-key>",
+    "X-Stamp": "<milliseconds>",
+    "X-Signature": "<base64-hmac-sha256>",
+    "Accept": "application/json"
+  },
+  "query": {
+    "pairSymbol": "BTCTRY",
+    "orderId": "123456789"
+  }
+}

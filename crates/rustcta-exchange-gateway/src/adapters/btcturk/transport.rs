@@ -8,6 +8,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::btcturk_signature;
+
 #[derive(Clone)]
 pub struct BtcTurkPublicRest {
     exchange_id: ExchangeId,
@@ -52,6 +54,30 @@ impl BtcTurkPublicRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_signed_get(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let stamp_ms = Utc::now().timestamp_millis();
+        let signature = btcturk_signature(api_key, api_secret, stamp_ms)?;
+        let response = self
+            .http
+            .get(build_url(&self.rest_base_url, endpoint, params))
+            .header("X-PCK", api_key)
+            .header("X-Stamp", stamp_ms.to_string())
+            .header("X-Signature", signature)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 pub fn public_get_request_spec(path: &str, query: Value) -> Value {
@@ -76,6 +102,21 @@ pub fn signed_json_request_spec(method: &str, path: &str, body: Value) -> Value 
             "Content-Type": "application/json"
         },
         "body": body
+    })
+}
+
+pub fn signed_get_request_spec(path: &str, query: Value) -> Value {
+    json!({
+        "method": "GET",
+        "path": path,
+        "auth": "btcturk_hmac_sha256_base64",
+        "headers": {
+            "X-PCK": "<redacted-api-key>",
+            "X-Stamp": "<milliseconds>",
+            "X-Signature": "<base64-hmac-sha256>",
+            "Accept": "application/json"
+        },
+        "query": query
     })
 }
 

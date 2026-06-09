@@ -1,0 +1,12 @@
+{
+  "exchange": "binancecoinm",
+  "name": "batch_place_orders",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/dapi/v1/batchOrders",
+  "payload": "batchOrders=%5B%7B%22symbol%22%3A%22BTCUSD_PERP%22%2C%22side%22%3A%22BUY%22%2C%22positionSide%22%3A%22LONG%22%2C%22type%22%3A%22LIMIT%22%2C%22timeInForce%22%3A%22GTC%22%2C%22quantity%22%3A%222%22%2C%22price%22%3A%2225000.0%22%2C%22newClientOrderId%22%3A%22cli-batch-1%22%7D%5D&recvWindow=5000&timestamp=1710000000000",
+  "expected_signature": "dd36c51f2ade0d4cb6d5522b806df68cd5174809f5eba0f84110066262aac800",
+  "payload_format": "raw_payload"
+}

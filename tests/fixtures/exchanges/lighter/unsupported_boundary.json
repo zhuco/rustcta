@@ -5,10 +5,77 @@
     "lighter.symbol_rules_session_spec_only",
     "lighter.order_book_session_spec_only",
     "lighter.send_tx_signing_unverified",
-    "lighter.send_tx_batch_signing_unverified",
+    "lighter.amend_requires_signed_tx_builder_nonce_and_reconciliation",
+    "lighter.batch_place_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard",
+    "lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard",
+    "lighter.order_list_unsupported",
     "lighter.private_stream_session_spec_only"
   ],
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "project_unimplemented",
+      "runtime_error": "lighter.amend_requires_signed_tx_builder_nonce_and_reconciliation",
+      "official_surface": "/sendTx",
+      "request_spec_fixture": "tests/fixtures/exchanges/lighter/request_specs/send_tx_modify_request_spec_only.json",
+      "parser_fixture": "tests/fixtures/exchanges/lighter/parser/amend_order_ack.json",
+      "capabilities_v2": {
+        "runtime": "disabled",
+        "endpoint": "/sendTx",
+        "native_batch": false,
+        "atomicity": "non_atomic"
+      },
+      "remaining_runtime_work": [
+        "SDK-compatible signed tx builder",
+        "API-key private key/index/nonce handling",
+        "post-write order readback reconciliation",
+        "broadcast dry-run guard"
+      ]
+    },
+    "batch_place_orders": {
+      "status": "project_unimplemented",
+      "runtime_error": "lighter.batch_place_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard",
+      "official_surfaces": ["/sendTxBatch", "/batchOrders"],
+      "request_spec_fixture": "tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_request_spec_only.json",
+      "parser_fixture": "tests/fixtures/exchanges/lighter/parser/batch_place_orders_ack.json",
+      "capabilities_v2": {
+        "runtime": "disabled",
+        "mode": "native",
+        "atomicity": "partial",
+        "supports_partial_failure": true
+      },
+      "remaining_runtime_work": [
+        "SDK-compatible signed tx batch builder",
+        "API-key private key/index/nonce handling",
+        "partial-failure and missing-item reconciliation",
+        "broadcast dry-run guard"
+      ]
+    },
+    "batch_cancel_orders": {
+      "status": "project_unimplemented",
+      "runtime_error": "lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard",
+      "official_surfaces": ["/sendTxBatch", "/batchOrders"],
+      "request_spec_fixture": "tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_cancel_request_spec_only.json",
+      "parser_fixture": "tests/fixtures/exchanges/lighter/parser/batch_cancel_orders_ack.json",
+      "capabilities_v2": {
+        "runtime": "disabled",
+        "mode": "native",
+        "atomicity": "partial",
+        "supports_partial_failure": true
+      },
+      "remaining_runtime_work": [
+        "SDK-compatible signed tx batch builder",
+        "API-key private key/index/nonce handling",
+        "partial-failure and missing-item reconciliation",
+        "broadcast dry-run guard"
+      ]
+    },
+    "place_order_list": {
+      "status": "unsupported",
+      "runtime_error": "lighter.order_list_unsupported"
+    }
+  },
   "checksum": "unsupported",
   "scan_only": false,
-  "trade_enabled": false
+  "trade_enabled": false,
+  "private_write_enabled": false
 }

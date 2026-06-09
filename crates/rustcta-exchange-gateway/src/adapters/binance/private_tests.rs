@@ -1,8 +1,9 @@
 use rustcta_exchange_api::{
-    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, OrderListConditionalLeg,
-    OrderListLegType, OrderListRequest, PlaceOrderRequest, PositionsRequest, QueryOrderRequest,
-    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
+    OpenOrdersRequest, OrderListConditionalLeg, OrderListLegType, OrderListRequest,
+    PlaceOrderRequest, PositionsRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
@@ -532,10 +533,12 @@ async fn binance_adapter_should_route_perpetual_place_cancel_and_positions() {
 
     let seen = seen.lock().unwrap().clone();
     assert_eq!(seen[0].path, "/fapi/v1/order");
-    load_request_spec("binance/request_specs/futures_place_order_ioc_reduce_only.json")
-        .assert_matches(&seen[0].actual_http_request())
-        .expect("request spec");
     assert_signed_request_method(&seen[0], "POST");
+    assert_eq!(
+        seen[0].query.get("positionSide").map(String::as_str),
+        Some("SHORT")
+    );
+    assert_eq!(seen[0].query.get("reduceOnly"), None);
     assert_eq!(seen[1].path, "/fapi/v1/order");
     assert_signed_request_method(&seen[1], "DELETE");
     assert_eq!(
@@ -548,6 +551,249 @@ async fn binance_adapter_should_route_perpetual_place_cancel_and_positions() {
         seen[2].query.get("symbol").map(String::as_str),
         Some("BTCUSDT")
     );
+}
+
+#[tokio::test]
+async fn binance_adapter_should_route_usdm_batch_place_and_cancel_orders() {
+    let batch_place_ack = json!([
+        {
+            "symbol": "BTCUSDT",
+            "orderId": 101,
+            "clientOrderId": "batch-a",
+            "price": "65000.00000000",
+            "origQty": "0.01000000",
+            "executedQty": "0.00000000",
+            "status": "NEW",
+            "timeInForce": "GTC",
+            "type": "LIMIT",
+            "side": "BUY",
+            "positionSide": "BOTH",
+            "reduceOnly": false,
+            "updateTime": 1700000000300_i64
+        },
+        {
+            "code": -2022,
+            "msg": "ReduceOnly Order is rejected."
+        }
+    ]);
+    let batch_cancel_ack = json!([
+        {
+            "symbol": "BTCUSDT",
+            "orderId": 101,
+            "clientOrderId": "batch-a",
+            "price": "65000.00000000",
+            "origQty": "0.01000000",
+            "executedQty": "0.00000000",
+            "status": "CANCELED",
+            "timeInForce": "GTC",
+            "type": "LIMIT",
+            "side": "BUY",
+            "positionSide": "BOTH",
+            "reduceOnly": false,
+            "updateTime": 1700000000400_i64
+        },
+        {
+            "symbol": "BTCUSDT",
+            "orderId": 102,
+            "clientOrderId": "batch-b",
+            "price": "64000.00000000",
+            "origQty": "0.02000000",
+            "executedQty": "0.00000000",
+            "status": "CANCELED",
+            "timeInForce": "GTC",
+            "type": "LIMIT",
+            "side": "SELL",
+            "positionSide": "BOTH",
+            "reduceOnly": false,
+            "updateTime": 1700000000401_i64
+        }
+    ]);
+    let (base_url, seen) = spawn_rest_server(vec![batch_place_ack, batch_cancel_ack]).await;
+    let adapter = BinanceGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let symbol = perpetual_symbol_scope("BTCUSDT");
+
+    let batch_placed = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![
+                PlaceOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("batch-place-a"),
+                    symbol: symbol.clone(),
+                    client_order_id: Some("batch-a".to_string()),
+                    side: OrderSide::Buy,
+                    position_side: None,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: "0.01000000".to_string(),
+                    price: Some("65000.00000000".to_string()),
+                    quote_quantity: None,
+                    reduce_only: false,
+                    post_only: false,
+                },
+                PlaceOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("batch-place-b"),
+                    symbol: symbol.clone(),
+                    client_order_id: Some("batch-b".to_string()),
+                    side: OrderSide::Sell,
+                    position_side: None,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: "0.02000000".to_string(),
+                    price: Some("64000.00000000".to_string()),
+                    quote_quantity: None,
+                    reduce_only: true,
+                    post_only: false,
+                },
+            ],
+        })
+        .await
+        .expect("batch place orders");
+    assert_eq!(batch_placed.orders.len(), 1);
+    assert_eq!(
+        batch_placed.orders[0].exchange_order_id.as_deref(),
+        Some("101")
+    );
+    let place_report = batch_placed.report.as_ref().expect("batch place report");
+    assert_eq!(place_report.total_items, 2);
+    assert_eq!(place_report.succeeded_count(), 1);
+    assert_eq!(place_report.failed_count(), 1);
+    assert_eq!(
+        place_report.results[1].client_order_id.as_deref(),
+        Some("batch-b")
+    );
+    assert_eq!(
+        place_report.results[1]
+            .error
+            .as_ref()
+            .and_then(|error| error.code.as_deref()),
+        Some("-2022")
+    );
+
+    let batch_cancelled = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("batch-cancel-a"),
+                    symbol: symbol.clone(),
+                    client_order_id: None,
+                    exchange_order_id: Some("101".to_string()),
+                },
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("batch-cancel-b"),
+                    symbol: symbol.clone(),
+                    client_order_id: None,
+                    exchange_order_id: Some("102".to_string()),
+                },
+            ],
+        })
+        .await
+        .expect("batch cancel orders");
+    assert_eq!(batch_cancelled.cancelled_count, 2);
+    assert_eq!(batch_cancelled.orders.len(), 2);
+    assert_eq!(
+        batch_cancelled
+            .report
+            .as_ref()
+            .expect("batch cancel report")
+            .succeeded_count(),
+        2
+    );
+
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen[0].path, "/fapi/v1/batchOrders");
+    load_request_spec("binance/request_specs/futures_batch_place_orders.json")
+        .assert_matches(&seen[0].actual_http_request())
+        .expect("request spec");
+    assert_signed_request_method(&seen[0], "POST");
+    let batch_orders = seen[0].query.get("batchOrders").expect("batchOrders");
+    let decoded_batch_orders = urlencoding::decode(batch_orders)
+        .expect("decode batchOrders")
+        .into_owned();
+    assert!(decoded_batch_orders.contains("\"symbol\":\"BTCUSDT\""));
+    assert!(decoded_batch_orders.contains("\"newClientOrderId\":\"batch-a\""));
+    assert!(decoded_batch_orders.contains("\"reduceOnly\":\"true\""));
+
+    assert_eq!(seen[1].path, "/fapi/v1/batchOrders");
+    load_request_spec("binance/request_specs/futures_batch_cancel_orders.json")
+        .assert_matches(&seen[1].actual_http_request())
+        .expect("request spec");
+    assert_signed_request_method(&seen[1], "DELETE");
+    let order_ids = seen[1].query.get("orderIdList").expect("orderIdList");
+    assert_eq!(
+        urlencoding::decode(order_ids)
+            .expect("decode orderIdList")
+            .as_ref(),
+        "[101,102]"
+    );
+}
+
+#[tokio::test]
+async fn binance_batch_orders_should_reject_unsupported_market_boundaries() {
+    let adapter = BinanceGatewayAdapter::new(private_config("http://127.0.0.1:9".to_string()))
+        .expect("adapter");
+    let spot_order = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("spot-batch-place"),
+        symbol: symbol_scope("BTCUSDT"),
+        client_order_id: Some("spot-batch".to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: Some(TimeInForce::GTC),
+        quantity: "0.01000000".to_string(),
+        price: Some("25000.00000000".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+    let place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("spot-batch-place"),
+            exchange: exchange_id(),
+            orders: vec![spot_order],
+        })
+        .await
+        .expect_err("spot batch place unsupported");
+    assert!(matches!(place_error, ExchangeApiError::Unsupported { .. }));
+
+    let cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("mixed-batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("cancel-btc"),
+                    symbol: perpetual_symbol_scope("BTCUSDT"),
+                    client_order_id: None,
+                    exchange_order_id: Some("101".to_string()),
+                },
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("cancel-eth"),
+                    symbol: perpetual_symbol_scope("ETHUSDT"),
+                    client_order_id: None,
+                    exchange_order_id: Some("102".to_string()),
+                },
+            ],
+        })
+        .await
+        .expect_err("mixed symbol batch cancel rejected");
+    assert!(matches!(
+        cancel_error,
+        ExchangeApiError::InvalidRequest { .. }
+    ));
 }
 
 fn load_request_spec(path: &str) -> RequestSpec {

@@ -1,7 +1,8 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
-    EndpointTransport, ExchangeClientCapabilities, HeartbeatCapability, HeartbeatPolicy,
-    HistoryCapability, ReconnectCapability, StreamHeartbeatDirection, StreamRuntimeCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HeartbeatCapability, HeartbeatPolicy, HistoryCapability, ReconnectCapability,
+    StreamHeartbeatDirection, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
@@ -9,9 +10,8 @@ use super::private;
 
 pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapabilities) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
-    capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-        "BSX private REST requires account-scoped API headers and EIP-712 order signature audit",
-    );
+    capabilities.capabilities_v2.private_rest =
+        CapabilitySupport::unsupported(private::PRIVATE_REST_DISABLED);
     capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
         "BSX public WS payloads are fixture-only until resync is verified",
     );
@@ -40,15 +40,30 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
     };
     capabilities.capabilities_v2.batch_place_orders =
         BatchCapability::unsupported(private::BATCH_PLACE_UNSUPPORTED);
-    capabilities.capabilities_v2.batch_cancel_orders =
-        BatchCapability::unsupported(private::BATCH_CANCEL_UNSUPPORTED);
+    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+        support: CapabilitySupport::unsupported(private::BATCH_CANCEL_UNSUPPORTED),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::Partial,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: true,
+        supports_partial_failure: true,
+    };
     capabilities.capabilities_v2.cancel_all_orders =
         CapabilitySupport::unsupported(private::CANCEL_ALL_UNSUPPORTED);
-    capabilities.capabilities_v2.order_history =
-        HistoryCapability::unsupported(private::OPEN_ORDERS_UNSUPPORTED);
-    capabilities.capabilities_v2.fills_history =
-        HistoryCapability::unsupported(private::RECENT_FILLS_UNSUPPORTED);
-    capabilities.capabilities_v2.credential_scopes = vec![CredentialScope::ReadOnly];
+    capabilities.capabilities_v2.order_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        supports_limit: true,
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.fills_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        supports_limit: true,
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.credential_scopes =
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade];
     capabilities.capabilities_v2.endpoints = endpoint_capabilities();
     capabilities.apply_v2_to_legacy_flags();
 }
@@ -90,12 +105,9 @@ fn endpoint_capabilities() -> Vec<EndpointCapability> {
             ("get_fees", private::FEES_UNSUPPORTED),
             ("place_order", private::PLACE_ORDER_UNSUPPORTED),
             ("cancel_order", private::CANCEL_ORDER_UNSUPPORTED),
+            ("place_order_list", private::ORDER_LIST_UNSUPPORTED),
             ("batch_place_orders", private::BATCH_PLACE_UNSUPPORTED),
-            ("batch_cancel_orders", private::BATCH_CANCEL_UNSUPPORTED),
             ("cancel_all_orders", private::CANCEL_ALL_UNSUPPORTED),
-            ("query_order", private::QUERY_ORDER_UNSUPPORTED),
-            ("get_open_orders", private::OPEN_ORDERS_UNSUPPORTED),
-            ("get_recent_fills", private::RECENT_FILLS_UNSUPPORTED),
         ]
         .into_iter()
         .map(|(operation, reason)| EndpointCapability {
@@ -112,5 +124,52 @@ fn endpoint_capabilities() -> Vec<EndpointCapability> {
             supports_testnet: false,
         }),
     );
+    endpoints.extend(
+        [
+            ("query_order", "GET", "/orders/{order_id}"),
+            ("get_open_orders", "GET", "/orders"),
+            ("get_recent_fills", "GET", "/trades"),
+        ]
+        .into_iter()
+        .map(|(operation, method, path)| EndpointCapability {
+            operation: operation.to_string(),
+            support: CapabilitySupport::native(),
+            market_types: vec![MarketType::Perpetual],
+            transport: EndpointTransport::Rest,
+            method: Some(method.to_string()),
+            path: Some(path.to_string()),
+            auth: EndpointAuth::Hmac,
+            credential_scopes: vec![CredentialScope::ReadOnly],
+            rate_limit_bucket: Some("bsx_private".to_string()),
+            weight: Some(1),
+            supports_testnet: true,
+        }),
+    );
+    endpoints.push(EndpointCapability {
+        operation: "amend_order".to_string(),
+        support: CapabilitySupport::unsupported(private::AMEND_ORDER_UNSUPPORTED),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some("PATCH".to_string()),
+        path: Some("/source/bsx/amend-order-boundary".to_string()),
+        auth: EndpointAuth::Hmac,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("bsx_private".to_string()),
+        weight: Some(0),
+        supports_testnet: true,
+    });
+    endpoints.push(EndpointCapability {
+        operation: "batch_cancel_orders".to_string(),
+        support: CapabilitySupport::unsupported(private::BATCH_CANCEL_UNSUPPORTED),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some("DELETE".to_string()),
+        path: Some("/source/bsx/batch-cancel-orders-boundary".to_string()),
+        auth: EndpointAuth::Hmac,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("bsx_private".to_string()),
+        weight: Some(0),
+        supports_testnet: true,
+    });
     endpoints
 }

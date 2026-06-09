@@ -9,8 +9,8 @@ use rustcta_types::{
 use serde_json::Value;
 
 use super::parser::{
-    data_payload, rows, symbol_scope, timestamp_from_value, validation_error, value_as_f64,
-    value_as_string,
+    data_payload, normalize_bigone_symbol, rows, symbol_scope, timestamp_from_value,
+    validation_error, value_as_f64, value_as_string,
 };
 
 pub fn parse_balances(
@@ -222,14 +222,39 @@ pub fn parse_fees(symbols: &[SymbolScope], value: &Value) -> Vec<FeeRateSnapshot
         .map(|symbol| FeeRateSnapshot {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             symbol: symbol.clone(),
-            maker_rate: value_as_string(data.get("maker_fee_rate").or_else(|| data.get("maker")))
-                .unwrap_or_else(|| "0.001".to_string()),
-            taker_rate: value_as_string(data.get("taker_fee_rate").or_else(|| data.get("taker")))
-                .unwrap_or_else(|| "0.001".to_string()),
-            source: Some("bigone.private_or_default".to_string()),
+            maker_rate: value_as_string(
+                fee_row(data, symbol)
+                    .get("maker_fee_rate")
+                    .or_else(|| fee_row(data, symbol).get("maker")),
+            )
+            .unwrap_or_else(|| "0.001".to_string()),
+            taker_rate: value_as_string(
+                fee_row(data, symbol)
+                    .get("taker_fee_rate")
+                    .or_else(|| fee_row(data, symbol).get("taker")),
+            )
+            .unwrap_or_else(|| "0.001".to_string()),
+            source: Some("bigone.viewer.trading_fees".to_string()),
             updated_at: Utc::now(),
         })
         .collect()
+}
+
+fn fee_row<'a>(data: &'a Value, symbol: &SymbolScope) -> &'a Value {
+    let normalized = normalize_bigone_symbol(&symbol.exchange_symbol.symbol, symbol.market_type);
+    data.as_array()
+        .and_then(|rows| {
+            rows.iter().find(|row| {
+                value_as_string(
+                    row.get("asset_pair_name")
+                        .or_else(|| row.get("asset_pair_names"))
+                        .or_else(|| row.get("market_id"))
+                        .or_else(|| row.get("symbol")),
+                )
+                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized))
+            })
+        })
+        .unwrap_or(data)
 }
 
 pub fn parse_fills(

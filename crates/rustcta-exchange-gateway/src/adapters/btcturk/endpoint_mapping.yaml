@@ -4,8 +4,8 @@ adapter: rustcta_exchange_gateway::adapters::btcturk
 metadata:
   status: validated
   source: docs/btcturk_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: "Task 18 Turkey spot adapter; TRY fiat markets documented, fiat funding rails excluded."
+  last_reviewed: "2026-06-09"
+  notes: "Task 18 Turkey spot adapter; TRY fiat markets documented, fiat funding rails excluded; private order/fill readbacks are credential-gated."
 market_types: [spot]
 products: [spot]
 rest:
@@ -35,12 +35,25 @@ reconciliation:
   readbacks: [query_order, get_open_orders, get_recent_fills]
   unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
 batch:
-  place_orders: { support: unsupported, reason: btcturk.batch_place_orders_unverified }
-  cancel_orders: { support: unsupported, reason: btcturk.batch_cancel_orders_unverified }
+  place_orders: { support: unsupported, reason: btcturk.batch_place_orders_unsupported }
+  cancel_orders: { support: unsupported, reason: btcturk.batch_cancel_orders_unsupported }
 websocket:
   public:
     support: native
     url: wss://ws-feed-pro.btcturk.com
+    channels: [orderbook, obdiff]
+    order_book:
+      snapshot_channel: orderbook
+      delta_channel: obdiff
+      subscription_examples:
+        - '[151,{"type":151,"channel":"orderbook","event":"BTCTRY","join":true}]'
+        - '[151,{"type":151,"channel":"obdiff","event":"BTCTRY","join":true}]'
+      update_interval: no fixed ms
+      depth: unspecified
+      sequence: CS ChangeSet
+      checksum: unsupported
+      continuity_control: unsupported
+      resync: rest_order_book_snapshot
     heartbeat: { direction: server_ping, interval_ms: 30000, timeout_ms: 10000 }
     resync: rest_order_book_snapshot
   private:
@@ -49,12 +62,37 @@ websocket:
     auth: hmac_api_key
     fallback: rest_reconciliation
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile is Spot-only and exposes no standard futures/perpetual/options product line."
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: public_fee_table
+    source_fixture: tests/fixtures/exchanges/btcturk/fees_table_boundary.json
+    reason: "BtcTurk Global publishes a maker/taker tier table, but no stable shared get_fees runtime/config loader is wired for this adapter; pending fee table config source refresh policy and region/profile guard."
   - fiat_withdrawals
   - fiat_deposits
   - bank_payment_rails
   - crypto_deposit_addresses
   - transfers
 endpoints:
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /btcturk-global-fee-structure
+    auth: none
+    rate_limit_bucket: btcturk_public
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: public maker/taker tier table is fixture-backed as a config source only, not a live runtime."
+    official_doc: https://global-blog.btcturk.com/btcturk-global/btcturk-global-fee-structure/
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcturk/fees_table_boundary.json
   - operation: get_symbol_rules
     product: spot
     transport: rest
@@ -90,6 +128,12 @@ endpoints:
     rate_limit_bucket: btcturk_rest
     weight: 1
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcturk/request_specs/get_balances.json
+    response_parser:
+      status: planned
+    notes: Signed balance endpoint is documented, but parser/read-only runtime and account reconciliation are not implemented; runtime returns btcturk.balances_offline_request_spec_only.
   - operation: place_order
     product: spot
     transport: rest
@@ -118,6 +162,7 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/btcturk/request_specs/cancel_order.json
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -127,7 +172,15 @@ endpoints:
     rate_limit_bucket: btcturk_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcturk/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcturk/order_status_success.json
+    notes: Runtime is fail-closed unless BTCTURK_PRIVATE_REST_ENABLED plus API key/secret are present; exchange_order_id is required and client_order_id lookup is unsupported.
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -137,7 +190,17 @@ endpoints:
     rate_limit_bucket: btcturk_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcturk/request_specs/get_open_orders.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcturk/open_orders_success.json
+    params:
+      - name: pairSymbol
+    notes: Runtime is fail-closed unless BTCTURK_PRIVATE_REST_ENABLED plus API key/secret are present; symbol is required.
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -147,3 +210,70 @@ endpoints:
     rate_limit_bucket: btcturk_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcturk/request_specs/get_recent_fills.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/btcturk/fills.json
+    params:
+      - name: pairSymbol
+      - name: orderId
+      - name: limit
+    notes: Runtime is fail-closed unless BTCTURK_PRIVATE_REST_ENABLED plus API key/secret are present; symbol is required and unsupported cursor/time filters fail closed.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcturk/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: btcturk_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcturk.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcturk/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: btcturk_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcturk.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcturk/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: btcturk_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcturk.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/btcturk/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: btcturk_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: btcturk.batch_cancel_orders_unsupported

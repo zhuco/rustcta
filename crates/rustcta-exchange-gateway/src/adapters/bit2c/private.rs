@@ -2,13 +2,17 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
+use serde_json::Value;
 
+use super::parser::{pair_from_symbol, parse_bit2c_open_orders, parse_bit2c_order_state};
 use super::Bit2cGatewayAdapter;
+use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
 impl Bit2cGatewayAdapter {
     pub(super) fn unsupported_balances(
@@ -104,12 +108,85 @@ impl Bit2cGatewayAdapter {
         self.unsupported("bit2c.query_order_private_rest_disabled")
     }
 
+    pub(super) async fn query_order_impl(
+        &self,
+        request: QueryOrderRequest,
+    ) -> ExchangeApiResult<QueryOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        if request.client_order_id.is_some() {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "bit2c.query_order.client_order_id",
+            });
+        }
+        let order_id = request
+            .exchange_order_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "bit2c query_order requires exchange_order_id".to_string(),
+            })?;
+        let value = self
+            .send_signed_get(
+                "bit2c.query_order",
+                "/Order/GetById",
+                &[("id", order_id.trim())],
+            )
+            .await?;
+        let order = parse_bit2c_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(QueryOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order: Some(order),
+        })
+    }
+
     pub(super) fn unsupported_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
         self.unsupported("bit2c.open_orders_private_rest_disabled")
+    }
+
+    pub(super) async fn get_open_orders_impl(
+        &self,
+        request: OpenOrdersRequest,
+    ) -> ExchangeApiResult<OpenOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if let Some(market_type) = request.market_type {
+            self.ensure_spot(market_type)?;
+        }
+        if request.page.is_some() {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "bit2c.get_open_orders.page",
+            });
+        }
+        let symbol = request
+            .symbol
+            .as_ref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "bit2c get_open_orders requires symbol for pair-scoped readback"
+                    .to_string(),
+            })?;
+        self.ensure_exchange(&symbol.exchange)?;
+        self.ensure_spot(symbol.market_type)?;
+        let pair = pair_from_symbol(&symbol.exchange_symbol.symbol)?;
+        let value = self
+            .send_signed_get(
+                "bit2c.get_open_orders",
+                "/Order/MyOrders",
+                &[("pair", pair.venue)],
+            )
+            .await?;
+        let orders = parse_bit2c_open_orders(&self.exchange_id, symbol, &value)?;
+        Ok(OpenOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+        })
     }
 
     pub(super) fn unsupported_recent_fills(
@@ -132,5 +209,24 @@ impl Bit2cGatewayAdapter {
         _subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
         self.unsupported("bit2c.private_streams_not_documented")
+    }
+
+    async fn send_signed_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &[(&str, &str)],
+    ) -> ExchangeApiResult<Value> {
+        if !self.config.private_rest_enabled() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        self.rest
+            .send_signed_get(
+                endpoint,
+                params,
+                self.config.api_key.as_deref().unwrap_or_default(),
+                self.config.api_secret.as_deref().unwrap_or_default(),
+            )
+            .await
     }
 }

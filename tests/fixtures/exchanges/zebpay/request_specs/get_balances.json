@@ -14,5 +14,13 @@
     "Authorization": "<redacted:bearer-token>"
   },
   "credential_scope": "read_only",
+  "response_sample": {
+    "trade_pair": "BTC-INR",
+    "currency": "BTC",
+    "available_balance": "0.01000000",
+    "total_balance": "0.01200000",
+    "locked_balance": "0.00200000"
+  },
+  "runtime_disabled_boundary": "Shared get_balances runtime is disabled; adapter returns zebpay.balances_request_spec_only until bearer token onboarding, wallet parser, and region guard are promoted.",
   "expected_error_until_promoted": "zebpay.balances_request_spec_only"
 }

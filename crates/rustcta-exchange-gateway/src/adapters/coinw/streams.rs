@@ -23,6 +23,43 @@ const COINW_WS_PING_INTERVAL_MS: i64 = 15_000;
 const COINW_WS_PONG_TIMEOUT_MS: i64 = 30_000;
 const COINW_WS_STALE_MESSAGE_MS: i64 = 30_000;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoinwPublicOrderBookWsPolicy {
+    pub spot_method1_snapshot_channel: &'static str,
+    pub spot_method1_snapshot_depth: u32,
+    pub spot_method2_snapshot_type: &'static str,
+    pub spot_method2_snapshot_depth: u32,
+    pub spot_method2_incremental_type: &'static str,
+    pub spot_sequence_field: &'static str,
+    pub spot_incremental_first_sequence_field: &'static str,
+    pub spot_incremental_last_sequence_field: &'static str,
+    pub futures_depth_type: &'static str,
+    pub futures_depth: u32,
+    pub futures_sequence_field: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub resync: &'static str,
+    pub risk: &'static str,
+}
+
+pub fn coinw_public_order_book_ws_policy() -> CoinwPublicOrderBookWsPolicy {
+    CoinwPublicOrderBookWsPolicy {
+        spot_method1_snapshot_channel: "spot/level2_20:{symbol}",
+        spot_method1_snapshot_depth: 20,
+        spot_method2_snapshot_type: "depth_snapshot",
+        spot_method2_snapshot_depth: 100,
+        spot_method2_incremental_type: "depth",
+        spot_sequence_field: "seq",
+        spot_incremental_first_sequence_field: "startSeq",
+        spot_incremental_last_sequence_field: "endSeq",
+        futures_depth_type: "depth",
+        futures_depth: 100,
+        futures_sequence_field: None,
+        checksum: None,
+        resync: "resubscribe, then rebuild from REST order book snapshot when sequence continuity is missing or the stream reconnects",
+        risk: "CoinW futures public depth documentation lists 100 levels and timestamp but no sequence or checksum field; treat futures continuity as snapshot/resubscribe-only until live evidence proves otherwise",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoinwPublicStreamMessage {
     SubscriptionAck { channel: Option<String> },
@@ -109,11 +146,7 @@ impl CoinwGatewayAdapter {
         ensure_exchange_api_schema(subscription.schema_version)?;
         self.ensure_exchange(&subscription.symbol.exchange)?;
         self.ensure_supported_market_type(subscription.symbol.market_type)?;
-        let url = match subscription.symbol.market_type {
-            MarketType::Spot => self.config.spot_public_ws_url.clone(),
-            MarketType::Perpetual => self.config.futures_public_ws_url.clone(),
-            _ => unreachable!("checked by ensure_supported_market_type"),
-        };
+        let url = self.public_ws_url(&subscription);
         CoinwPublicWsSession::new(self.exchange_id.clone(), url, subscription)
     }
 
@@ -143,6 +176,23 @@ impl CoinwGatewayAdapter {
             market_type,
             symbol_hint,
         )
+    }
+
+    fn public_ws_url(&self, subscription: &PublicStreamSubscription) -> String {
+        match subscription.symbol.market_type {
+            MarketType::Spot
+                if matches!(
+                    subscription.kind,
+                    PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot
+                ) && coinw_spot_pair_code(&subscription.symbol.exchange_symbol.symbol)
+                    .is_some() =>
+            {
+                self.config.spot_public_ws_method2_url.clone()
+            }
+            MarketType::Spot => self.config.spot_public_ws_url.clone(),
+            MarketType::Perpetual => self.config.futures_public_ws_url.clone(),
+            _ => unreachable!("checked by ensure_supported_market_type"),
+        }
     }
 }
 
@@ -414,7 +464,34 @@ fn coinw_spot_public_subscribe_payload(
     let symbol =
         normalize_coinw_spot_symbol(&subscription.symbol.exchange_symbol.symbol)?.replace('_', "-");
     let args = match &subscription.kind {
-        PublicStreamKind::OrderBookDelta => format!("spot/level2:{symbol}"),
+        PublicStreamKind::OrderBookDelta => {
+            let pair_code = coinw_spot_pair_code(&subscription.symbol.exchange_symbol.symbol)
+                .ok_or(ExchangeApiError::Unsupported {
+                    operation: "coinw.spot_order_book_delta_requires_numeric_pair_code",
+                })?;
+            return Ok(json!({
+                "event": "sub",
+                "params": {
+                    "biz": "exchange",
+                    "type": "depth",
+                    "pairCode": pair_code,
+                },
+            }));
+        }
+        PublicStreamKind::OrderBookSnapshot
+            if coinw_spot_pair_code(&subscription.symbol.exchange_symbol.symbol).is_some() =>
+        {
+            let pair_code = coinw_spot_pair_code(&subscription.symbol.exchange_symbol.symbol)
+                .expect("checked above");
+            return Ok(json!({
+                "event": "sub",
+                "params": {
+                    "biz": "exchange",
+                    "type": "depth_snapshot",
+                    "pairCode": pair_code,
+                },
+            }));
+        }
         PublicStreamKind::OrderBookSnapshot => format!("spot/level2_20:{symbol}"),
         PublicStreamKind::Trades => format!("spot/match:{symbol}"),
         PublicStreamKind::Ticker => format!("spot/market-api-ticker:{symbol}"),
@@ -426,6 +503,15 @@ fn coinw_spot_public_subscribe_payload(
         "event": "subscribe",
         "args": args,
     }))
+}
+
+fn coinw_spot_pair_code(symbol: &str) -> Option<String> {
+    let trimmed = symbol.trim();
+    if trimmed.chars().all(|ch| ch.is_ascii_digit()) && !trimmed.is_empty() {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 fn coinw_futures_public_subscribe_payload(
@@ -606,7 +692,7 @@ fn normalize_public_order_book_message(
     symbol: &SymbolScope,
     value: &Value,
 ) -> ExchangeApiResult<Value> {
-    let data = stream_data(value);
+    let data = stream_data_value(&symbol.exchange, value)?;
     Ok(match market_type {
         MarketType::Spot => {
             let pair = normalize_coinw_spot_symbol(&symbol.exchange_symbol.symbol)?;
@@ -615,6 +701,16 @@ fn normalize_public_order_book_message(
                     "pair": pair,
                     "bids": data.get("bids").cloned().unwrap_or(Value::Null),
                     "asks": data.get("asks").cloned().unwrap_or(Value::Null),
+                    "seq": data.get("seq").or_else(|| data.get("endSeq")).cloned().unwrap_or(Value::Null),
+                    "startSeq": data.get("startSeq").cloned().unwrap_or(Value::Null),
+                    "endSeq": data.get("endSeq").cloned().unwrap_or(Value::Null),
+                    "time": data
+                        .get("time")
+                        .or_else(|| data.get("ts"))
+                        .or_else(|| value.get("time"))
+                        .or_else(|| value.get("ts"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
                 }]
             })
         }
@@ -622,7 +718,13 @@ fn normalize_public_order_book_message(
             "data": {
                 "bids": normalize_futures_levels(data.get("bids").or_else(|| data.get("b"))),
                 "asks": normalize_futures_levels(data.get("asks").or_else(|| data.get("a"))),
-                "ts": data.get("ts").or_else(|| data.get("time")).cloned().unwrap_or(Value::Null),
+                "ts": data
+                    .get("ts")
+                    .or_else(|| data.get("time"))
+                    .or_else(|| value.get("ts"))
+                    .or_else(|| value.get("time"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
             }
         }),
         _ => {
@@ -631,6 +733,20 @@ fn normalize_public_order_book_message(
             });
         }
     })
+}
+
+fn stream_data_value(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<Value> {
+    let data = stream_data(value);
+    if let Some(text) = data.as_str() {
+        return serde_json::from_str(text).map_err(|error| {
+            stream_parse_error(
+                exchange_id.clone(),
+                &format!("invalid CoinW websocket data JSON: {error}"),
+                data,
+            )
+        });
+    }
+    Ok(data.clone())
 }
 
 fn normalize_futures_levels(value: Option<&Value>) -> Value {
@@ -732,6 +848,7 @@ fn stream_kind(value: &Value) -> Option<String> {
     value
         .get("type")
         .or_else(|| value.get("channel"))
+        .or_else(|| value.get("subject"))
         .or_else(|| value.get("topic"))
         .or_else(|| value.get("args"))
         .and_then(Value::as_str)

@@ -1,0 +1,12 @@
+{
+  "operation": "bitbank.get_open_orders",
+  "method": "GET",
+  "path": "/v1/user/spot/active_orders",
+  "query": [
+    [
+      "pair",
+      "btc_jpy"
+    ]
+  ],
+  "body": null
+}

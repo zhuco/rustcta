@@ -44,6 +44,16 @@ Request specs assert Coins.ph paths, `X-COINS-APIKEY`, `Content-Type`, signed qu
 
 The adapter only advertises `read_only` and `trade` credential scopes when private REST credentials are present. `transfer` and `withdraw` scopes remain unsupported. Coins.ph wallet, payment, crypto-account, deposit, withdraw, sub-account transfer, and fiat-transfer endpoints are documented as out of scope because trading automation must not require funding credentials.
 
+## Advanced Order Unsupported Boundary
+
+P4 高级订单能力保持明确不支持，不提升 live runtime。当前 Coins.ph Spot profile 只有普通 order/cancel/readback；未核到可无损映射 shared gateway 的 in-place amend、OCO/OTO order-list、native batch place/cancel，`cancel_all_orders` 也需要本地 partial-cancel 语义 live audit 后才可启用。
+
+可执行证据：
+
+- `endpoint_mapping.yaml` 声明 `amend_order`、`place_order_list`、`batch_place_orders`、`batch_cancel_orders`、`cancel_all_orders` 为 `support: unsupported`。
+- `tests/fixtures/exchanges/coinsph/unsupported_boundary.json` 固定 capability flags 和 runtime `Unsupported.operation` 名称。
+- `private_tests.rs` 覆盖 capabilities flags、`capabilities_v2` unsupported endpoint、runtime guard。
+
 ## Official Public WebSocket Gap
 
 官方 WS 细项核验见 [WebSocket 官方核验 P3 P2 公共 WS 缺口交易所](../WebSocket官方核验_P3_P2公共WS缺口交易所.md)。Coins.ph supports Binance-like public streams at
@@ -51,7 +61,9 @@ The adapter only advertises `read_only` and `trade` credential scopes when priva
 partial depth supports 5/10/20/200 levels, 5/10/20 levels can use `@100ms`,
 200 levels are 1000ms, and diff depth supports 100ms/1000ms. Local book rebuild
 uses REST depth snapshot plus `U/u` update-id continuity. Current project status
-is `项目未实现公共 WS 行情`, not `交易所不支持`.
+is `项目未实现公共 WS 行情`, not `交易所不支持`; `endpoint_mapping.yaml`
+declares `websocket.public.support: spec_only` with the channel/depth/resync
+boundary.
 
 ## Current Limitations
 

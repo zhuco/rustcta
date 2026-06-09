@@ -1,0 +1,13 @@
+{
+  "exchange": "hitbtc",
+  "name": "amend_order_replace_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "PATCH",
+  "request_path": "/api/3/spot/order/cli-hitbtc-1",
+  "payload": "PATCH/api/3/spot/order/cli-hitbtc-1new_client_order_id=cli-hitbtc-1-r1&price=0.046020&quantity=0.050171000000000010000",
+  "expected_signature": "a8005581bdff80dada2559a2ea2bb39fadf2540e3fefaa29b1656eabb511870f",
+  "payload_format": "raw_payload",
+  "body": "new_client_order_id=cli-hitbtc-1-r1&price=0.046020&quantity=0.050"
+}

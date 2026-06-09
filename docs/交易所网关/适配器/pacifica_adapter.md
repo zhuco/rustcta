@@ -70,6 +70,8 @@ P9 official verification adds the public book details: `book` updates once
 every 100ms and accepts `agg_level` values 1, 10, 100, 1000, and 10000. The
 `bbo` stream sends top-of-book changes. Both streams include `li`/last order id
 ordering metadata; no checksum is documented.
+`endpoint_mapping.yaml` records `book`, `bbo`, 100ms cadence, book `agg_level`
+choices, `li` ordering, no-checksum status, and REST `/api/v1/book` fallback.
 
 ## Capability Boundary
 
@@ -81,6 +83,7 @@ Unsupported or request-spec-only:
   for a later resync validation task.
 - Private WebSocket account streams are spec-only until signed subscription and
   resync are live verified.
+- 账户/余额接口写 `项目未实现/离线边界`：account order/position streams 和 agent-wallet account 模型提供账户状态线索，`endpoint_mapping.yaml` 已将 `get_balances` 写成 `source://pacifica/agent-wallet-account-equity` spec-only source boundary，并绑定 `tests/fixtures/exchanges/pacifica/request_specs/get_balances_account_source.json`。矩阵应为 `get_balances=离线`；balances/account equity readback 尚未接入 shared runtime、parser 或 private WS reconciliation。
 - Leverage, margin mode, TPSL, withdrawals, subaccounts, API key management, and
   builder-code operations are not exposed through the shared trading runtime.
 - Dead-man switch is not mapped.
@@ -104,3 +107,7 @@ cargo test -p rustcta-exchange-gateway pacifica --lib --message-format short
 
 Do not run `cargo build`, production private streams, or live trading commands
 for this adapter.
+
+## Fee Boundary
+
+交易所不支持当前费率接口 runtime：agent-wallet account fee 字段未映射，当前只稳定到 public market/book。

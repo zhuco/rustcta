@@ -21,6 +21,12 @@ use super::CryptoComGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisorAction};
 
+pub const CRYPTOCOM_ORDERBOOK_DEPTHS: [u16; 2] = [10, 50];
+pub const CRYPTOCOM_ORDERBOOK_UPDATE_FREQUENCIES_MS: [u16; 2] = [10, 100];
+pub const CRYPTOCOM_DEFAULT_ORDERBOOK_DEPTH: u16 = 50;
+pub const CRYPTOCOM_DEFAULT_ORDERBOOK_UPDATE_FREQUENCY_MS: u16 = 10;
+pub const CRYPTOCOM_ORDERBOOK_DELTA_SUBSCRIPTION_TYPE: &str = "SNAPSHOT_AND_UPDATE";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CryptoComPublicStreamMessage {
     OrderBook(rustcta_types::OrderBookSnapshot),
@@ -68,6 +74,61 @@ pub struct CryptoComCandle {
     pub low: String,
     pub close: String,
     pub volume: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CryptoComOrderBookDeltaDetails {
+    pub snapshot: rustcta_types::OrderBookSnapshot,
+    pub update_id: Option<u64>,
+    pub previous_update_id: Option<u64>,
+    pub update_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CryptoComOrderBookSequenceAction {
+    AcceptSnapshotOrFirstUpdate,
+    ApplyUpdate,
+    RebuildFromSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CryptoComPublicOrderBookWsPolicy {
+    pub channel_template: &'static str,
+    pub subscription_type: &'static str,
+    pub supported_depths: &'static [u16],
+    pub default_depth: u16,
+    pub supported_update_frequencies_ms: &'static [u16],
+    pub default_update_frequency_ms: u16,
+    pub sequence_fields: &'static [&'static str],
+    pub checksum: Option<&'static str>,
+    pub rest_snapshot_operation: &'static str,
+    pub resync_strategy: &'static str,
+}
+
+impl CryptoComPublicOrderBookWsPolicy {
+    pub fn as_json(&self) -> Value {
+        json!({
+            "channel_template": self.channel_template,
+            "subscription_type": self.subscription_type,
+            "depth": {
+                "default": self.default_depth,
+                "supported": self.supported_depths,
+            },
+            "book_update_frequency_ms": {
+                "default": self.default_update_frequency_ms,
+                "supported": self.supported_update_frequencies_ms,
+            },
+            "sequence": {
+                "fields": self.sequence_fields,
+                "continuity": "incoming pu must equal previous local u; rebuild on gap or regression",
+            },
+            "checksum": self.checksum,
+            "resync": {
+                "operation": self.rest_snapshot_operation,
+                "strategy": self.resync_strategy,
+            },
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -328,11 +389,36 @@ pub fn cryptocom_public_subscribe_payload(
     subscription: &PublicStreamSubscription,
     id: u64,
 ) -> ExchangeApiResult<Value> {
+    if matches!(subscription.kind, PublicStreamKind::OrderBookDelta) {
+        return cryptocom_public_orderbook_delta_subscribe_payload(
+            &subscription.symbol,
+            id,
+            CRYPTOCOM_DEFAULT_ORDERBOOK_DEPTH,
+            CRYPTOCOM_DEFAULT_ORDERBOOK_UPDATE_FREQUENCY_MS,
+        );
+    }
     Ok(json!({
         "id": id,
         "method": "subscribe",
         "params": {
             "channels": [cryptocom_public_channel(subscription)?],
+        },
+    }))
+}
+
+pub fn cryptocom_public_orderbook_delta_subscribe_payload(
+    symbol: &SymbolScope,
+    id: u64,
+    depth: u16,
+    update_frequency_ms: u16,
+) -> ExchangeApiResult<Value> {
+    Ok(json!({
+        "id": id,
+        "method": "subscribe",
+        "params": {
+            "channels": [cryptocom_public_orderbook_channel(symbol, depth)?],
+            "book_subscription_type": CRYPTOCOM_ORDERBOOK_DELTA_SUBSCRIPTION_TYPE,
+            "book_update_frequency": cryptocom_orderbook_update_frequency_ms(update_frequency_ms)?,
         },
     }))
 }
@@ -406,6 +492,80 @@ pub fn parse_cryptocom_public_stream_message(
             "unsupported cryptocom public stream message",
             value,
         )),
+    }
+}
+
+pub fn parse_cryptocom_orderbook_delta_details(
+    exchange_id: &ExchangeId,
+    symbol: SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<CryptoComOrderBookDeltaDetails> {
+    let result = value.get("result").unwrap_or(value);
+    let data_item = first_result_item(result)?;
+    let parse_value = if data_item.get("update").is_some() {
+        book_update_as_snapshot(result)
+    } else {
+        result.clone()
+    };
+    let snapshot = parse_orderbook_snapshot(exchange_id, symbol, &parse_value)?;
+    let update = data_item.get("update").unwrap_or(data_item);
+    let update_id = data_item
+        .get("u")
+        .or_else(|| update.get("u"))
+        .and_then(value_as_u64)
+        .or(snapshot.sequence);
+    let previous_update_id = data_item
+        .get("pu")
+        .or_else(|| update.get("pu"))
+        .and_then(value_as_u64);
+    let update_type = data_item
+        .get("tt")
+        .or_else(|| data_item.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(CryptoComOrderBookDeltaDetails {
+        snapshot,
+        update_id,
+        previous_update_id,
+        update_type,
+    })
+}
+
+pub fn cryptocom_orderbook_sequence_action(
+    previous_local_update_id: Option<u64>,
+    message_previous_update_id: Option<u64>,
+    message_update_id: Option<u64>,
+) -> CryptoComOrderBookSequenceAction {
+    let Some(message_update_id) = message_update_id else {
+        return CryptoComOrderBookSequenceAction::RebuildFromSnapshot;
+    };
+    let Some(previous_local_update_id) = previous_local_update_id else {
+        return CryptoComOrderBookSequenceAction::AcceptSnapshotOrFirstUpdate;
+    };
+    if message_update_id <= previous_local_update_id {
+        return CryptoComOrderBookSequenceAction::RebuildFromSnapshot;
+    }
+    match message_previous_update_id {
+        Some(previous) if previous == previous_local_update_id => {
+            CryptoComOrderBookSequenceAction::ApplyUpdate
+        }
+        _ => CryptoComOrderBookSequenceAction::RebuildFromSnapshot,
+    }
+}
+
+pub fn cryptocom_public_orderbook_ws_policy() -> CryptoComPublicOrderBookWsPolicy {
+    CryptoComPublicOrderBookWsPolicy {
+        channel_template: "book.{instrument_name}.{depth}",
+        subscription_type: CRYPTOCOM_ORDERBOOK_DELTA_SUBSCRIPTION_TYPE,
+        supported_depths: &CRYPTOCOM_ORDERBOOK_DEPTHS,
+        default_depth: CRYPTOCOM_DEFAULT_ORDERBOOK_DEPTH,
+        supported_update_frequencies_ms: &CRYPTOCOM_ORDERBOOK_UPDATE_FREQUENCIES_MS,
+        default_update_frequency_ms: CRYPTOCOM_DEFAULT_ORDERBOOK_UPDATE_FREQUENCY_MS,
+        sequence_fields: &["u", "pu"],
+        checksum: None,
+        rest_snapshot_operation: "get_order_book",
+        resync_strategy:
+            "subscribe with SNAPSHOT_AND_UPDATE, seed from the first snapshot, apply updates only when pu equals the previous local u, and rebuild from REST public/get-book plus fresh subscription on reconnect, pu gap, or regression",
     }
 }
 
@@ -501,12 +661,53 @@ fn cryptocom_public_channel(subscription: &PublicStreamSubscription) -> Exchange
     match &subscription.kind {
         PublicStreamKind::Trades => Ok(format!("trade.{symbol}")),
         PublicStreamKind::Ticker => Ok(format!("ticker.{symbol}")),
-        PublicStreamKind::OrderBookDelta => Ok(format!("book.{symbol}.50")),
-        PublicStreamKind::OrderBookSnapshot => Ok(format!("book.{symbol}.50")),
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => {
+            cryptocom_public_orderbook_channel(
+                &subscription.symbol,
+                CRYPTOCOM_DEFAULT_ORDERBOOK_DEPTH,
+            )
+        }
         PublicStreamKind::Candles { interval } => Ok(format!(
             "candlestick.{}.{symbol}",
             normalize_interval(interval)?
         )),
+    }
+}
+
+pub fn cryptocom_public_orderbook_channel(
+    symbol: &SymbolScope,
+    depth: u16,
+) -> ExchangeApiResult<String> {
+    let symbol = normalize_cryptocom_symbol(symbol)?;
+    Ok(format!(
+        "book.{symbol}.{}",
+        cryptocom_orderbook_depth(depth)?
+    ))
+}
+
+pub fn cryptocom_orderbook_depth(depth: u16) -> ExchangeApiResult<u16> {
+    if CRYPTOCOM_ORDERBOOK_DEPTHS.contains(&depth) {
+        Ok(depth)
+    } else {
+        Err(ExchangeApiError::InvalidRequest {
+            message: format!(
+                "cryptocom order book depth must be one of {:?}, got {depth}",
+                CRYPTOCOM_ORDERBOOK_DEPTHS
+            ),
+        })
+    }
+}
+
+pub fn cryptocom_orderbook_update_frequency_ms(frequency_ms: u16) -> ExchangeApiResult<u16> {
+    if CRYPTOCOM_ORDERBOOK_UPDATE_FREQUENCIES_MS.contains(&frequency_ms) {
+        Ok(frequency_ms)
+    } else {
+        Err(ExchangeApiError::InvalidRequest {
+            message: format!(
+                "cryptocom order book update frequency must be one of {:?} ms, got {frequency_ms}",
+                CRYPTOCOM_ORDERBOOK_UPDATE_FREQUENCIES_MS
+            ),
+        })
     }
 }
 

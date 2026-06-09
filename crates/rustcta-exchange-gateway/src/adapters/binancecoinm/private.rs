@@ -2,20 +2,25 @@ use std::collections::HashMap;
 
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, OrderListConditionalLeg, OrderListLegType, OrderListOrderLeg,
-    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchItemResult, BatchOperationReport,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
+    ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderListConditionalLeg, OrderListLegType, OrderListOrderLeg, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderType};
+use rustcta_types::{ExchangeError, MarketType, OrderSide, OrderType};
+use serde_json::Value;
 
 use super::parser::normalize_binancecoinm_symbol;
 use super::private_parser::{
     parse_account_balances, parse_binancecoinm_cancel_all_orders, parse_fee_snapshots,
     parse_open_orders, parse_order_state, parse_positions, parse_recent_fills,
 };
+use super::transport::classify_binancecoinm_error;
 use super::BinanceCoinMGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
@@ -178,6 +183,110 @@ impl BinanceCoinMGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
             order,
+        })
+    }
+
+    pub(super) async fn batch_place_orders_impl(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.orders.is_empty() {
+            return Ok(BatchPlaceOrdersResponse {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                metadata: response_metadata(request.exchange, request.context.request_id),
+                orders: Vec::new(),
+                report: None,
+            });
+        }
+        if request.orders.len() > 5 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "binancecoinm batch_place_orders supports at most 5 orders".to_string(),
+            });
+        }
+
+        let mut batch_orders = Vec::with_capacity(request.orders.len());
+        for order in &request.orders {
+            ensure_exchange_api_schema(order.schema_version)?;
+            self.ensure_exchange(&order.symbol.exchange)?;
+            self.ensure_coin_m(order.symbol.market_type)?;
+            batch_orders.push(binancecoinm_batch_order_json(order)?);
+        }
+
+        let mut params = HashMap::new();
+        params.insert(
+            "batchOrders".to_string(),
+            urlencoding::encode(&format!("[{}]", batch_orders.join(","))).into_owned(),
+        );
+        let value = self
+            .send_signed_post(
+                "binancecoinm.batch_place_orders",
+                "/dapi/v1/batchOrders",
+                &params,
+            )
+            .await?;
+        let (orders, report) =
+            parse_binancecoinm_batch_place_response(&self.exchange_id, &request, &value)?;
+        Ok(BatchPlaceOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            report: Some(report),
+        })
+    }
+
+    pub(super) async fn batch_cancel_orders_impl(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.cancels.is_empty() {
+            return Ok(BatchCancelOrdersResponse {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                metadata: response_metadata(request.exchange, request.context.request_id),
+                orders: Vec::new(),
+                cancelled_count: 0,
+                report: None,
+            });
+        }
+        if request.cancels.len() > 10 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "binancecoinm batch_cancel_orders supports at most 10 cancels".to_string(),
+            });
+        }
+
+        let expected_symbol =
+            normalize_binancecoinm_symbol(&request.cancels[0].symbol.exchange_symbol.symbol)?;
+        for cancel in &request.cancels {
+            ensure_exchange_api_schema(cancel.schema_version)?;
+            self.ensure_exchange(&cancel.symbol.exchange)?;
+            self.ensure_coin_m(cancel.symbol.market_type)?;
+            let symbol = normalize_binancecoinm_symbol(&cancel.symbol.exchange_symbol.symbol)?;
+            if symbol != expected_symbol {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "binancecoinm batch_cancel_orders requires one symbol".to_string(),
+                });
+            }
+        }
+
+        let params = binancecoinm_batch_cancel_params(&request.cancels)?;
+        let value = self
+            .send_signed_delete(
+                "binancecoinm.batch_cancel_orders",
+                "/dapi/v1/batchOrders",
+                &params,
+            )
+            .await?;
+        let (orders, report) =
+            parse_binancecoinm_batch_cancel_response(&self.exchange_id, &request, &value)?;
+        Ok(BatchCancelOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            cancelled_count: orders.len() as u32,
+            orders,
+            report: Some(report),
         })
     }
 
@@ -502,6 +611,336 @@ fn binancecoinm_place_order_params(
         );
     }
     Ok(params)
+}
+
+fn binancecoinm_batch_order_json(request: &PlaceOrderRequest) -> ExchangeApiResult<String> {
+    let mut fields = vec![
+        (
+            "symbol",
+            normalize_binancecoinm_symbol(&request.symbol.exchange_symbol.symbol)?,
+        ),
+        ("side", binancecoinm_side(request.side).to_string()),
+    ];
+    if let Some(position_side) = request.position_side {
+        fields.push((
+            "positionSide",
+            binancecoinm_position_side(position_side).to_string(),
+        ));
+    }
+    fields.push((
+        "type",
+        binancecoinm_order_type(request.order_type, request.post_only).to_string(),
+    ));
+    if request.order_type != OrderType::Market {
+        let time_in_force = if request.post_only {
+            "GTX"
+        } else {
+            binancecoinm_time_in_force(request.order_type, request.time_in_force)
+        };
+        fields.push(("timeInForce", time_in_force.to_string()));
+    }
+    if request.order_type == OrderType::Market {
+        if let Some(quote_quantity) = request.quote_quantity.as_deref() {
+            fields.push((
+                "quoteOrderQty",
+                non_empty_value("quoteOrderQty", quote_quantity)?,
+            ));
+        } else {
+            fields.push(("quantity", non_empty_value("quantity", &request.quantity)?));
+        }
+    } else {
+        fields.push(("quantity", non_empty_value("quantity", &request.quantity)?));
+        let price = request
+            .price
+            .as_deref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "binancecoinm limit-style batch order requires price".to_string(),
+            })?;
+        fields.push(("price", non_empty_value("price", price)?));
+    }
+    if let Some(client_order_id) = request.client_order_id.as_deref() {
+        fields.push((
+            "newClientOrderId",
+            non_empty_value("newClientOrderId", client_order_id)?,
+        ));
+    }
+    if request.reduce_only {
+        fields.push(("reduceOnly", "true".to_string()));
+    }
+    let json_fields = fields
+        .into_iter()
+        .map(|(key, value)| {
+            let value =
+                serde_json::to_string(&value).map_err(|error| ExchangeApiError::Serialization {
+                    message: error.to_string(),
+                })?;
+            Ok(format!("\"{key}\":{value}"))
+        })
+        .collect::<ExchangeApiResult<Vec<_>>>()?;
+    Ok(format!("{{{}}}", json_fields.join(",")))
+}
+
+fn non_empty_value(key: &str, value: &str) -> ExchangeApiResult<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("binancecoinm parameter {key} must not be empty"),
+        });
+    }
+    Ok(value.to_string())
+}
+
+fn binancecoinm_batch_cancel_params(
+    cancels: &[CancelOrderRequest],
+) -> ExchangeApiResult<HashMap<String, String>> {
+    let symbol = normalize_binancecoinm_symbol(&cancels[0].symbol.exchange_symbol.symbol)?;
+    let order_ids = cancels
+        .iter()
+        .map(|cancel| {
+            cancel
+                .exchange_order_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(parse_order_id)
+        })
+        .collect::<Option<ExchangeApiResult<Vec<_>>>>()
+        .transpose()?;
+    let client_order_ids = cancels
+        .iter()
+        .map(|cancel| {
+            cancel
+                .client_order_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .collect::<Option<Vec<_>>>();
+
+    let mut params = HashMap::new();
+    params.insert("symbol".to_string(), symbol);
+    if let Some(order_ids) = order_ids {
+        params.insert(
+            "orderIdList".to_string(),
+            serialize_json_query_value(&order_ids)?,
+        );
+    } else if let Some(client_order_ids) = client_order_ids {
+        params.insert(
+            "origClientOrderIdList".to_string(),
+            serialize_json_query_value(&client_order_ids)?,
+        );
+    } else {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "binancecoinm batch_cancel_orders requires either all exchange_order_id or all client_order_id".to_string(),
+        });
+    }
+    Ok(params)
+}
+
+fn parse_binancecoinm_batch_place_response(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &BatchPlaceOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<(Vec<rustcta_exchange_api::OrderState>, BatchOperationReport)> {
+    let rows = batch_response_rows(exchange_id, "batch place response is not an array", value)?;
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.orders.len());
+    for (index, order_request) in request.orders.iter().enumerate() {
+        let Some(row) = rows.get(index) else {
+            let error = missing_batch_item_error(exchange_id, "missing batch place response item");
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                Some(ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "Binance COIN-M did not return a batch place result for this request item",
+                )),
+            ));
+            continue;
+        };
+        if let Some(error) = binancecoinm_batch_item_error(
+            exchange_id,
+            row,
+            order_request.client_order_id.clone(),
+            None,
+        ) {
+            let plan = error.requires_reconciliation().then(|| {
+                ReconcilePlan::for_place_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchPlacePartialFailure,
+                    order_request,
+                    RetryReconcilePolicy::default(),
+                    "Binance COIN-M batch place item failed and requires order readback",
+                )
+            });
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                plan,
+            ));
+            continue;
+        }
+        let order = parse_order_state(exchange_id, Some(&order_request.symbol), row)?;
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+    Ok((
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.orders.len(),
+            results,
+        },
+    ))
+}
+
+fn parse_binancecoinm_batch_cancel_response(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &BatchCancelOrdersRequest,
+    value: &Value,
+) -> ExchangeApiResult<(Vec<rustcta_exchange_api::OrderState>, BatchOperationReport)> {
+    let rows = batch_response_rows(exchange_id, "batch cancel response is not an array", value)?;
+    let mut orders = Vec::new();
+    let mut results = Vec::with_capacity(request.cancels.len());
+    for (index, cancel_request) in request.cancels.iter().enumerate() {
+        let Some(row) = rows.get(index) else {
+            let error = missing_batch_item_error(exchange_id, "missing batch cancel response item");
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                error,
+                Some(ReconcilePlan::for_cancel_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchResponseMissingItem,
+                    cancel_request,
+                    RetryReconcilePolicy::default(),
+                    "Binance COIN-M did not return a batch cancel result for this request item",
+                )),
+            ));
+            continue;
+        };
+        if let Some(error) = binancecoinm_batch_item_error(
+            exchange_id,
+            row,
+            cancel_request.client_order_id.clone(),
+            cancel_request.exchange_order_id.clone(),
+        ) {
+            let plan = error.requires_reconciliation().then(|| {
+                ReconcilePlan::for_cancel_request(
+                    exchange_id.clone(),
+                    ReconcileTrigger::BatchCancelPartialFailure,
+                    cancel_request,
+                    RetryReconcilePolicy::default(),
+                    "Binance COIN-M batch cancel item failed and requires order readback",
+                )
+            });
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                error,
+                plan,
+            ));
+            continue;
+        }
+        let order = parse_order_state(exchange_id, Some(&cancel_request.symbol), row)?;
+        results.push(BatchItemResult::success(index, order.clone()));
+        orders.push(order);
+    }
+    Ok((
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.cancels.len(),
+            results,
+        },
+    ))
+}
+
+fn batch_response_rows<'a>(
+    exchange_id: &rustcta_types::ExchangeId,
+    message: &str,
+    value: &'a Value,
+) -> ExchangeApiResult<&'a [Value]> {
+    value.as_array().map(Vec::as_slice).ok_or_else(|| {
+        ExchangeApiError::Exchange(ExchangeError::new(
+            exchange_id.clone(),
+            rustcta_types::ExchangeErrorClass::Decode,
+            format!("{message}: {value}"),
+            chrono::Utc::now(),
+        ))
+    })
+}
+
+fn binancecoinm_batch_item_error(
+    exchange_id: &rustcta_types::ExchangeId,
+    value: &Value,
+    client_order_id: Option<String>,
+    exchange_order_id: Option<String>,
+) -> Option<ExchangeError> {
+    let code = value.get("code").and_then(json_value_text)?;
+    let message = value
+        .get("msg")
+        .or_else(|| value.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("Binance COIN-M batch item failed");
+    let mut error = ExchangeError::new(
+        exchange_id.clone(),
+        classify_binancecoinm_error(Some(&code), message),
+        message,
+        chrono::Utc::now(),
+    );
+    error.code = Some(code);
+    error.client_order_id = client_order_id;
+    error.order_id = exchange_order_id;
+    error.raw = Some(value.clone());
+    Some(error)
+}
+
+fn missing_batch_item_error(
+    exchange_id: &rustcta_types::ExchangeId,
+    message: &str,
+) -> ExchangeError {
+    ExchangeError::new(
+        exchange_id.clone(),
+        rustcta_types::ExchangeErrorClass::UnknownOrderState,
+        message,
+        chrono::Utc::now(),
+    )
+}
+
+fn json_value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn serialize_json_query_value<T: serde::Serialize>(value: &T) -> ExchangeApiResult<String> {
+    let json = serde_json::to_string(value).map_err(|error| ExchangeApiError::Serialization {
+        message: error.to_string(),
+    })?;
+    Ok(urlencoding::encode(&json).into_owned())
+}
+
+fn parse_order_id(value: &str) -> ExchangeApiResult<u64> {
+    value
+        .parse::<u64>()
+        .map_err(|error| ExchangeApiError::InvalidRequest {
+            message: format!("binancecoinm orderId must be an unsigned integer: {error}"),
+        })
 }
 
 fn binancecoinm_order_list_params(

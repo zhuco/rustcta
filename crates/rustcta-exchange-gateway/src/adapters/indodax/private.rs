@@ -112,37 +112,8 @@ impl IndodaxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        let order_id = request
-            .exchange_order_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| ExchangeApiError::InvalidRequest {
-                message: "indodax cancel_order requires exchange_order_id".to_string(),
-            })?;
-        if request.client_order_id.is_some() {
-            return Err(ExchangeApiError::Unsupported {
-                operation: "indodax.cancel_by_client_order_id",
-            });
-        }
-        let mut params = HashMap::new();
-        params.insert(
-            "pair".to_string(),
-            normalize_indodax_symbol(&request.symbol.exchange_symbol.symbol)?,
-        );
-        params.insert("order_id".to_string(), order_id.to_string());
-        params.insert("type".to_string(), "buy".to_string());
-        let value = self
-            .send_tapi("indodax.cancel_order", "cancelOrder", params)
-            .await?;
-        let mut order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)
-            .unwrap_or_else(|_| cancelled_order_state(&self.exchange_id, &request));
-        order.status = OrderStatus::Cancelled;
-        Ok(CancelOrderResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
-            order,
-            cancelled: true,
+        Err(ExchangeApiError::Unsupported {
+            operation: "indodax.cancel_order_requires_side_context",
         })
     }
 
@@ -317,17 +288,8 @@ impl IndodaxGatewayAdapter {
                     .to_string(),
             });
         }
-        let mut orders = Vec::with_capacity(request.cancels.len());
-        for cancel in &request.cancels {
-            orders.push(self.cancel_order_impl(cancel.clone()).await?.order);
-        }
-        let cancelled_count = orders.len() as u32;
-        Ok(BatchCancelOrdersResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(request.exchange, request.context.request_id),
-            orders,
-            cancelled_count,
-            report: None,
+        Err(ExchangeApiError::Unsupported {
+            operation: "indodax.batch_cancel_orders_require_side_context",
         })
     }
 }
@@ -468,34 +430,6 @@ fn order_from_quote_ack(
         reduce_only: false,
         post_only: false,
         created_at: Some(chrono::Utc::now()),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-fn cancelled_order_state(
-    exchange_id: &rustcta_types::ExchangeId,
-    request: &CancelOrderRequest,
-) -> OrderState {
-    OrderState {
-        schema_version: EXCHANGE_API_SCHEMA_VERSION,
-        exchange: exchange_id.clone(),
-        market_type: request.symbol.market_type,
-        canonical_symbol: request.symbol.canonical_symbol.clone(),
-        exchange_symbol: request.symbol.exchange_symbol.clone(),
-        client_order_id: None,
-        exchange_order_id: request.exchange_order_id.clone(),
-        side: OrderSide::Buy,
-        position_side: Some(PositionSide::None),
-        order_type: OrderType::Limit,
-        time_in_force: None,
-        status: OrderStatus::Cancelled,
-        quantity: "0".to_string(),
-        price: None,
-        filled_quantity: "0".to_string(),
-        average_fill_price: None,
-        reduce_only: false,
-        post_only: false,
-        created_at: None,
         updated_at: chrono::Utc::now(),
     }
 }

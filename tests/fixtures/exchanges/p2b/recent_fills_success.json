@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "result": [
+    {
+      "id": "fill-001",
+      "orderId": "12345",
+      "market": "BTC_USDT",
+      "side": "buy",
+      "amount": "0.01000000",
+      "price": "64000.00",
+      "total": "640.00",
+      "fee": "0.6400",
+      "feeCurrency": "USDT",
+      "role": "taker",
+      "time": 1698485860
+    }
+  ]
+}

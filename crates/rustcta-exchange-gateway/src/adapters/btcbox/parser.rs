@@ -1,10 +1,12 @@
-use chrono::Utc;
+use chrono::{NaiveDateTime, TimeZone, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, OrderState, SymbolRules, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
-    OrderBookLevel, OrderBookSnapshot,
+    OrderBookLevel, OrderBookSnapshot, OrderSide, OrderStatus, OrderType, PositionSide,
+    TimeInForce,
 };
 use serde_json::Value;
 
@@ -141,6 +143,68 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_btcbox_order_state(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderState> {
+    let quantity = text_field(value, "amount_original")
+        .ok_or_else(|| parse_error(exchange_id, "amount_original", value))?;
+    let outstanding = text_field(value, "amount_outstanding").unwrap_or_else(|| "0".to_string());
+    let filled_quantity = subtract_decimal_strings(&quantity, &outstanding);
+    Ok(OrderState {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Spot,
+        canonical_symbol: symbol.canonical_symbol.clone(),
+        exchange_symbol: symbol.exchange_symbol.clone(),
+        client_order_id: None,
+        exchange_order_id: text_field(value, "id"),
+        side: parse_side(value.get("type").and_then(Value::as_str))?,
+        position_side: Some(PositionSide::None),
+        order_type: OrderType::Limit,
+        time_in_force: Some(TimeInForce::GTC),
+        status: parse_order_status(
+            value.get("status").and_then(Value::as_str),
+            &filled_quantity,
+        ),
+        quantity,
+        price: text_field(value, "price"),
+        filled_quantity,
+        average_fill_price: None,
+        reduce_only: false,
+        post_only: false,
+        created_at: value
+            .get("datetime")
+            .and_then(Value::as_str)
+            .and_then(parse_btcbox_datetime),
+        updated_at: Utc::now(),
+    })
+}
+
+pub fn parse_btcbox_open_orders(
+    exchange_id: &ExchangeId,
+    symbol: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| parse_error(exchange_id, "trade_list array", value))?;
+    rows.iter()
+        .map(|row| {
+            let mut order = parse_btcbox_order_state(exchange_id, symbol, row)?;
+            if order.status == OrderStatus::Unknown {
+                order.status = if order.filled_quantity == "0" {
+                    OrderStatus::Open
+                } else {
+                    OrderStatus::PartiallyFilled
+                };
+            }
+            Ok(order)
+        })
+        .collect()
+}
+
 fn parse_levels(
     exchange_id: &ExchangeId,
     value: Option<&Value>,
@@ -170,6 +234,65 @@ fn value_f64(value: &Value) -> Option<f64> {
     value
         .as_f64()
         .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+}
+
+fn text_field(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|field| {
+        field
+            .as_str()
+            .map(ToString::to_string)
+            .or_else(|| field.as_i64().map(|number| number.to_string()))
+            .or_else(|| field.as_u64().map(|number| number.to_string()))
+            .or_else(|| field.as_f64().map(trim_float))
+    })
+}
+
+fn trim_float(value: f64) -> String {
+    let text = value.to_string();
+    text.strip_suffix(".0").unwrap_or(&text).to_string()
+}
+
+fn subtract_decimal_strings(quantity: &str, outstanding: &str) -> String {
+    let quantity = quantity.parse::<f64>().unwrap_or_default();
+    let outstanding = outstanding.parse::<f64>().unwrap_or_default();
+    trim_float((quantity - outstanding).max(0.0))
+}
+
+fn parse_side(value: Option<&str>) -> ExchangeApiResult<OrderSide> {
+    match value
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "buy" => Ok(OrderSide::Buy),
+        "sell" => Ok(OrderSide::Sell),
+        _ => Err(ExchangeApiError::InvalidRequest {
+            message: "btcbox order row missing supported side".to_string(),
+        }),
+    }
+}
+
+fn parse_order_status(status: Option<&str>, filled_quantity: &str) -> OrderStatus {
+    match status
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "wait" | "no" | "open" => OrderStatus::Open,
+        "" if filled_quantity == "0" => OrderStatus::Open,
+        "part" | "partial" | "partially_filled" => OrderStatus::PartiallyFilled,
+        "cancelled" | "canceled" => OrderStatus::Cancelled,
+        "all" | "filled" | "closed" => OrderStatus::Filled,
+        _ => OrderStatus::Unknown,
+    }
+}
+
+fn parse_btcbox_datetime(value: &str) -> Option<chrono::DateTime<Utc>> {
+    NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .map(|naive| Utc.from_utc_datetime(&naive))
 }
 
 fn parse_error(exchange_id: &ExchangeId, message: &str, raw: &Value) -> ExchangeApiError {

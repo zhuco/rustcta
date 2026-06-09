@@ -17,5 +17,5 @@
   "auth": "session_cookie_plus_external_signer",
   "request_spec_required": true,
   "trade_enabled": false,
-  "expected_error": "grvt.amend_order_session_spec_only"
+  "expected_error": "grvt.amend_requires_session_renewal_eip712_signer_and_reconciliation"
 }

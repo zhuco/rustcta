@@ -56,12 +56,66 @@ websocket:
   public:
     support: native
     url: wss://api.upbit.com/websocket/v1
+    protocol: websocket_json_array
+    regional_urls:
+      korea: wss://api.upbit.com/websocket/v1
+      singapore: wss://sg-api.upbit.com/websocket/v1
+      indonesia: wss://id-api.upbit.com/websocket/v1
+      thailand: wss://th-api.upbit.com/websocket/v1
     heartbeat:
       method: ping
       direction: client_ping
       interval_ms: 30000
       timeout_ms: 90000
     resync: rest_order_book_snapshot
+    order_book:
+      channel: orderbook
+      product: spot
+      market_types: [spot]
+      url: wss://sg-api.upbit.com/websocket/v1
+      protocol: websocket_json_array
+      request:
+        format: ticket_type_codes_format
+        ticket_required: true
+        type: orderbook
+        codes_format: "{code}.{count}"
+        code_format: QUOTE-BASE
+        supported_unit_counts: [1, 5, 15, 30]
+        default_unit_count: 30
+        invalid_count_policy: exchange_defaults_to_30
+        snapshot_switch: is_only_snapshot
+        realtime_switch: is_only_realtime
+        format_object: DEFAULT
+      depth:
+        field: orderbook_units
+        unit_count_source: code_suffix
+        depths: [1, 5, 15, 30]
+        supported_unit_counts: [1, 5, 15, 30]
+        default_unit_count: 30
+        max_depth_per_side: 30
+      update_interval:
+        fixed_update_interval_ms: null
+        note: "Official public WS docs do not publish a fixed millisecond orderbook cadence."
+      sequence:
+        fields: []
+        timestamp_field: timestamp
+        stream_type_field: stream_type
+        snapshot_value: SNAPSHOT
+        realtime_value: REALTIME
+        continuity: unsupported_no_official_sequence
+        gap_detection: reconnect_or_stale_stream_only
+      checksum:
+        supported: false
+        field: null
+        risk: "No official checksum field; no checksum mismatch risk, but continuity cannot be checksum-validated."
+      resync:
+        mode: rest_snapshot_rebuild
+        rest_endpoint_operation: get_order_book
+        rest_endpoint: /v1/orderbook
+        triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]
+      fixtures:
+        subscribe: tests/fixtures/exchanges/upbit/ws/public_orderbook.json
+        parser: tests/fixtures/exchanges/upbit/ws/orderbook_snapshot.json
   private:
     support: native_specs_only
     url: wss://api.upbit.com/websocket/v1/private
@@ -162,6 +216,8 @@ endpoints:
     weight: 1
     request_spec_required: true
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API reference scope is Spot-only and exposes no standard futures/perpetual/options product line."
   - operation: get_positions
     reason: "Upbit Spot has no derivative position model."
   - operation: amend_order

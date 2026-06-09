@@ -1,0 +1,22 @@
+{
+  "exchange": "dydx",
+  "operation": "batch_place_orders",
+  "boundary_type": "node_tx_response_parser_boundary",
+  "status": "project_unimplemented",
+  "parser_enabled": false,
+  "trade_enabled": false,
+  "response_model": {
+    "chain": "dydx v4",
+    "message_type": "multiple MsgPlaceOrder messages",
+    "expected_runtime_response": "Node broadcast transaction response plus per-order Indexer readback"
+  },
+  "remaining_runtime": [
+    "wallet_transaction_signing",
+    "account_sequence",
+    "batch_tx_builder",
+    "partial_tx_response_parser",
+    "indexer_order_reconciliation",
+    "dry_run_safe_broadcast_guard"
+  ],
+  "expected_error": "dydx.batch_place_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation"
+}

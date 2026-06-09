@@ -7,9 +7,7 @@ use rustcta_types::MarketType;
 
 pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapabilities) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
-    capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-        "yobit private REST is request-spec-only until read-only and write semantics are verified",
-    );
+    capabilities.capabilities_v2.private_rest = CapabilitySupport::native();
     capabilities.capabilities_v2.public_streams =
         CapabilitySupport::unsupported("yobit public WebSocket API was not verified");
     capabilities.capabilities_v2.private_streams =
@@ -43,10 +41,18 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
         BatchCapability::unsupported("yobit.batch_cancel_orders_unverified");
     capabilities.capabilities_v2.cancel_all_orders =
         CapabilitySupport::unsupported("yobit.cancel_all_orders_request_spec_only");
-    capabilities.capabilities_v2.order_history =
-        HistoryCapability::unsupported("yobit.private_order_history_request_spec_only");
-    capabilities.capabilities_v2.fills_history =
-        HistoryCapability::unsupported("yobit.private_fills_history_request_spec_only");
+    capabilities.capabilities_v2.order_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        supports_limit: true,
+        max_limit: Some(100),
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.fills_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        supports_limit: true,
+        max_limit: Some(100),
+        ..HistoryCapability::default()
+    };
     capabilities.capabilities_v2.credential_scopes =
         vec![CredentialScope::ReadOnly, CredentialScope::Trade];
     capabilities.capabilities_v2.endpoints = yobit_endpoints();
@@ -81,23 +87,54 @@ fn yobit_endpoints() -> Vec<EndpointCapability> {
             weight: Some(1),
             supports_testnet: false,
         },
-        private_endpoint("get_balances", "getInfo", CredentialScope::ReadOnly),
-        private_endpoint("place_order", "Trade", CredentialScope::Trade),
-        private_endpoint("cancel_order", "CancelOrder", CredentialScope::Trade),
-        private_endpoint("query_order", "OrderInfo", CredentialScope::ReadOnly),
-        private_endpoint("get_open_orders", "ActiveOrders", CredentialScope::ReadOnly),
+        private_endpoint(
+            "get_balances",
+            "getInfo",
+            CredentialScope::ReadOnly,
+            CapabilitySupport::unsupported("yobit.get_balances_request_spec_only"),
+        ),
+        private_endpoint(
+            "place_order",
+            "Trade",
+            CredentialScope::Trade,
+            CapabilitySupport::unsupported("yobit.place_order_request_spec_only"),
+        ),
+        private_endpoint(
+            "cancel_order",
+            "CancelOrder",
+            CredentialScope::Trade,
+            CapabilitySupport::unsupported("yobit.cancel_order_request_spec_only"),
+        ),
+        private_endpoint(
+            "query_order",
+            "OrderInfo",
+            CredentialScope::ReadOnly,
+            CapabilitySupport::native(),
+        ),
+        private_endpoint(
+            "get_open_orders",
+            "ActiveOrders",
+            CredentialScope::ReadOnly,
+            CapabilitySupport::native(),
+        ),
         private_endpoint(
             "get_recent_fills",
             "TradeHistory",
             CredentialScope::ReadOnly,
+            CapabilitySupport::native(),
         ),
     ]
 }
 
-fn private_endpoint(operation: &str, path: &str, scope: CredentialScope) -> EndpointCapability {
+fn private_endpoint(
+    operation: &str,
+    path: &str,
+    scope: CredentialScope,
+    support: CapabilitySupport,
+) -> EndpointCapability {
     EndpointCapability {
         operation: operation.to_string(),
-        support: CapabilitySupport::unsupported(format!("yobit.{operation}_request_spec_only")),
+        support,
         market_types: vec![MarketType::Spot],
         transport: EndpointTransport::Rest,
         method: Some("POST".to_string()),

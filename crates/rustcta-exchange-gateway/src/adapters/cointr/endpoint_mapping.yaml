@@ -64,7 +64,32 @@ websocket:
   public:
     supports_subscribe: true
     supports_unsubscribe: false
-    channels: [books5, trade, ticker, candle]
+    channels: [books, books1, books5, books15, trade, ticker, candle]
+    orderbook:
+      subscribe:
+        op: subscribe
+        args: [{ instType: SPOT, channel: books5, instId: BTCUSDT }]
+      channels:
+        - name: books
+          levels: full
+          push_interval_ms: [200, 300]
+          message_type: snapshot_then_update
+        - name: books1
+          levels: 1
+          push_interval_ms: [200, 300]
+          message_type: snapshot
+        - name: books5
+          levels: 5
+          push_interval_ms: [200, 300]
+          message_type: snapshot
+        - name: books15
+          levels: 15
+          push_interval_ms: [200, 300]
+          message_type: snapshot
+      checksum: crc32
+      checksum_depth: 25
+      sequence: none
+      resync: rest_order_book_snapshot_then_rebuild_cache
     heartbeat: { direction: client_ping, ping_interval_ms: 15000, pong_timeout_ms: 30000, stale_message_ms: 30000 }
   private:
     supports_subscribe: true
@@ -209,8 +234,10 @@ endpoints:
     weight: 5
     request_spec_required: true
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/batch_place_orders_spot.json }
+    support: native
     native_batch: true
     atomicity: partial
+    max_items: 20
   - operation: batch_cancel_orders
     product: spot
     market_types: [spot, linear_perp]
@@ -223,8 +250,42 @@ endpoints:
     weight: 5
     request_spec_required: true
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/batch_cancel_orders_spot.json }
+    support: native
     native_batch: true
     atomicity: partial
+    max_items: 20
+  - operation: amend_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cointr/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cointr.amend_order_unsupported
+    notes: CoinTR mapping has no lossless shared in-place amend endpoint; callers must cancel and replace explicitly.
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cointr/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: cointr.order_list_unsupported
+    notes: CoinTR mapping has no standard OCO/OTO/order-list semantics exposed through the shared gateway.
   - operation: cancel_all_orders
     product: spot
     market_types: [spot, linear_perp]

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "ark-fill-1",
+    "orderId": "ark-order-1",
+    "clientOrderId": "client-1",
+    "symbol": "BTC_USDT",
+    "side": "buy",
+    "size": "0.00400000",
+    "price": "63950.00",
+    "notional": "255.80",
+    "fee": "0.1279",
+    "feeAsset": "USDT",
+    "liquidity": "taker",
+    "filledAt": "2026-06-09T01:03:00Z"
+  }
+]

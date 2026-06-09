@@ -1,0 +1,21 @@
+{
+  "adapter": "bitbank",
+  "boundary": "core_trading_source_boundary",
+  "status": "spec_only",
+  "operations": [
+    "place_order",
+    "cancel_order"
+  ],
+  "source": {
+    "auth": "signed private REST",
+    "paths": [
+      "POST /v1/user/spot/order",
+      "POST /v1/user/spot/cancel_order"
+    ]
+  },
+  "runtime_gap": [
+    "explicit live-write/dry-run guard not wired",
+    "place/cancel acknowledgement parser not promoted",
+    "post-write query/open/fills reconciliation missing for write lifecycle"
+  ]
+}

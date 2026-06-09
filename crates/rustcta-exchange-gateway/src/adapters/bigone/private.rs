@@ -85,10 +85,34 @@ impl BigOneGatewayAdapter {
         request: FeesRequest,
     ) -> ExchangeApiResult<FeesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
+        if request.symbols.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "bigone get_fees requires at least one spot symbol".to_string(),
+            });
+        }
+        for symbol in &request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            if symbol.market_type != MarketType::Spot {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "bigone.contract_fees_source_only",
+                });
+            }
+        }
+        let asset_pair_names = request
+            .symbols
+            .iter()
+            .map(|symbol| normalize_bigone_symbol(&symbol.exchange_symbol.symbol, MarketType::Spot))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut params = HashMap::new();
+        params.insert("asset_pair_names".to_string(), asset_pair_names);
+        let value = self
+            .signed_get(false, "/api/v3/viewer/trading_fees", &params)
+            .await?;
         Ok(FeesResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
-            fees: parse_fees(&request.symbols, &Value::Null),
+            fees: parse_fees(&request.symbols, &value),
         })
     }
 

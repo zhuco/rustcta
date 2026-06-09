@@ -103,6 +103,25 @@ streams:
       trades: trade
       ticker: tick
       candles: kbar
+    order_book:
+      channel: depth
+      supported_depths: [10, 50, 100]
+      default_depth: 100
+      fixed_update_interval_ms: null
+      interval_note: official Spot depth WS docs do not publish a fixed millisecond cadence
+      message_type: snapshot
+      sequence:
+        field: null
+        contiguous: false
+        gap_detection: unsupported_no_confirmed_sequence_or_update_id
+        risk: no documented sequence field, so missed updates cannot be proven from WS payload alone
+      checksum: unsupported
+      checksum_risk: no documented checksum field for Spot depth WS
+      rebuild:
+        strategy: fetch REST depth snapshot and resubscribe after reconnect, stale stream, or suspected gap
+        rest_snapshot_endpoint: /v2/depth.do
+      fixture: tests/fixtures/exchanges/lbank/ws/public_spot_depth.json
+      implementation: crates/rustcta-exchange-gateway/src/adapters/lbank/streams.rs
     standard_events:
     - order_book_snapshot
     - heartbeat
@@ -115,7 +134,7 @@ streams:
       ping_interval_ms: 30000
       pong_timeout_ms: 10000
     resync:
-      order_book: rest_snapshot
+      order_book: rest_snapshot_fallback_and_resubscribe
   private:
     support: spot_only_with_subscribe_key
     channels:

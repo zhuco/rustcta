@@ -1,0 +1,57 @@
+{
+  "exchange": "myokx",
+  "profile_of": "okx",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "base_url": "https://eea.okx.com",
+  "path": "/api/v5/account/balance",
+  "auth": "signed",
+  "query": {
+    "ccy": {
+      "match": "absent"
+    }
+  },
+  "headers": {
+    "OK-ACCESS-KEY": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-PASSPHRASE": {
+      "match": "non_empty"
+    }
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "real",
+    "secret",
+    "private"
+  ],
+  "response_sample": {
+    "code": "0",
+    "msg": "",
+    "data": [
+      {
+        "totalEq": "1000.00",
+        "details": [
+          {
+            "ccy": "USDT",
+            "cashBal": "1000.00",
+            "availBal": "950.00",
+            "eq": "1000.00"
+          }
+        ]
+      }
+    ]
+  },
+  "runtime_boundary": "MyOKX account balance reuses the OKX V5 signed runtime when EEA private REST credentials and explicit enable flag are configured.",
+  "runtime_enabled": true,
+  "trade_enabled": false,
+  "secret_free": "<redacted:secret>"
+}

@@ -1,0 +1,19 @@
+{
+  "exchange": "aster",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Aster Spot API and Futures V3 API",
+      "evidence": "Aster has separate spot and futures API surfaces; this adapter currently wires Futures V3 perpetual REST/WS runtime."
+    }
+  ],
+  "runtime_isolation": "Keep Aster spot separate from the futures V3 runtime until spot REST/WS hosts, listen-key flow and account scope are verified.",
+  "remaining_work": [
+    "pin spot exchangeInfo, depth, ticker and trades specs",
+    "add signed spot account, order, open-order and fill fixtures",
+    "wire spot listen-key/private stream reconciliation and product-scope guards"
+  ]
+}

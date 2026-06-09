@@ -1,0 +1,19 @@
+{
+  "exchange": "apex",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "ApeX spot account/wallet and trading materials",
+      "evidence": "Spot account or wallet clues exist, but this adapter maps ApeX Omni perpetual public REST and private request-spec boundaries only."
+    }
+  ],
+  "runtime_isolation": "Keep ApeX spot out of the perpetual runtime until spot metadata, wallet/account reads and zkLink/L2 order signing are independently verified.",
+  "remaining_work": [
+    "pin spot symbols and spot order-book request/response specs",
+    "add spot wallet/account balance and order readback fixtures",
+    "wire spot place/cancel/query/open/fills with zkLink/L2 signer and reconciliation"
+  ]
+}

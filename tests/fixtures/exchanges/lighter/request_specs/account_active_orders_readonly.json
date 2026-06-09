@@ -1,7 +1,7 @@
 {
   "exchange": "lighter",
   "operation": "open_orders",
-  "status": "unsupported_unverified",
+  "status": "guarded_runtime",
   "method": "GET",
   "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
   "path": "/accountActiveOrders",
@@ -11,6 +11,7 @@
   },
   "auth": "bearer",
   "request_spec_required": true,
-  "expected_error": "lighter.open_orders_auth_token_unverified",
+  "guard": "LIGHTER_PRIVATE_REST_ENABLED or RUSTCTA_LIGHTER_PRIVATE_REST_ENABLED plus LIGHTER_AUTH_TOKEN/RUSTCTA_LIGHTER_AUTH_TOKEN and LIGHTER_ACCOUNT_INDEX/RUSTCTA_LIGHTER_ACCOUNT_INDEX",
+  "disabled_error": "lighter.private_rest_disabled",
   "trade_enabled": false
 }

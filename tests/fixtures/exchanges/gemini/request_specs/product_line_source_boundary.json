@@ -1,0 +1,55 @@
+{
+  "exchange": "gemini",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "derivatives_product", "perpetual_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["derivatives", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://developer.gemini.com/trading/rest-api/derivatives",
+      "evidence": "Gemini developer documentation exposes derivatives REST endpoints for perpetual contracts and derivatives-specific account operations."
+    }
+  ],
+  "runtime_isolation": "Gemini derivatives/perpetual access requires region and product eligibility checks and must not be enabled through the spot order runtime.",
+  "unsupported_runtime_reason": "Gemini derivatives/perpetual endpoints are official, but this adapter has no region/product guard, derivatives symbol model, position/risk parser or derivatives order reconciliation.",
+  "required_endpoints": {
+    "market_metadata": [
+      "derivatives/perpetual symbols",
+      "contract specifications",
+      "region/product eligibility rules"
+    ],
+    "public_market_data": [
+      "derivatives/perpetual order book",
+      "derivatives/perpetual ticker",
+      "derivatives/perpetual trades"
+    ],
+    "private_account": [
+      "derivatives account state",
+      "positions",
+      "risk or margin limits"
+    ],
+    "private_order_lifecycle": [
+      "derivatives/perpetual place order",
+      "derivatives/perpetual cancel order",
+      "derivatives/perpetual query/open orders",
+      "derivatives/perpetual fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "region and product eligibility guard",
+    "derivatives read-only and trade permission guard",
+    "product-scoped live-dry-run guard"
+  ],
+  "unsafe_to_promote_without": [
+    "derivatives symbol metadata fixtures",
+    "eligibility and credential scope validation",
+    "position/risk parser coverage",
+    "derivatives order lifecycle reconciliation"
+  ],
+  "remaining_work": [
+    "pin derivatives symbol and market metadata specs",
+    "add region/product eligibility guard",
+    "add derivatives account, position, order and fill parsers"
+  ]
+}

@@ -19,10 +19,7 @@ pub fn parse_symbol_rules(
             value,
         )
     })?;
-    pairs
-        .iter()
-        .map(|value| parse_symbol_rule(exchange_id, value))
-        .collect()
+    parse_rules_skipping_invalid_symbols(pairs, |value| parse_symbol_rule(exchange_id, value))
 }
 
 pub fn parse_perpetual_symbol_rules(
@@ -36,10 +33,33 @@ pub fn parse_perpetual_symbol_rules(
             value,
         )
     })?;
-    contracts
-        .iter()
-        .map(|value| parse_perpetual_symbol_rule(exchange_id, value))
-        .collect()
+    parse_rules_skipping_invalid_symbols(contracts, |value| {
+        parse_perpetual_symbol_rule(exchange_id, value)
+    })
+}
+
+fn parse_rules_skipping_invalid_symbols(
+    values: &[Value],
+    mut parse: impl FnMut(&Value) -> ExchangeApiResult<SymbolRules>,
+) -> ExchangeApiResult<Vec<SymbolRules>> {
+    let mut rules = Vec::new();
+    for value in values {
+        match parse(value) {
+            Ok(rule) => rules.push(rule),
+            Err(error) if should_skip_symbol_rule_error(&error) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(rules)
+}
+
+fn should_skip_symbol_rule_error(error: &ExchangeApiError) -> bool {
+    match error {
+        ExchangeApiError::InvalidRequest { message } => {
+            message.contains("canonical_symbol") || message.contains("exchange_symbol")
+        }
+        _ => false,
+    }
 }
 
 fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {

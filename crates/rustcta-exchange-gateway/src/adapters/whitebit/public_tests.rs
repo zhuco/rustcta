@@ -6,7 +6,8 @@ use serde_json::json;
 
 use super::parser::parse_symbol_rules;
 use super::streams::{
-    whitebit_public_subscribe_payload, WhiteBitPublicStreamMessage, WhiteBitWsSessionEvent,
+    whitebit_public_order_book_ws_policy, whitebit_public_subscribe_payload,
+    WhiteBitPublicStreamMessage, WhiteBitWsSessionEvent,
 };
 use super::test_support::{context, perp_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{WhiteBitGatewayAdapter, WhiteBitGatewayConfig};
@@ -28,6 +29,15 @@ fn fixture(path: &str) -> serde_json::Value {
         _ => unreachable!("unknown fixture"),
     })
     .expect("fixture json")
+}
+
+fn ws_fixture(path: &str) -> &'static str {
+    match path {
+        "public_depth_update" => include_str!(
+            "../../../../../tests/fixtures/exchanges/whitebit/ws/public_depth_update.json"
+        ),
+        _ => unreachable!("unknown ws fixture"),
+    }
 }
 
 #[test]
@@ -256,6 +266,24 @@ async fn whitebit_adapter_should_build_public_websocket_subscription_specs() {
 }
 
 #[test]
+fn whitebit_public_order_book_ws_policy_should_describe_update_id_resync() {
+    let policy = whitebit_public_order_book_ws_policy();
+
+    assert_eq!(policy.channel, "depth_subscribe");
+    assert_eq!(policy.subscribe_params, "[market, 100, \"0\", true]");
+    assert_eq!(policy.depth, 100);
+    assert_eq!(policy.interval_ms, 100);
+    assert_eq!(policy.snapshot_keepalive_ms, 10_000);
+    assert_eq!(policy.sequence_field, "update_id");
+    assert!(policy.continuity.contains("previous update_id + 1"));
+    assert_eq!(policy.checksum, None);
+    assert!(policy
+        .rest_snapshot_endpoint
+        .contains("/api/v4/public/orderbook"));
+    assert!(policy.resync.contains("REST order book snapshot"));
+}
+
+#[test]
 fn whitebit_public_websocket_session_should_subscribe_heartbeat_and_parse_order_book() {
     let adapter = WhiteBitGatewayAdapter::default_public().expect("adapter");
     let subscription = PublicStreamSubscription {
@@ -284,9 +312,7 @@ fn whitebit_public_websocket_session_should_subscribe_heartbeat_and_parse_order_
     }));
 
     let events = session
-        .handle_text_message(
-            r#"{"method":"depth_update","params":[{"bids":[["65000","0.2"]],"asks":[["65010","0.3"]],"last":101,"timestamp":1743054548000}]}"#,
-        )
+        .handle_text_message(ws_fixture("public_depth_update"))
         .expect("depth update");
     assert!(events.iter().any(|event| {
         matches!(

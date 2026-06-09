@@ -123,7 +123,9 @@ impl CryptomusGatewayAdapter {
             .await?;
         let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)
             .ok()
-            .filter(|order| order.status != OrderStatus::Unknown)
+            .filter(|order| {
+                order.status != OrderStatus::Open && order.status != OrderStatus::Unknown
+            })
             .unwrap_or_else(|| order_state_from_cancel_ack(&self.exchange_id, &request));
         Ok(CancelOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,

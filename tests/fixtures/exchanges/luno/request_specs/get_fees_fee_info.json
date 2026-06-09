@@ -1,0 +1,32 @@
+{
+  "exchange": "luno",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/1/fee_info",
+  "auth": "http_basic_api_key",
+  "query": {
+    "pair": {
+      "match": "exact",
+      "value": "XBTZAR"
+    }
+  },
+  "headers": {
+    "Authorization": {
+      "match": "prefix",
+      "value": "Basic "
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "runtime_boundary": {
+    "status": "offline",
+    "reason": "fee_info is pair-scoped and credentialed, but shared FeeRateSnapshot parser and account-effective guard are not implemented.",
+    "adapter_error": "luno.fees_offline_request_spec_only"
+  },
+  "body": null
+}

@@ -1,0 +1,30 @@
+{
+  "operation": "latoken.batch_cancel_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/v2/auth/order/cancelBulk",
+  "query": {},
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256",
+    "content-type": "application/json"
+  },
+  "body": {
+    "orders": [
+      {
+        "id": "latoken_test_order_id_001"
+      },
+      {
+        "id": "latoken_test_order_id_002"
+      }
+    ]
+  },
+  "canonical_payload": "POST/v2/auth/order/cancelBulkorders=[{\"id\":\"latoken_test_order_id_001\"},{\"id\":\"latoken_test_order_id_002\"}]",
+  "credential_scope": "trade",
+  "official_source": "https://api.latoken.com/doc/v2/",
+  "source_endpoint": "POST /v2/auth/order/cancelBulk",
+  "source_summary": "Cancel an array of orders; request accepts 1-50 cancel order objects and response returns per-order status or validation errors.",
+  "expected_error_until_promoted": "latoken.batch_cancel_orders_request_spec_only"
+}

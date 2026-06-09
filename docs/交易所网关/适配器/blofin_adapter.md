@@ -39,6 +39,9 @@ Explicitly unsupported / not implemented:
   product/help pages document spot trading, while the verified OpenAPI used by
   this adapter is still dominated by `SWAP`/perpetual order lifecycle. A
   separate task must verify whether a stable Spot API order lifecycle is public.
+  `endpoint_mapping.yaml` 记录 `spot_product status: project_unimplemented`；
+  补 Spot 前需要 stable spot instruments/books/tickers/trades、spot balances、
+  spot order/open-order/fill lifecycle 和 parser fixtures。
 - Unified `ExchangeClient` trait methods for quote-sized market orders, amend
   order, and OCO/OTO order lists. BloFin-specific TPSL/algo order methods are
   available outside the shared trait.
@@ -120,8 +123,8 @@ The machine-readable mapping is
 - Official WS order book detail: `books` sends an initial 200-depth snapshot
   and 100ms incremental updates; `books5` sends 5-depth snapshots every 100ms
   when changed. `books` includes `prevSeqId`/`seqId`, so `prevSeqId` must match
-  the previous `seqId`; no checksum was found. Mapping still needs these
-  interval/depth/sequence fields. Source batch:
+  the previous `seqId`; no checksum was found. Mapping records these
+  100ms, 200/5 depth, `prevSeqId`/`seqId`, and gap rebuild fields. Source batch:
   [WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 - Order book strictness: REST and WS must be rebuilt from
   `GET /api/v1/market/books` on disconnect or sequence mismatch.
@@ -164,3 +167,9 @@ CARGO_TARGET_DIR=/tmp/rustcta_blofin_target cargo test -p rustcta-exchange-gatew
 CARGO_TARGET_DIR=/tmp/rustcta_gateway_app_blofin_target cargo check -p rustcta-gateway
 python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/blofin/endpoint_mapping.yaml
 ```
+
+## P2 Product Line Boundary (2026-06-09)
+
+`spot_product` is an official-source project boundary, not an exchange-unsupported row. BloFin spot trading exists as a separate product line, while this adapter is scoped to BloFin USDT linear perpetual OpenAPI.
+
+Do not promote Spot runtime from the swap/perpetual adapter. Promotion requires stable spot instruments/books/tickers/trades public specs, spot balance/account private specs, spot order/open-order/fill lifecycle, product-scope parser coverage, and reconciliation guards.

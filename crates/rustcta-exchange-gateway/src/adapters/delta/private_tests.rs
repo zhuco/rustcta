@@ -1,7 +1,8 @@
 use rustcta_exchange_api::{
-    BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, OpenOrdersRequest, PlaceOrderRequest, PositionsRequest,
-    QueryOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelOrderRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest, PlaceOrderRequest,
+    PositionsRequest, QueryOrderRequest, RecentFillsRequest, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{ExchangeErrorClass, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::Value;
@@ -21,6 +22,7 @@ async fn delta_adapter_should_keep_private_operations_unsupported_without_creden
     })
     .expect("adapter");
     assert!(!adapter.capabilities().supports_private_rest);
+    assert!(!adapter.capabilities().supports_amend_order);
     let error = adapter
         .get_balances(BalancesRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -31,6 +33,20 @@ async fn delta_adapter_should_keep_private_operations_unsupported_without_creden
         })
         .await
         .expect_err("private operation should be unsupported");
+    assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+
+    let error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend-guard"),
+            symbol: perp_symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("2001".to_string()),
+            new_client_order_id: None,
+            new_quantity: "3".to_string(),
+        })
+        .await
+        .expect_err("amend should be guarded without credentials");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
 }
 
@@ -152,9 +168,14 @@ async fn delta_adapter_should_route_private_readbacks_with_signed_headers() {
 
 #[tokio::test]
 async fn delta_adapter_should_route_order_mutations() {
-    let (base_url, seen) =
-        spawn_rest_server(vec![fixture("place_ack"), fixture("cancel_ack")]).await;
+    let (base_url, seen) = spawn_rest_server(vec![
+        fixture("place_ack"),
+        fixture("amend_ack"),
+        fixture("cancel_ack"),
+    ])
+    .await;
     let adapter = private_adapter(base_url);
+    assert!(adapter.capabilities().supports_amend_order);
     let placed = adapter
         .place_order(PlaceOrderRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -175,6 +196,22 @@ async fn delta_adapter_should_route_order_mutations() {
         .expect("place");
     assert_eq!(placed.order.exchange_order_id.as_deref(), Some("2001"));
 
+    let amended = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: perp_symbol_scope(),
+            client_order_id: Some("cid-1".to_string()),
+            exchange_order_id: Some("2001".to_string()),
+            new_client_order_id: None,
+            new_quantity: "3".to_string(),
+        })
+        .await
+        .expect("amend");
+    assert_eq!(amended.order.exchange_order_id.as_deref(), Some("2001"));
+    assert_eq!(amended.order.quantity, "3");
+    assert_eq!(amended.order.status, OrderStatus::New);
+
     let cancelled = adapter
         .cancel_order(CancelOrderRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -194,7 +231,59 @@ async fn delta_adapter_should_route_order_mutations() {
         requests[0].body.as_ref().unwrap()["product_symbol"],
         "BTCUSDT"
     );
-    assert_eq!(requests[1].method, "DELETE");
+    assert_eq!(requests[1].method, "PUT");
+    assert_eq!(requests[1].path, "/v2/orders");
+    assert_eq!(requests[1].body.as_ref().unwrap()["id"], "2001");
+    assert_eq!(requests[1].body.as_ref().unwrap()["size"], "3");
+    assert_eq!(
+        requests[1].body.as_ref().unwrap()["client_order_id"],
+        "cid-1"
+    );
+    assert_eq!(requests[1].header("api-key"), Some("key"));
+    assert_eq!(requests[2].method, "DELETE");
+}
+
+#[test]
+fn delta_amend_request_spec_should_be_runtime_enabled_and_parser_backed() {
+    let spec: Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/delta/request_specs/amend_order.json"
+    ))
+    .expect("request spec");
+    assert_eq!(spec["exchange"], "delta");
+    assert_eq!(spec["name"], "amend_order");
+    assert_eq!(spec["method"], "PUT");
+    assert_eq!(spec["path"], "/v2/orders");
+    assert_eq!(spec["json_body"]["product_symbol"], "BTCUSDT");
+    assert_eq!(spec["json_body"]["size"], "3");
+    assert_eq!(spec["runtime_status"], "runtime_enabled");
+    assert_eq!(
+        spec["response_parser_fixture"],
+        "tests/fixtures/exchanges/delta/amend_ack.json"
+    );
+
+    let ack = fixture("amend_ack");
+    assert_eq!(ack["result"]["id"], 2001);
+    assert_eq!(ack["result"]["state"], "open");
+}
+
+#[tokio::test]
+async fn delta_amend_should_reject_unverified_new_client_order_id() {
+    let (base_url, seen) = spawn_rest_server(Vec::new()).await;
+    let adapter = private_adapter(base_url);
+    let error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend-new-client-id"),
+            symbol: perp_symbol_scope(),
+            client_order_id: Some("cid-1".to_string()),
+            exchange_order_id: Some("2001".to_string()),
+            new_client_order_id: Some("cid-2".to_string()),
+            new_quantity: "3".to_string(),
+        })
+        .await
+        .expect_err("new client id amend is not mapped");
+    assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -258,6 +347,7 @@ fn fixture(name: &str) -> Value {
         "fills" => include_str!("../../../../../tests/fixtures/exchanges/delta/fills.json"),
         "positions" => include_str!("../../../../../tests/fixtures/exchanges/delta/positions.json"),
         "place_ack" => include_str!("../../../../../tests/fixtures/exchanges/delta/place_ack.json"),
+        "amend_ack" => include_str!("../../../../../tests/fixtures/exchanges/delta/amend_ack.json"),
         "cancel_ack" => {
             include_str!("../../../../../tests/fixtures/exchanges/delta/cancel_ack.json")
         }

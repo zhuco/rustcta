@@ -1,0 +1,15 @@
+{
+  "exchange": "delta",
+  "name": "amend_order",
+  "method": "PUT",
+  "path": "/v2/orders",
+  "required_headers": ["api-key", "signature", "timestamp"],
+  "json_body": {
+    "product_symbol": "BTCUSDT",
+    "id": "2001",
+    "size": "3"
+  },
+  "runtime_status": "runtime_enabled",
+  "response_parser_fixture": "tests/fixtures/exchanges/delta/amend_ack.json",
+  "notes": "Shared amend_order runtime sends Delta PUT /v2/orders for quantity edits and parses the order ack; price edit remains outside the current shared AmendOrderRequest shape."
+}

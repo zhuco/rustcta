@@ -15,6 +15,7 @@ base_urls:
 auth:
   private_rest: unsupported; no verified signing scheme
 rate_limits:
+  bitkan_account_source: { scope: account, interval_ms: 1000, limit: 1 }
   unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   all: { mode: unsupported }
@@ -32,6 +33,27 @@ websocket:
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+
+unsupported:
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：未核到稳定官方 BitKan-native fee/account API。"
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/bitkan/request_specs/get_balances_account_source.json
+    reason: "BitKan exchange account balances should be modeled through a verified account/balance API, but stable BitKan-native readback docs and signing rules are not implemented in this adapter yet."
+  - operation: get_positions
+    reason: "交易所不支持当前仓位接口 runtime：当前未核到稳定官方 BitKan-native exchange API、签名规则和仓位生命周期文档。"
+  - operation: place_order
+    reason: "交易所不支持当前交易/私有接口 runtime：当前未核到稳定官方 BitKan-native exchange trading API、签名规则和订单生命周期文档。"
+  - operation: cancel_order
+    reason: "交易所不支持当前交易/私有接口 runtime：当前未核到稳定官方 BitKan-native cancel API、签名规则和订单生命周期文档。"
+  - operation: query_order
+    reason: "交易所不支持当前交易/私有接口 runtime：当前未核到稳定官方 BitKan-native order readback API、签名规则和订单生命周期文档。"
+  - operation: get_open_orders
+    reason: "交易所不支持当前交易/私有接口 runtime：当前未核到稳定官方 BitKan-native open orders API、签名规则和订单生命周期文档。"
+  - operation: get_recent_fills
+    reason: "交易所不支持当前交易/私有接口 runtime：当前未核到稳定官方 BitKan-native fills API、签名规则和订单生命周期文档。"
+
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -63,6 +85,23 @@ endpoints:
     testnet: false
     support: unsupported_unverified
     reason: bitkan.order_book_unverified
+  - operation: get_balances
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: SOURCE_READ
+    path: source://bitkan/account-balance-api-unverified
+    auth: none
+    rate_limit_bucket: bitkan_account_source
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "Account/balance readback boundary only; shared get_balances runtime remains project-unimplemented pending official BitKan-native account/balance API verification, signing rules, parser, and read-only guard."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bitkan/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/bitkan/request_specs/get_balances_account_source.json }
   - operation: place_order
     product: spot
     market_types: [spot, perpetual]
@@ -93,6 +132,66 @@ endpoints:
     testnet: false
     support: unsupported_unverified
     reason: bitkan.cancel_order_unverified
+  - operation: amend_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitkan/amend_order
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.amend_order_unverified
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitkan/order_list
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.order_list_unverified
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitkan/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.batch_place_orders_unverified
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitkan/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.batch_cancel_orders_unverified
   - operation: batch_orders
     product: spot
     market_types: [spot, perpetual]

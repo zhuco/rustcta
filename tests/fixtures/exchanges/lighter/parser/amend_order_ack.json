@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": {
+    "tx_type": "modify_order",
+    "market_index": 0,
+    "order_index": "lighter-order-1001",
+    "client_order_index": "lighter-client-1001",
+    "side": "buy",
+    "order_type": "limit",
+    "status": "accepted",
+    "new_base_amount": "1.25",
+    "new_price": "2064.55"
+  }
+}

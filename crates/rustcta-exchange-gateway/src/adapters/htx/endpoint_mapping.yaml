@@ -68,8 +68,66 @@ websocket:
   public:
     supports_subscribe: true
     supports_unsubscribe: true
-    channels: [depth, trade, ticker, kline]
+    channels: [depth, mbp, mbp_refresh, bbo, trade, ticker, kline]
     heartbeat: { direction: server_ping, ping_interval_ms: 20000, pong_timeout_ms: 30000, stale_message_ms: 30000 }
+    orderbook:
+      subscribe:
+        op_field: sub
+        request: { sub: channel, id: client_request_id }
+      spot:
+        standard_depth:
+          channel: market.{symbol}.depth.{type}
+          interval_ms: 1000
+          depth: merged_depth
+          sequence_fields: [version]
+          checksum: none
+          resync: rest_order_book_snapshot
+        mbp_incremental:
+          channel: market.{symbol}.mbp.{levels}
+          interval_ms: event_driven
+          depth: [5, 20, 150, 400]
+          sequence_fields: [seqNum, prevSeqNum]
+          checksum: none
+          resync: rest_snapshot_then_seqnum_continuity
+        mbp_refresh:
+          channel: market.{symbol}.mbp.refresh.{levels}
+          interval_ms: 100
+          depth: [5, 10, 20]
+          sequence_fields: [seqNum, prevSeqNum]
+          checksum: none
+          resync: rest_snapshot_then_seqnum_continuity
+        bbo:
+          channel: market.{symbol}.bbo
+          interval_ms: tick_by_tick
+          depth: 1
+          sequence_fields: [seqId]
+          checksum: none
+          support: mapping_only
+          reason: current public stream API has no dedicated BBO subscription kind
+      linear_perp:
+        standard_depth:
+          channel: market.{contract_code}.depth.{type}
+          interval_ms: 100
+          depth: [20, 150]
+          sequence_fields: [version]
+          checksum: none
+          resync: rest_order_book_snapshot
+        high_freq_depth:
+          channel: market.{contract_code}.depth.size_{size}.high_freq
+          interval_ms: 30
+          depth: [20, 150]
+          sequence_fields: [version]
+          snapshot_update_model: first_message_snapshot_then_update
+          checksum: none
+          resync: rest_snapshot_then_version_continuity
+        bbo:
+          channel: market.{contract_code}.bbo
+          interval_ms: tick_by_tick
+          depth: 1
+          sequence_fields: [version]
+          checksum: none
+          support: mapping_only
+          reason: current public stream API has no dedicated BBO subscription kind
   private:
     supports_subscribe: true
     supports_unsubscribe: true
@@ -79,14 +137,76 @@ streams:
   public:
     operation: subscribe_public_stream
     transport: websocket
-    product: linear_perp
+    product: spot | linear_perp
+    channel: public_orderbook_default
     support: parser_only
     request_spec_required: true
     rate_limit_bucket: htx.ws
     weight: 1
+    channels:
+      - market.{symbol}.mbp.refresh.20
+      - market.{symbol}.mbp.20
+      - market.{contract_code}.depth.size_20.high_freq
+    interval_ms: [event_driven, 30, 100]
+    depth: [20]
+    sequence: [seqNum, prevSeqNum, version]
+    checksum: none
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs }
-    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs, fixture: tests/fixtures/exchanges/htx/ws/public_book.json }
-    resync: { endpoint_operation: get_order_book }
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs
+      fixtures:
+        - tests/fixtures/exchanges/htx/ws/public_book.json
+        - tests/fixtures/exchanges/htx/ws/public_spot_mbp_refresh.json
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_sequence_continuity
+      gap_triggers: [seqNum_gap, prevSeqNum_mismatch, version_regression, reconnect]
+    orderbook_channels:
+      spot_mbp_refresh:
+        channel: market.{symbol}.mbp.refresh.20
+        support: parser_only
+        interval_ms: 100
+        depth: 20
+        sequence: [seqNum, prevSeqNum]
+        checksum: none
+        parser_fixture: tests/fixtures/exchanges/htx/ws/public_spot_mbp_refresh.json
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_then_seqnum_continuity }
+      spot_mbp_delta:
+        channel: market.{symbol}.mbp.20
+        support: parser_only
+        interval_ms: event_driven
+        depth: 20
+        sequence: [seqNum, prevSeqNum]
+        checksum: none
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_then_seqnum_continuity }
+      spot_bbo:
+        channel: market.{symbol}.bbo
+        support: mapping_only
+        interval_ms: tick_by_tick
+        depth: 1
+        sequence: [seqId]
+        checksum: none
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_on_reconnect }
+        reason: current public stream API has no dedicated BBO subscription kind
+      linear_high_freq:
+        channel: market.{contract_code}.depth.size_20.high_freq
+        support: parser_only
+        interval_ms: 30
+        depth: 20
+        sequence: [version]
+        checksum: none
+        parser_fixture: tests/fixtures/exchanges/htx/ws/public_book.json
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_then_version_continuity }
+      linear_bbo:
+        channel: market.{contract_code}.bbo
+        support: mapping_only
+        interval_ms: tick_by_tick
+        depth: 1
+        sequence: [version]
+        checksum: none
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_on_reconnect }
+        reason: current public stream API has no dedicated BBO subscription kind
   private:
     operation: subscribe_private_stream
     transport: websocket

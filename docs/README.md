@@ -64,6 +64,12 @@ WebSocket market-data rules now live under `交易所网关/`.
 
 ## Strategies And Operations
 
+- `cross_arb_live_runner_low_latency_zh.md` - cross-exchange perpetual
+  arbitrage single-runner, low-latency, live-switch, dashboard, private-WS
+  confirmation, and deprecated config-entry rules.
+- `cross_exchange_perpetual_precision_constraints_zh.md` - hard constraints for
+  cross-exchange perpetual arbitrage precision, contract units, base quantity
+  normalization, exchange order strings, and Decimal/integer-scale migration.
 - `multi_exchange_spot_arbitrage.md` - Spot-to-Spot arbitrage runtime overview.
 - `spot_spot_inventory_rebalance_flow.md` - inventory rebalance rules.
 - `spot_spot_inventory_rebalance_flow_zh.md` - Chinese version of the inventory

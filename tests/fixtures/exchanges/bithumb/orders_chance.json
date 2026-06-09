@@ -1,0 +1,10 @@
+{
+  "market": {
+    "id": "KRW-BTC",
+    "name": "BTC/KRW"
+  },
+  "bid_fee": "0.0005",
+  "ask_fee": "0.0005",
+  "maker_bid_fee": "0.0004",
+  "maker_ask_fee": "0.0004"
+}

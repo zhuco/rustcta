@@ -1,0 +1,23 @@
+{
+  "exchange": "bsx",
+  "operation": "get_open_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders",
+  "auth": "signed",
+  "query": {
+    "limit": "100",
+    "product_id": "BTC-PERP"
+  },
+  "headers": {
+    "BSX-KEY": { "match": "exact", "value": "test-api-key" },
+    "BSX-SIGNATURE": { "match": "present" },
+    "BSX-TIMESTAMP": { "match": "present" },
+    "BSX-ACCOUNT": { "match": "exact", "value": "0xtestwallet" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": ["secret", "private"]
+}

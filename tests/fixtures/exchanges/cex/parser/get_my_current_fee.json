@@ -1,0 +1,13 @@
+{
+  "ok": "ok",
+  "data": {
+    "tradingFee": {
+      "BTC-USD": {
+        "percent": "0.5"
+      },
+      "ETH-USD": {
+        "percent": "0.5"
+      }
+    }
+  }
+}

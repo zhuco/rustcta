@@ -8,10 +8,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, ClapArgs)]
 pub struct ExchangeOrderCanarySafetyArgs {
-    #[arg(
-        long,
-        default_value = "config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"
-    )]
+    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
     pub config: PathBuf,
     #[arg(long, default_value = "bitget")]
     pub exchange: String,
@@ -35,10 +32,7 @@ pub struct ExchangeOrderCanarySafetyArgs {
 
 #[derive(Debug, Clone, ClapArgs)]
 pub struct BitgetPerpOrderCanarySafetyArgs {
-    #[arg(
-        long,
-        default_value = "config/cross_exchange_arbitrage_bitget_50u.live-small.yml"
-    )]
+    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
     pub config: PathBuf,
     #[arg(long, default_value = "BTC/USDT")]
     pub symbol: String,
@@ -105,10 +99,7 @@ pub struct CrossArbFeeAuditSafetyArgs {
 
 #[derive(Debug, Clone, ClapArgs)]
 pub struct CrossArbOrderAdminSafetyArgs {
-    #[arg(
-        long,
-        default_value = "config/cross_exchange_arbitrage_three_venues_hcr_10u_405symbols.live-small.yml"
-    )]
+    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
     pub config: PathBuf,
     #[arg(long, value_enum)]
     pub action: AdminAction,
@@ -144,10 +135,7 @@ pub struct FundingArbObserveSafetyArgs {
 
 #[derive(Debug, Clone, ClapArgs)]
 pub struct CrossArbWsOpportunityProbeSafetyArgs {
-    #[arg(
-        long,
-        default_value = "config/cross_exchange_arbitrage_three_venues_hcr_10u_405symbols.live-small.yml"
-    )]
+    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
     pub config: PathBuf,
     #[arg(long, default_value_t = 220)]
     pub max_symbols: usize,
@@ -218,6 +206,7 @@ pub struct SafetyPlan {
     pub gate_mode: SafetyGateMode,
     pub config: String,
     pub config_dry_run: Option<bool>,
+    pub config_trading_enabled: Option<bool>,
     pub execute_requested: bool,
     pub live_order_confirmed: Option<bool>,
     pub mutation_confirmed: Option<bool>,
@@ -238,7 +227,9 @@ struct CrossArbConfigSafetyView {
 #[derive(Debug, Default, Deserialize)]
 struct CrossArbExecutionSafetyView {
     #[serde(default)]
-    dry_run: bool,
+    dry_run: Option<bool>,
+    #[serde(default)]
+    trading_enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -254,7 +245,8 @@ pub fn exchange_order_canary_safety_plan(args: ExchangeOrderCanarySafetyArgs) ->
     validate_supported_perp_canary_exchange(&args.exchange)?;
 
     let config = load_cross_arb_config_safety_view(&args.config)?;
-    validate_cross_arb_dry_run_gate(args.execute, config.execution.dry_run)?;
+    let trading_enabled = cross_arb_trading_enabled(&config);
+    validate_cross_arb_trading_gate(args.execute, trading_enabled)?;
     validate_enabled_exchange(&args.exchange, &config.universe.enabled_exchanges)?;
 
     render_plan(SafetyPlan {
@@ -262,14 +254,15 @@ pub fn exchange_order_canary_safety_plan(args: ExchangeOrderCanarySafetyArgs) ->
         new_command: "rustcta-tools-ops canary exchange-order",
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
-        config_dry_run: Some(config.execution.dry_run),
+        config_dry_run: config.execution.dry_run,
+        config_trading_enabled: Some(trading_enabled),
         execute_requested: args.execute,
         live_order_confirmed: Some(args.confirm_live_order),
         mutation_confirmed: None,
         planned_side_effects: vec![],
         safety_checks: vec![
             "--execute requires --confirm-live-order".to_string(),
-            "config execution.dry_run must match execution intent".to_string(),
+            "config execution.trading_enabled must match execution intent".to_string(),
             "canary notional must be > 0 and <= 10 USDT".to_string(),
             "max estimated canary notional must be > 0 and <= 20 USDT".to_string(),
             "symbol must use USDT quote".to_string(),
@@ -330,21 +323,23 @@ pub fn bitget_perp_order_canary_safety_plan(
     )?;
 
     let config = load_cross_arb_config_safety_view(&args.config)?;
-    validate_cross_arb_dry_run_gate(args.execute, config.execution.dry_run)?;
+    let trading_enabled = cross_arb_trading_enabled(&config);
+    validate_cross_arb_trading_gate(args.execute, trading_enabled)?;
 
     render_plan(SafetyPlan {
         legacy_binary: "bitget_order_canary",
         new_command: "rustcta-tools-ops canary bitget-perp-order",
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
-        config_dry_run: Some(config.execution.dry_run),
+        config_dry_run: config.execution.dry_run,
+        config_trading_enabled: Some(trading_enabled),
         execute_requested: args.execute,
         live_order_confirmed: Some(args.confirm_live_order),
         mutation_confirmed: None,
         planned_side_effects: vec![],
         safety_checks: vec![
             "--execute requires --confirm-live-order".to_string(),
-            "config execution.dry_run must match execution intent".to_string(),
+            "config execution.trading_enabled must match execution intent".to_string(),
             "canary notional must be > 0 and <= 10 USDT".to_string(),
             "max estimated canary notional must be > 0 and <= 20 USDT".to_string(),
             "symbol must use USDT quote".to_string(),
@@ -411,6 +406,7 @@ pub fn bitget_spot_order_canary_safety_plan(
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
         config_dry_run: None,
+        config_trading_enabled: None,
         execute_requested: args.execute,
         live_order_confirmed: Some(args.confirm_live_order),
         mutation_confirmed: None,
@@ -454,7 +450,8 @@ pub fn cross_arb_account_audit_safety_plan(args: CrossArbAccountAuditSafetyArgs)
         new_command: "rustcta-tools-ops audit cross-arb-account",
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
-        config_dry_run: Some(config.execution.dry_run),
+        config_dry_run: config.execution.dry_run,
+        config_trading_enabled: Some(cross_arb_trading_enabled(&config)),
         execute_requested: false,
         live_order_confirmed: None,
         mutation_confirmed: None,
@@ -515,7 +512,8 @@ pub fn cross_arb_fee_audit_safety_plan(args: CrossArbFeeAuditSafetyArgs) -> Resu
         new_command: "rustcta-tools-ops audit cross-arb-fee",
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
-        config_dry_run: Some(config.execution.dry_run),
+        config_dry_run: config.execution.dry_run,
+        config_trading_enabled: Some(cross_arb_trading_enabled(&config)),
         execute_requested: false,
         live_order_confirmed: None,
         mutation_confirmed: None,
@@ -595,7 +593,8 @@ pub fn cross_arb_order_admin_safety_plan(args: CrossArbOrderAdminSafetyArgs) -> 
         new_command: "rustcta-tools-ops admin cross-arb-order",
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
-        config_dry_run: Some(config.execution.dry_run),
+        config_dry_run: config.execution.dry_run,
+        config_trading_enabled: Some(cross_arb_trading_enabled(&config)),
         execute_requested: args.execute,
         live_order_confirmed: None,
         mutation_confirmed,
@@ -651,6 +650,7 @@ pub fn funding_arb_observe_safety_plan(args: FundingArbObserveSafetyArgs) -> Res
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
         config_dry_run: None,
+        config_trading_enabled: None,
         execute_requested: false,
         live_order_confirmed: None,
         mutation_confirmed: Some(false),
@@ -708,6 +708,7 @@ pub fn cross_arb_ws_opportunity_probe_safety_plan(
         gate_mode: SafetyGateMode::DryRunPlanOnly,
         config: args.config.display().to_string(),
         config_dry_run: None,
+        config_trading_enabled: None,
         execute_requested: false,
         live_order_confirmed: None,
         mutation_confirmed: Some(false),
@@ -757,12 +758,19 @@ fn validate_live_order_gate(execute: bool, confirm_live_order: bool) -> Result<(
     Ok(())
 }
 
-fn validate_cross_arb_dry_run_gate(execute: bool, config_dry_run: bool) -> Result<()> {
-    if execute && config_dry_run {
-        bail!("config execution.dry_run=true; set it false only for an intentional canary order");
+fn cross_arb_trading_enabled(config: &CrossArbConfigSafetyView) -> bool {
+    config
+        .execution
+        .trading_enabled
+        .unwrap_or_else(|| config.execution.dry_run.is_some_and(|dry_run| !dry_run))
+}
+
+fn validate_cross_arb_trading_gate(execute: bool, trading_enabled: bool) -> Result<()> {
+    if execute && !trading_enabled {
+        bail!("config execution.trading_enabled=false; set it true only for an intentional canary order");
     }
-    if !execute && !config_dry_run {
-        bail!("config execution.dry_run=false requires --execute --confirm-live-order");
+    if !execute && trading_enabled {
+        bail!("config execution.trading_enabled=true requires --execute --confirm-live-order");
     }
     Ok(())
 }
@@ -851,10 +859,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exchange_canary_plan_preserves_dry_run_gate() {
+    fn exchange_canary_plan_preserves_trading_gate() {
         let report = exchange_order_canary_safety_plan(ExchangeOrderCanarySafetyArgs {
             config: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"),
+                .join("../../config/cross_exchange_arbitrage_usdt.yml"),
             exchange: "bitget".to_string(),
             symbol: "DOGE/USDT".to_string(),
             side: CanarySide::Long,
@@ -868,7 +876,7 @@ mod tests {
         .expect("dry-run plan");
         let value: serde_json::Value = serde_json::from_str(&report).expect("json");
         assert_eq!(value["legacy_binary"], "exchange_order_canary");
-        assert_eq!(value["config_dry_run"], true);
+        assert_eq!(value["config_trading_enabled"], false);
         assert_eq!(value["request"]["exchange"], "bitget");
         assert!(value["planned_side_effects"].as_array().unwrap().is_empty());
     }

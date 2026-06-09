@@ -4,6 +4,8 @@
   "public_rest_runtime_enabled": true,
   "private_rest_request_spec_only": true,
   "private_write_runtime_enabled": false,
+  "batch_place_orders_native_spec_only": true,
+  "batch_place_orders_parser_fixture": true,
   "private_ws_runtime_enabled": false,
   "v2_onchain_trading_enabled": false,
   "testnet_enabled": false,
@@ -13,5 +15,10 @@
     "deposits_withdrawals_transfers",
     "broker_proxy_paths",
     "stable_testnet"
+  ],
+  "advanced_order_unsupported": [
+    "amend_order",
+    "batch_cancel_orders",
+    "place_order_list"
   ]
 }

@@ -549,35 +549,83 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
         });
     }
 
-    let cross_detail = secret_free_object([
-        ("status", legacy.get("status").cloned()),
-        ("config_summary", legacy.get("config_summary").cloned()),
-        (
-            "arbitrage_relationships",
-            legacy.get("arbitrage_relationships").cloned(),
-        ),
-        (
-            "arbitrage_opportunities",
-            legacy.get("arbitrage_opportunities").cloned(),
-        ),
-        (
-            "arbitrage_statistics",
-            legacy.get("arbitrage_statistics").cloned(),
-        ),
-        (
-            "market_snapshots",
-            legacy
-                .get("cross_arb_market_snapshots")
-                .cloned()
-                .or_else(|| legacy.get("market_snapshots").cloned()),
-        ),
-        (
-            "instrument_feasibility",
-            legacy.get("instrument_feasibility").cloned(),
-        ),
-        ("scanner", legacy.get("five_exchange_scanner").cloned()),
-        ("hedge_policy", legacy.get("hedge_policy").cloned()),
-    ]);
+    let cross_detail = legacy
+        .get("cross_arb_dashboard")
+        .or_else(|| legacy.get("cross_arb"))
+        .filter(|value| value.is_object())
+        .map(secret_free_value)
+        .unwrap_or_else(|| {
+            secret_free_object([
+                ("status", legacy.get("status").cloned()),
+                ("config_summary", legacy.get("config_summary").cloned()),
+                (
+                    "summary",
+                    legacy
+                        .get("cross_arb_summary")
+                        .cloned()
+                        .or_else(|| legacy.get("summary").cloned()),
+                ),
+                (
+                    "settings",
+                    legacy
+                        .get("cross_arb_settings")
+                        .cloned()
+                        .or_else(|| legacy.get("settings").cloned()),
+                ),
+                (
+                    "arbitrage_relationships",
+                    legacy.get("arbitrage_relationships").cloned(),
+                ),
+                (
+                    "opportunities",
+                    legacy
+                        .get("arbitrage_opportunities")
+                        .cloned()
+                        .or_else(|| legacy.get("opportunities").cloned()),
+                ),
+                (
+                    "arbitrage_opportunities",
+                    legacy.get("arbitrage_opportunities").cloned(),
+                ),
+                (
+                    "arbitrage_statistics",
+                    legacy.get("arbitrage_statistics").cloned(),
+                ),
+                (
+                    "market_snapshots",
+                    legacy
+                        .get("cross_arb_market_snapshots")
+                        .cloned()
+                        .or_else(|| legacy.get("market_snapshots").cloned()),
+                ),
+                ("exchange_status", legacy.get("exchange_status").cloned()),
+                ("private_events", legacy.get("private_events").cloned()),
+                ("risk_events", legacy.get("risk_events").cloned()),
+                ("instruments", legacy.get("instruments").cloned()),
+                (
+                    "instrument_feasibility",
+                    legacy.get("instrument_feasibility").cloned(),
+                ),
+                ("position_bundles", legacy.get("position_bundles").cloned()),
+                ("open_orders", legacy.get("open_orders").cloned()),
+                (
+                    "arbitrage_results",
+                    legacy.get("arbitrage_results").cloned(),
+                ),
+                ("profit_summary", legacy.get("profit_summary").cloned()),
+                ("account_console", legacy.get("account_console").cloned()),
+                (
+                    "account_readiness",
+                    legacy.get("account_readiness").cloned(),
+                ),
+                (
+                    "strategy_readiness",
+                    legacy.get("strategy_readiness").cloned(),
+                ),
+                ("scanner", legacy.get("five_exchange_scanner").cloned()),
+                ("hedge_policy", legacy.get("hedge_policy").cloned()),
+            ])
+        });
     if !cross_detail
         .as_object()
         .is_some_and(serde_json::Map::is_empty)

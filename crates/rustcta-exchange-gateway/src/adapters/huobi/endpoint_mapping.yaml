@@ -35,12 +35,157 @@ websocket:
   public:
     supports_subscribe: true
     supports_unsubscribe: true
-    channels: [depth, trade, ticker, kline]
+    channels: [depth, mbp, mbp_refresh, bbo, trade, ticker, kline]
     heartbeat: { direction: server_ping, ping_interval_ms: 20000, pong_timeout_ms: 30000, stale_message_ms: 30000 }
+    orderbook:
+      subscribe:
+        op_field: sub
+        request: { sub: channel, id: client_request_id }
+      spot:
+        standard_depth:
+          channel: market.{symbol}.depth.{type}
+          interval_ms: 1000
+          depth: merged_depth
+          sequence_fields: [version]
+          checksum: none
+          resync: rest_order_book_snapshot
+        mbp_incremental:
+          channel: market.{symbol}.mbp.{levels}
+          interval_ms: event_driven
+          depth: [5, 20, 150, 400]
+          sequence_fields: [seqNum, prevSeqNum]
+          checksum: none
+          resync: rest_snapshot_then_seqnum_continuity
+        mbp_refresh:
+          channel: market.{symbol}.mbp.refresh.{levels}
+          interval_ms: 100
+          depth: [5, 10, 20]
+          sequence_fields: [seqNum, prevSeqNum]
+          checksum: none
+          resync: rest_snapshot_then_seqnum_continuity
+        bbo:
+          channel: market.{symbol}.bbo
+          interval_ms: tick_by_tick
+          depth: 1
+          sequence_fields: [seqId]
+          checksum: none
+          support: mapping_only
+          reason: current shared HTX/Huobi public stream API has no dedicated BBO subscription kind
+      linear_perp:
+        standard_depth:
+          channel: market.{contract_code}.depth.{type}
+          interval_ms: 100
+          depth: [20, 150]
+          sequence_fields: [version]
+          checksum: none
+          resync: rest_order_book_snapshot
+        high_freq_depth:
+          channel: market.{contract_code}.depth.size_{size}.high_freq
+          interval_ms: 30
+          depth: [20, 150]
+          sequence_fields: [version]
+          snapshot_update_model: first_message_snapshot_then_update
+          checksum: none
+          resync: rest_snapshot_then_version_continuity
+        bbo:
+          channel: market.{contract_code}.bbo
+          interval_ms: tick_by_tick
+          depth: 1
+          sequence_fields: [version]
+          checksum: none
+          support: mapping_only
+          reason: current shared HTX/Huobi public stream API has no dedicated BBO subscription kind
   private:
     supports_subscribe: true
     supports_unsubscribe: true
     channels: [spot_orders, spot_fills, spot_accounts, orders_cross, match_orders_cross, accounts_cross, positions_cross]
+streams:
+  public:
+    operation: subscribe_public_stream
+    transport: websocket
+    product: spot | linear_perp
+    channel: public_orderbook_default
+    support: parser_only
+    request_spec_required: true
+    rate_limit_bucket: huobi.ws
+    weight: 1
+    channels:
+      - market.{symbol}.mbp.refresh.20
+      - market.{symbol}.mbp.20
+      - market.{contract_code}.depth.size_20.high_freq
+    interval_ms: [event_driven, 30, 100]
+    depth: [20]
+    sequence: [seqNum, prevSeqNum, version]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs }
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs
+      fixtures:
+        - tests/fixtures/exchanges/huobi/ws/public_book.json
+        - tests/fixtures/exchanges/huobi/ws/public_spot_mbp_refresh.json
+    orderbook_channels:
+      spot_mbp_refresh:
+        channel: market.{symbol}.mbp.refresh.20
+        support: parser_only
+        interval_ms: 100
+        depth: 20
+        sequence: [seqNum, prevSeqNum]
+        checksum: none
+        parser_fixture: tests/fixtures/exchanges/huobi/ws/public_spot_mbp_refresh.json
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_then_seqnum_continuity }
+      spot_mbp_delta:
+        channel: market.{symbol}.mbp.20
+        support: parser_only
+        interval_ms: event_driven
+        depth: 20
+        sequence: [seqNum, prevSeqNum]
+        checksum: none
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_then_seqnum_continuity }
+      spot_bbo:
+        channel: market.{symbol}.bbo
+        support: mapping_only
+        interval_ms: tick_by_tick
+        depth: 1
+        sequence: [seqId]
+        checksum: none
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_on_reconnect }
+        reason: current shared HTX/Huobi public stream API has no dedicated BBO subscription kind
+      linear_high_freq:
+        channel: market.{contract_code}.depth.size_20.high_freq
+        support: parser_only
+        interval_ms: 30
+        depth: 20
+        sequence: [version]
+        checksum: none
+        parser_fixture: tests/fixtures/exchanges/huobi/ws/public_book.json
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_then_version_continuity }
+      linear_bbo:
+        channel: market.{contract_code}.bbo
+        support: mapping_only
+        interval_ms: tick_by_tick
+        depth: 1
+        sequence: [version]
+        checksum: none
+        resync: { endpoint_operation: get_order_book, mode: rest_snapshot_on_reconnect }
+        reason: current shared HTX/Huobi public stream API has no dedicated BBO subscription kind
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_sequence_continuity
+      gap_triggers: [seqNum_gap, prevSeqNum_mismatch, version_regression, reconnect]
+  private:
+    operation: subscribe_private_stream
+    transport: websocket
+    product: spot | linear_perp
+    support: parser_only
+    auth: signed
+    credential_scopes: [read_only, trade]
+    request_spec_required: true
+    rate_limit_bucket: huobi.ws
+    weight: 1
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs }
+    resync: { endpoint_operation: get_open_orders }
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -73,6 +218,8 @@ endpoints:
     rate_limit_bucket: huobi.rest.private
     weight: 1
     request_spec_required: true
+    support: native
+    reason: "Guarded runtime reuses HTX signed spot account balance when HUOBI_SPOT_ACCOUNT_ID plus private REST credentials are configured."
   - operation: get_balances
     product: linear_perp
     market_types: [linear_perp]
@@ -84,7 +231,51 @@ endpoints:
     rate_limit_bucket: huobi.rest.private
     weight: 1
     request_spec_required: true
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/huobi/request_specs/get_balances_linear_cross.json
+    response_parser:
+      parser: rustcta_exchange_gateway::adapters::htx::private_parser::parse_balances
+      fixture: tests/fixtures/exchanges/huobi/request_specs/get_balances_linear_cross.json
+    reason: "Guarded runtime reuses HTX signed linear swap account-info when Huobi private REST credentials and explicit enable flag are configured."
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_position_info
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: "Huobi legacy profile reuses the guarded HTX signed USDT-M cross-position runtime with huobi exchange id, request-spec matching, position parser coverage, and REST readback reconciliation."
+    official_doc: https://huobiapi.github.io/docs/usdt_swap/v1/en/#general-query-cross-margin-mode-position-information
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/huobi/request_specs/get_positions_linear_cross.json, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs }
+    notes: "Reconciliation mode: REST readback; private stream hint: positions_cross.*."
+  - operation: get_fees
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_fee
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    reason: "Huobi legacy profile reuses guarded HTX signed USDT-M swap_fee runtime with huobi exchange id, contract-code request spec, maker/taker parser coverage, and read-only private REST credentials."
+    official_doc: https://huobiapi.github.io/docs/usdt_swap/v1/en/#general-query-information-on-a-user-s-commission-rate
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/huobi/request_specs/get_fees_linear_swap.json, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs }
+    response_parser: { status: implemented, parser: rustcta_exchange_gateway::adapters::htx::private_parser::parse_fee_rates, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs }
   - operation: place_order
+    support: native
     product: linear_perp
     market_types: [spot, linear_perp]
     transport: rest
@@ -96,6 +287,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: cancel_order
+    support: native
     product: linear_perp
     market_types: [spot, linear_perp]
     transport: rest
@@ -107,6 +299,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: query_order
+    support: native
     product: spot
     market_types: [spot]
     transport: rest
@@ -118,6 +311,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: query_order
+    support: native
     product: linear_perp
     market_types: [linear_perp]
     transport: rest
@@ -129,6 +323,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     product: spot
     market_types: [spot]
     transport: rest
@@ -140,6 +335,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_open_orders
+    support: native
     product: linear_perp
     market_types: [linear_perp]
     transport: rest
@@ -151,6 +347,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_recent_fills
+    support: native
     product: spot
     market_types: [spot]
     transport: rest
@@ -162,6 +359,7 @@ endpoints:
     weight: 1
     request_spec_required: true
   - operation: get_recent_fills
+    support: native
     product: linear_perp
     market_types: [linear_perp]
     transport: rest

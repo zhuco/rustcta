@@ -3,9 +3,15 @@ exchange: binance
 adapter: rustcta_exchange_gateway::adapters::binance
 market_types:
   - spot
+  - perpetual
 rest:
   base_url: https://api.binance.com
   testnet_base_url: https://testnet.binance.vision
+base_urls:
+  spot_public_rest: https://api.binance.com
+  usdm_public_rest: https://fapi.binance.com
+  spot_public_ws: wss://stream.binance.com:9443/ws
+  usdm_public_ws: wss://fstream.binance.com/ws
 rate_limits:
   buckets:
     public_ip:
@@ -39,11 +45,28 @@ reconciliation:
   retry_policy: retry_rate_limited_and_transient
 batch:
   place_orders:
-    support: unsupported
-    reason: batch place order is not implemented
+    support: native
+    product: perpetual
+    endpoint: /fapi/v1/batchOrders
+    atomicity: partial
+    max_items: 5
+    same_market_type_required: true
+    same_symbol_required: false
+    partial_failure: true
+    spot_support: unsupported
+    spot_reason: Binance Spot has no shared native batch place endpoint in this adapter.
   cancel_orders:
-    support: unsupported
-    reason: batch cancel order is not implemented
+    support: native
+    product: perpetual
+    endpoint: /fapi/v1/batchOrders
+    atomicity: partial
+    max_items: 10
+    same_market_type_required: true
+    same_symbol_required: true
+    partial_failure: true
+    identifiers: [orderIdList, origClientOrderIdList]
+    spot_support: unsupported
+    spot_reason: Binance Spot has no shared native batch cancel endpoint in this adapter.
   cancel_all_orders:
     support: native
     atomicity: partial
@@ -51,18 +74,111 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: rest_fallback
+    urls:
+      spot: wss://stream.binance.com:9443/ws
+      perpetual: wss://fstream.binance.com/ws
+    subscribe:
+      method: SUBSCRIBE
+      params: [stream_name]
+      id: client_request_id
+    channels:
+      book_ticker:
+        stream: <symbol>@bookTicker
+        products: [spot, perpetual]
+        interval_ms: realtime
+        depth: 1
+        sequence: u
+        checksum: none
+      partial_depth:
+        stream: <symbol>@depth5|10|20[@100ms]
+        products: [spot, perpetual]
+        interval_ms: [100, 1000]
+        depth: [5, 10, 20]
+        sequence: lastUpdateId
+        checksum: none
+      diff_depth:
+        stream: <symbol>@depth[@100ms]
+        products: [spot, perpetual]
+        interval_ms: [100, 1000]
+        depth: delta
+        sequence: U/u
+        checksum: none
+    sequence:
+      snapshot_field: lastUpdateId
+      delta_fields: [U, u]
+      futures_previous_update_field: pu
+      gap_policy: REST depth snapshot + buffered delta replay
+    fixtures:
+      subscribe_payload: crates/rustcta-exchange-gateway/src/adapters/binance/public_tests.rs
+      parser_snapshot: tests/fixtures/exchanges/binance/ws/public_depth_snapshot.json
+      parser_delta: tests/fixtures/exchanges/binance/ws/public_depth_delta.json
+      parser_book_ticker: tests/fixtures/exchanges/binance/ws/public_book_ticker.json
     heartbeat:
       required: true
       direction: server_ping
-      interval_ms: 180000
-      timeout_ms: 600000
+      interval_ms: 20000
+      timeout_ms: 60000
+      pong_payload_echo: true
     resync: rest_order_book_snapshot
   private:
     support: unsupported
     auth: listen_key
     renewal_ms: 1800000
     fallback: rest_reconciliation
+unsupported:
+  - operation: coin_m_product
+    status: delegated
+    delegate_adapter: binancecoinm
+    reason: Binance COIN-M inverse perpetual and dated futures are handled by the separate binancecoinm adapter; this binance profile maps Spot and USD-M.
+  - operation: options_product
+    status: project_unimplemented
+    product_lines: [options]
+    boundary: project_unimplemented_product_line
+    official_gap: binance_options_api
+    source_boundary_fixture: tests/fixtures/exchanges/binance/request_specs/product_line_options_boundary.json
+    current_scope: "Binance Spot and USD-M Futures/Perpetual REST plus public order-book streams; COIN-M is delegated to binancecoinm."
+    runtime_gap: "Binance Options has separate option instrument metadata, order book/market data, account position/risk readback, and option order lifecycle surfaces that are not wired into this adapter."
+    required_endpoints:
+      market_metadata: [option_exchange_info, option_instrument_specs, option_expiry_underlying_contracts]
+      public_market_data: [option_depth, option_ticker, option_trades, option_mark_price]
+      private_account: [option_account, option_positions, option_risk_or_margin, option_balances]
+      private_order_lifecycle: [option_place_order, option_cancel_order, option_query_order, option_open_orders, option_fills]
+    unsafe_to_promote_without: [option symbol and expiry parser fixtures, option order-book parser coverage, option account position/risk parser coverage, signed option order lifecycle request specs, post-write query/open/fills reconciliation, credential scope and eligibility guard]
+    reason: Binance Options are an official product line, but this adapter currently maps Spot and USD-M futures/perpetuals only; do not mark it unsupported.
+streams:
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: spot
+    channel: public_orderbook_spot
+    support: rest_fallback
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels: [bookTicker, depth5, depth10, depth20, diff_depth]
+    interval_ms: [100, 1000]
+    depth: [1, 5, 10, 20, delta]
+    sequence: [lastUpdateId, U, u]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/binance/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/binance/ws/public_depth_delta.json }
+    resync: { endpoint_operation: get_order_book }
+  - operation: subscribe_public_stream
+    transport: websocket
+    product: perpetual
+    channel: public_orderbook_usdm
+    support: rest_fallback
+    request_spec_required: true
+    rate_limit_bucket: public_ip
+    weight: 1
+    channels: [bookTicker, depth5, depth10, depth20, diff_depth]
+    interval_ms: [100, 250, 500]
+    depth: [1, 5, 10, 20, delta]
+    sequence: [lastUpdateId, U, u, pu]
+    checksum: none
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/binance/public_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/binance/ws/public_depth_delta.json }
+    resync: { endpoint_operation: get_order_book }
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -187,6 +303,134 @@ endpoints:
     product: spot
     method: GET
     path: /api/v3/myTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+  - operation: get_symbol_rules
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/exchangeInfo
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 10
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 5
+    request_spec_required: false
+  - operation: get_balances
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v2/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+  - operation: get_positions
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v2/positionRisk
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/commissionRate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /fapi/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: batch_place_orders
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /fapi/v1/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 5
+    request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /fapi/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: batch_cancel_orders
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /fapi/v1/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /fapi/v1/allOpenOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 4
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 6
+    request_spec_required: true
+  - operation: get_recent_fills
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/userTrades
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: signed_uid

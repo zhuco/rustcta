@@ -1,6 +1,7 @@
 use rustcta_exchange_api::{
-    BalancesRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest,
-    PositionsRequest, QueryOrderRequest, QuoteMarketOrderRequest, EXCHANGE_API_SCHEMA_VERSION,
+    BalancesRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
+    PlaceOrderRequest, PositionsRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
@@ -50,6 +51,34 @@ fn bitmart_capabilities_v2_should_declare_ws_rest_fallback_and_boundaries() {
     assert!(capabilities.supports_quote_market_order);
     assert!(capabilities.supports_batch_cancel_order);
     assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_fees);
+}
+
+#[tokio::test]
+async fn bitmart_fees_should_remain_offline_source_boundary() {
+    let adapter = BitmartGatewayAdapter::new(BitmartGatewayConfig {
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        memo: Some("memo".to_string()),
+        enabled_private_rest: true,
+        ..BitmartGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let error = adapter
+        .get_fees(FeesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fees"),
+            symbols: vec![spot_symbol_scope()],
+        })
+        .await
+        .expect_err("fee schedule is offline only");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "bitmart.fees_config_source_only"
+        }
+    ));
 }
 
 #[tokio::test]

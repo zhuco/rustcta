@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::ExchangeId;
 use serde_json::Value;
+
+use super::signing::{sign_orderly_request, OrderlyAuth};
 
 #[derive(Clone)]
 pub struct ModetradeRest {
@@ -46,6 +49,44 @@ impl ModetradeRest {
         parse_response(&self.exchange_id, response).await
     }
 
+    pub async fn send_signed_get(
+        &self,
+        path: &str,
+        params: &BTreeMap<String, String>,
+        auth: &OrderlyAuth,
+    ) -> ExchangeApiResult<Value> {
+        let path = normalized_path(path);
+        let query = encoded_query(params);
+        let path_with_query = if query.is_empty() {
+            path
+        } else {
+            format!("{path}?{query}")
+        };
+        let timestamp_ms = chrono::Utc::now().timestamp_millis();
+        let signed = sign_orderly_request(auth, timestamp_ms, "GET", &path_with_query, "")?;
+        let response = self
+            .http
+            .get(format!(
+                "{}{}",
+                self.rest_base_url.trim_end_matches('/'),
+                path_with_query
+            ))
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .header("orderly-account-id", signed.orderly_account_id)
+            .header("orderly-key", signed.orderly_key)
+            .header("orderly-timestamp", signed.timestamp_ms.to_string())
+            .header("orderly-signature", signed.orderly_signature)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(&self.exchange_id, response).await
+    }
+
     pub fn public_info_path() -> &'static str {
         "/v1/public/info"
     }
@@ -61,6 +102,14 @@ impl ModetradeRest {
             normalized_path(path)
         )
     }
+}
+
+fn encoded_query(params: &BTreeMap<String, String>) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in params {
+        serializer.append_pair(key, value);
+    }
+    serializer.finish()
 }
 
 async fn parse_response(

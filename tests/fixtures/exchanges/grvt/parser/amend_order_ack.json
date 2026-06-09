@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "result": {
+    "order": {
+      "order_id": "grvt-order-1001",
+      "client_order_id": "grvt-amend-1",
+      "instrument": "BTC_USDT_Perp",
+      "side": "BUY",
+      "order_type": "LIMIT",
+      "status": "OPEN",
+      "size": "0.002",
+      "limit_price": "65000",
+      "filled_size": "0",
+      "reduce_only": false,
+      "post_only": false,
+      "created_at": "2026-06-08T12:00:00Z",
+      "updated_at": "2026-06-08T12:00:03Z"
+    }
+  }
+}

@@ -784,7 +784,7 @@ cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- ledger summar
 cargo check -p rustcta-control-api
 cargo test -p rustcta-control-api
 cargo check -p rustcta-control-api-app
-RUSTCTA_CONTROL_API_BIND=127.0.0.1:0 RUSTCTA_CONTROL_API_AGENT_ID=local-agent RUSTCTA_CONTROL_API_TENANT_ID=local RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=<tmp>/audit.jsonl RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=<tmp>/registry.json RUSTCTA_CONTROL_API_STRATEGY_LOG_PATH=<tmp>/strategy.log RUSTCTA_CONTROL_API_STATIC_DIR=<tmp>/dist timeout 2s cargo run -q -p rustcta-control-api-app --bin rustcta-control-api
+scripts/control_api_smoke_test.sh
 cargo test -p rustcta-event-ledger
 cargo test -p rustcta-execution-router
 cargo test -p rustcta-supervisor
@@ -815,7 +815,7 @@ cargo test --test backtest_cli
 cargo check -p rustcta-control-api
 cargo test -p rustcta-control-api
 cargo check -p rustcta-control-api-app
-RUSTCTA_CONTROL_API_BIND=127.0.0.1:0 RUSTCTA_CONTROL_API_AGENT_ID=local-agent RUSTCTA_CONTROL_API_TENANT_ID=local RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=<tmp>/dashboard_snapshot.json RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=<tmp>/audit.jsonl RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=<tmp>/registry.json RUSTCTA_CONTROL_API_STRATEGY_LOG_PATH=<tmp>/strategy.log RUSTCTA_CONTROL_API_STATIC_DIR=<tmp>/dist timeout 2s cargo run -q -p rustcta-control-api-app --bin rustcta-control-api
+scripts/control_api_smoke_test.sh
 cargo run -q -p rustcta-tools-ops -- verify-retired-src
 cargo run -q -p rustcta-tools-ops -- verify-retired-src --target tools
 cargo run -q -p rustcta-tools-ops -- smart-money binance-collector --config config/smart_money.yml

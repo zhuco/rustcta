@@ -23,6 +23,37 @@ use super::WhiteBitGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisorAction};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhiteBitPublicOrderBookWsPolicy {
+    pub channel: &'static str,
+    pub subscribe_params: &'static str,
+    pub depth: u32,
+    pub interval_ms: u64,
+    pub snapshot_keepalive_ms: u64,
+    pub sequence_field: &'static str,
+    pub continuity: &'static str,
+    pub checksum: Option<&'static str>,
+    pub update_semantics: &'static str,
+    pub rest_snapshot_endpoint: &'static str,
+    pub resync: &'static str,
+}
+
+pub fn whitebit_public_order_book_ws_policy() -> WhiteBitPublicOrderBookWsPolicy {
+    WhiteBitPublicOrderBookWsPolicy {
+        channel: "depth_subscribe",
+        subscribe_params: "[market, 100, \"0\", true]",
+        depth: 100,
+        interval_ms: 100,
+        snapshot_keepalive_ms: 10_000,
+        sequence_field: "update_id",
+        continuity: "next update_id must equal previous update_id + 1",
+        checksum: None,
+        update_semantics: "absolute quantity at changed price levels; quantity 0 removes the level",
+        rest_snapshot_endpoint: "GET /api/v4/public/orderbook/{market}",
+        resync: "fetch REST order book snapshot on connect/reconnect, resubscribe after update_id gap/regression, and rebuild from REST snapshot",
+    }
+}
+
 impl WhiteBitGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -809,7 +840,12 @@ fn normalize_depth_message(value: &Value) -> Value {
                 "bids": book.get("bids").cloned().unwrap_or_else(|| json!([])),
                 "asks": book.get("asks").cloned().unwrap_or_else(|| json!([])),
             },
-            "last": book.get("last").or_else(|| book.get("sequence")).cloned().unwrap_or(Value::Null),
+            "last": book
+                .get("update_id")
+                .or_else(|| book.get("last"))
+                .or_else(|| book.get("sequence"))
+                .cloned()
+                .unwrap_or(Value::Null),
             "timestamp": book.get("timestamp").or_else(|| book.get("time")).cloned().unwrap_or(Value::Null),
         }
     })

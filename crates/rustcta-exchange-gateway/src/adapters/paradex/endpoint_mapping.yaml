@@ -30,8 +30,38 @@ batch:
   place_orders: { support: unsupported, reason: paradex.batch_place_orders_unverified }
   cancel_orders: { support: unsupported, reason: paradex.batch_cancel_orders_unverified }
 websocket:
-  public: { support: native, channels: [order_book, trades, markets_summary, bbo], heartbeat: client_ping }
+  public:
+    support: native
+    channels: [order_book, trades, markets_summary, bbo]
+    heartbeat: client_ping
+    order_book:
+      channel: "order_book.{market_symbol}.{feed_type}@15@{refresh_rate}"
+      feed_types: [snapshot, deltas, interactive]
+      refresh_rate_ms: [50, 100]
+      depths: [15]
+      sequence: seq_no
+      checksum: unsupported
+      resync: seq_gap_resubscribe_snapshot
+      notes: "order_book fixed 15 levels with 50ms/100ms refresh_rate; BBO channel remains 1 level."
+    bbo:
+      channel: "bbo.{market_symbol}"
+      depths: [1]
   private: { support: native_with_jwt, channels: [user.orders, user.trades, user.positions, user.balance], auth_renewal: relogin }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Paradex Spot Trading exists as a separate product line, but this adapter scope is perpetual/options markets, order book, JWT/Stark private order/account boundaries only; remaining Spot runtime work is spot market filters, spot order-book public parser, spot balance private specs, spot order lifecycle/orders/open-orders/fills private specs, JWT/Stark product-scope auth, and REST/WS reconciliation."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/paradex/request_specs/product_line_source_boundary.json
+    current_scope: "Paradex perpetual/options markets, order book, JWT/Stark private order/account boundaries."
+    runtime_gap: "Spot market filters, spot order book, spot order lifecycle, and spot account/fill reconciliation are not wired."
+    required_endpoints: [spot_markets, spot_orderbook, spot_orders, spot_open_orders, spot_fills, spot_balance]
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：fee 未映射到 shared trait，private JWT/Stark gated。"
+  - operation: get_balances
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/paradex/request_specs/get_balances.json
+    reason: "Official private account/balance readback exists via private WS user.balance and GET /balance request spec, but shared get_balances runtime is project-unimplemented pending JWT/Stark auth guard, balance parser, and reconciliation."
 endpoints:
   - operation: symbol_rules
     product: perpetual
@@ -91,6 +121,23 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: native
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: GET
+    path: /balance
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: paradex_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "Paradex GET /balance and private WS user.balance are fixture-backed, but shared get_balances runtime remains disabled pending JWT/Stark auth guard, balance parser, and REST/WS reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/paradex/request_specs/get_balances.json
   - operation: place_order
     product: perpetual
     market_types: [perpetual, option]

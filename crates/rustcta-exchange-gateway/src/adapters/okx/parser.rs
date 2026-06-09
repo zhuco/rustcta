@@ -97,7 +97,7 @@ fn parse_symbol_rule(
         supports_market_orders: tradable,
         supports_limit_orders: tradable,
         supports_post_only: tradable,
-        supports_reduce_only: market_type == MarketType::Perpetual,
+        supports_reduce_only: is_okx_derivative_market(market_type),
         updated_at: Utc::now(),
     })
 }
@@ -134,6 +134,10 @@ pub fn parse_orderbook_snapshot(
         .get("ts")
         .and_then(value_as_i64)
         .and_then(DateTime::<Utc>::from_timestamp_millis);
+    snapshot.sequence = payload
+        .get("seqId")
+        .or_else(|| payload.get("seqid"))
+        .and_then(value_as_u64);
     Ok(snapshot)
 }
 
@@ -162,6 +166,13 @@ pub fn normalize_okx_symbol_for_market(
         }
         return Ok(upper);
     }
+    if market_type == MarketType::Futures {
+        return split_compact_futures_symbol(&normalized_key).ok_or_else(|| {
+            ExchangeApiError::InvalidRequest {
+                message: format!("cannot infer OKX futures instId from {symbol}"),
+            }
+        });
+    }
     let normalized =
         split_compact_symbol(&normalized_key).ok_or_else(|| ExchangeApiError::InvalidRequest {
             message: format!("cannot infer OKX instId from {symbol}"),
@@ -176,7 +187,9 @@ pub fn normalize_okx_symbol_for_market(
 pub fn okx_inst_type(market_type: MarketType) -> ExchangeApiResult<&'static str> {
     match market_type {
         MarketType::Spot => Ok("SPOT"),
+        MarketType::Futures => Ok("FUTURES"),
         MarketType::Perpetual => Ok("SWAP"),
+        MarketType::Option => Ok("OPTION"),
         _ => Err(ExchangeApiError::Unsupported {
             operation: "okx.unsupported_market_type",
         }),
@@ -185,9 +198,16 @@ pub fn okx_inst_type(market_type: MarketType) -> ExchangeApiResult<&'static str>
 
 pub fn okx_td_mode(market_type: MarketType) -> &'static str {
     match market_type {
-        MarketType::Perpetual => "cross",
+        MarketType::Futures | MarketType::Perpetual | MarketType::Option => "cross",
         _ => "cash",
     }
+}
+
+pub fn is_okx_derivative_market(market_type: MarketType) -> bool {
+    matches!(
+        market_type,
+        MarketType::Futures | MarketType::Perpetual | MarketType::Option
+    )
 }
 
 pub fn split_okx_inst_id(symbol: &str) -> Option<(String, String)> {
@@ -266,6 +286,22 @@ fn split_compact_symbol(symbol: &str) -> Option<String> {
     })
 }
 
+fn split_compact_futures_symbol(symbol: &str) -> Option<String> {
+    const SETTLE_QUOTES: [&str; 3] = ["USDT", "USDC", "USD"];
+    SETTLE_QUOTES.iter().find_map(|quote| {
+        let quote_index = symbol.find(quote)?;
+        let base = &symbol[..quote_index];
+        let expiry = &symbol[(quote_index + quote.len())..];
+        if base.is_empty()
+            || !(expiry.len() == 6 || expiry.len() == 8)
+            || !expiry.chars().all(|ch| ch.is_ascii_digit())
+        {
+            return None;
+        }
+        Some(format!("{base}-{quote}-{expiry}"))
+    })
+}
+
 pub(super) fn string_or_number(value: Option<&Value>) -> Option<String> {
     value.and_then(|value| match value {
         Value::String(text) => Some(text.clone()),
@@ -284,6 +320,10 @@ fn number_from_value(value: &Value) -> Option<f64> {
 
 fn value_as_i64(value: &Value) -> Option<i64> {
     value.as_i64().or_else(|| value.as_str()?.parse().ok())
+}
+
+fn value_as_u64(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_str()?.parse().ok())
 }
 
 fn precision_from_step(step: Option<&str>) -> Option<u32> {

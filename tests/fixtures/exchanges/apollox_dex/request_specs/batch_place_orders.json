@@ -1,0 +1,27 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/fapi/v1/batchOrders",
+  "auth": "signed",
+  "query": {
+    "batchOrders": {
+      "match": "exact",
+      "value": "[{\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"timeInForce\":\"GTC\",\"quantity\":\"0.01\",\"price\":\"65000.5\",\"reduceOnly\":\"false\",\"newClientOrderId\":\"cli-apollox-batch-1\"}]"
+    },
+    "timestamp": { "match": "exact", "value": "1700000000000" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "apollox_dex/batch_place_orders_hmac"
+}

@@ -223,7 +223,7 @@ impl ExchangeClient for HyperliquidGatewayAdapter {
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
         capabilities.supports_positions = private;
-        capabilities.supports_fees = true;
+        capabilities.supports_fees = false;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
         capabilities.supports_cancel_all_orders = private;
@@ -336,7 +336,10 @@ impl ExchangeClient for HyperliquidGatewayAdapter {
     }
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
-        self.get_fees_impl(request).await
+        let _ = request;
+        Err(ExchangeApiError::Unsupported {
+            operation: "hyperliquid.fee_schedule_source_boundary_only",
+        })
     }
 
     async fn place_order(

@@ -1,0 +1,39 @@
+{
+  "exchange": "lighter",
+  "operation": "get_balances",
+  "status": "request_spec_only",
+  "method": "GET",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/account",
+  "query": {
+    "account_index": "redacted-account-index"
+  },
+  "auth": "bearer",
+  "headers": {
+    "Authorization": { "match": "non_empty" }
+  },
+  "request_spec_required": true,
+  "account_scope": {
+    "required": ["account_index", "bearer_token"],
+    "credential_scopes": ["read_only"],
+    "sub_account_mapping": "required"
+  },
+  "source_boundary": {
+    "kind": "account_api_balance_readback",
+    "account_scope": ["account_index"],
+    "ws_reconciliation_source": "account_all_positions/account updates",
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
+  "response_sample": {
+    "account_index": 123,
+    "collateral": "1000.000000",
+    "available_balance": "800.000000",
+    "total_account_value": "1100.000000",
+    "positions": []
+  },
+  "runtime_boundary": "Lighter get_balances is request-spec only until bearer token smoke, account/sub-account parser, asset precision mapping, and WS/REST reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

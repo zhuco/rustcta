@@ -1,13 +1,12 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, EndpointAuth, EndpointCapability, EndpointTransport,
-    ExchangeClientCapabilities, HistoryCapability, StreamRuntimeCapability,
+    BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
+    EndpointTransport, ExchangeClientCapabilities, HistoryCapability, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
 pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapabilities) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
-    capabilities.capabilities_v2.private_rest =
-        CapabilitySupport::unsupported("bitbns private REST is audited but disabled");
+    capabilities.capabilities_v2.private_rest = CapabilitySupport::native();
     capabilities.capabilities_v2.public_streams =
         CapabilitySupport::unsupported("bitbns Socket.IO helpers are spec-only in this adapter");
     capabilities.capabilities_v2.private_streams =
@@ -19,11 +18,20 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
         BatchCapability::unsupported("bitbns batch cancel is unsupported in scan-only adapter");
     capabilities.capabilities_v2.cancel_all_orders =
         CapabilitySupport::unsupported("bitbns cancel-all is unsupported in scan-only adapter");
-    capabilities.capabilities_v2.order_history =
-        HistoryCapability::unsupported("bitbns order history requires private REST review");
-    capabilities.capabilities_v2.fills_history =
-        HistoryCapability::unsupported("bitbns fills require private REST review");
-    capabilities.capabilities_v2.credential_scopes = Vec::new();
+    capabilities.capabilities_v2.order_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        supports_limit: false,
+        max_limit: None,
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.fills_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        supports_limit: false,
+        max_limit: None,
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.credential_scopes =
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade];
     capabilities.capabilities_v2.endpoints = endpoints();
     capabilities.apply_v2_to_legacy_flags();
     capabilities.supports_public_rest = true;
@@ -61,17 +69,54 @@ fn endpoints() -> Vec<EndpointCapability> {
         },
         EndpointCapability {
             operation: "private_rest".to_string(),
-            support: CapabilitySupport::unsupported(
-                "bitbns private REST is intentionally not mapped to ExchangeClient",
-            ),
+            support: CapabilitySupport::native(),
             market_types: vec![MarketType::Spot],
             transport: EndpointTransport::Rest,
-            method: None,
-            path: None,
+            method: Some("POST".to_string()),
+            path: Some("/{method}/{symbol}".to_string()),
             auth: EndpointAuth::Hmac,
-            credential_scopes: Vec::new(),
-            rate_limit_bucket: Some("bitbns_private_disabled".to_string()),
-            weight: Some(0),
+            credential_scopes: vec![CredentialScope::ReadOnly, CredentialScope::Trade],
+            rate_limit_bucket: Some("bitbns_private".to_string()),
+            weight: Some(1),
+            supports_testnet: false,
+        },
+        EndpointCapability {
+            operation: "query_order".to_string(),
+            support: CapabilitySupport::native(),
+            market_types: vec![MarketType::Spot],
+            transport: EndpointTransport::Rest,
+            method: Some("POST".to_string()),
+            path: Some("/orderStatus/{symbol}".to_string()),
+            auth: EndpointAuth::Hmac,
+            credential_scopes: vec![CredentialScope::ReadOnly],
+            rate_limit_bucket: Some("bitbns_private".to_string()),
+            weight: Some(1),
+            supports_testnet: false,
+        },
+        EndpointCapability {
+            operation: "get_open_orders".to_string(),
+            support: CapabilitySupport::native(),
+            market_types: vec![MarketType::Spot],
+            transport: EndpointTransport::Rest,
+            method: Some("POST".to_string()),
+            path: Some("/listOpenOrders/{symbol}".to_string()),
+            auth: EndpointAuth::Hmac,
+            credential_scopes: vec![CredentialScope::ReadOnly],
+            rate_limit_bucket: Some("bitbns_private".to_string()),
+            weight: Some(1),
+            supports_testnet: false,
+        },
+        EndpointCapability {
+            operation: "get_recent_fills".to_string(),
+            support: CapabilitySupport::native(),
+            market_types: vec![MarketType::Spot],
+            transport: EndpointTransport::Rest,
+            method: Some("POST".to_string()),
+            path: Some("/listExecutedOrders/{symbol}".to_string()),
+            auth: EndpointAuth::Hmac,
+            credential_scopes: vec![CredentialScope::ReadOnly],
+            rate_limit_bucket: Some("bitbns_private".to_string()),
+            weight: Some(1),
             supports_testnet: false,
         },
     ]

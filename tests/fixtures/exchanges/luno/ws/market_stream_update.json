@@ -1,0 +1,26 @@
+{
+  "sequence": "24353",
+  "trade_updates": [
+    {
+      "sequence": 7000001,
+      "base": "0.05000000",
+      "counter": "60000.00",
+      "maker_order_id": "offline-bid-1",
+      "taker_order_id": "offline-taker-1"
+    }
+  ],
+  "create_update": {
+    "order_id": "offline-bid-2",
+    "type": "BID",
+    "price": "1199900.00",
+    "volume": "0.07500000"
+  },
+  "delete_update": null,
+  "status_update": null,
+  "timestamp": 1700000000100,
+  "fixture_notes": {
+    "semantics": "Luno market stream updates are atomic and must be applied only when sequence is exactly previous + 1.",
+    "checksum": null,
+    "resync": "Close and reconnect on out-of-order sequence; REST /api/1/orderbook is only a fallback snapshot source."
+  }
+}

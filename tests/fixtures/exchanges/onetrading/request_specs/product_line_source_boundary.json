@@ -1,0 +1,65 @@
+{
+  "exchange": "onetrading",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "futures_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://docs.onetrading.com/rest/public/instruments",
+      "evidence": "One Trading instruments expose typed instruments; the current adapter filters to type=SPOT and leaves futures/perpetual out of runtime."
+    }
+  ],
+  "runtime_isolation": "One Trading futures/perpetual instruments, positions and margin state need a separate product profile; spot filtering must remain enforced and non-SPOT instruments must not reach spot order parsers.",
+  "unsupported_runtime_reason": "Official futures/perpetual instruments exist, but this adapter only maps type=SPOT metadata/order books and lacks futures account, position, margin, fee and order lifecycle runtime.",
+  "required_endpoints": {
+    "market_metadata": [
+      "futures/perpetual instruments",
+      "contract specifications",
+      "settlement and precision rules"
+    ],
+    "public_market_data": [
+      "futures/perpetual order book",
+      "futures/perpetual ticker",
+      "futures/perpetual trades"
+    ],
+    "private_account": [
+      "futures/perpetual balances or margin account",
+      "positions",
+      "risk or leverage limits",
+      "account-effective futures/perpetual fees"
+    ],
+    "private_order_lifecycle": [
+      "futures/perpetual place order",
+      "futures/perpetual cancel order",
+      "open orders",
+      "order query",
+      "recent fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "bearer-token permission audit for futures/perpetual trading",
+    "product-scope guard distinct from type=SPOT REST calls",
+    "dry-run or sandbox guard before enabling live writes"
+  ],
+  "unsafe_to_promote_without": [
+    "futures/perpetual instrument metadata fixtures",
+    "position, margin and risk parser coverage",
+    "bearer-token permission validation",
+    "write/readback reconciliation for futures/perpetual order lifecycle"
+  ],
+  "runtime_gaps": [
+    "product-scope guard distinct from spot type=SPOT REST calls",
+    "futures/perpetual symbol precision and contract sizing parser",
+    "position, margin and risk parser",
+    "bearer-token permission audit for futures/perpetual trading",
+    "write/readback reconciliation for futures/perpetual order lifecycle",
+    "dry-run or sandbox guard before enabling live writes"
+  ],
+  "remaining_work": [
+    "map futures/perpetual instrument metadata",
+    "add position, margin and fee readbacks",
+    "add futures order lifecycle request specs and reconciliation"
+  ]
+}

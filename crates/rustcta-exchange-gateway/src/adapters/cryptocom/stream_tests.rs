@@ -6,9 +6,13 @@ use rustcta_types::{AccountId, OrderSide, OrderStatus};
 use serde_json::json;
 
 use super::streams::{
-    cryptocom_private_subscribe_payload, cryptocom_public_subscribe_payload,
-    cryptocom_ws_auth_payload, parse_cryptocom_private_stream_message,
-    parse_cryptocom_public_stream_message, CryptoComPublicStreamMessage, CryptoComWsSessionEvent,
+    cryptocom_orderbook_depth, cryptocom_orderbook_sequence_action,
+    cryptocom_orderbook_update_frequency_ms, cryptocom_private_subscribe_payload,
+    cryptocom_public_orderbook_delta_subscribe_payload, cryptocom_public_orderbook_ws_policy,
+    cryptocom_public_subscribe_payload, cryptocom_ws_auth_payload,
+    parse_cryptocom_orderbook_delta_details, parse_cryptocom_private_stream_message,
+    parse_cryptocom_public_stream_message, CryptoComOrderBookSequenceAction,
+    CryptoComPublicStreamMessage, CryptoComWsSessionEvent,
 };
 use super::test_support::{context, exchange_id, symbol_scope};
 use super::{CryptoComGatewayAdapter, CryptoComGatewayConfig};
@@ -22,6 +26,11 @@ fn cryptocom_public_stream_payloads_should_match_official_channels() {
         book_payload["params"]["channels"],
         json!(["book.BTC_USDT.50"])
     );
+    assert_eq!(
+        book_payload["params"]["book_subscription_type"],
+        "SNAPSHOT_AND_UPDATE"
+    );
+    assert_eq!(book_payload["params"]["book_update_frequency"], 10);
 
     let trades = public_subscription(PublicStreamKind::Trades);
     let trades_payload = cryptocom_public_subscribe_payload(&trades, 2).expect("trades");
@@ -37,6 +46,83 @@ fn cryptocom_public_stream_payloads_should_match_official_channels() {
     assert_eq!(
         candle_payload["params"]["channels"],
         json!(["candlestick.1m.BTC_USDT"])
+    );
+}
+
+#[test]
+fn cryptocom_public_orderbook_ws_policy_should_document_delta_depth_frequency_and_resync() {
+    let policy = cryptocom_public_orderbook_ws_policy();
+    assert_eq!(policy.channel_template, "book.{instrument_name}.{depth}");
+    assert_eq!(policy.subscription_type, "SNAPSHOT_AND_UPDATE");
+    assert_eq!(policy.supported_depths, &[10, 50]);
+    assert_eq!(policy.supported_update_frequencies_ms, &[10, 100]);
+    assert_eq!(policy.sequence_fields, &["u", "pu"]);
+    assert!(policy.checksum.is_none());
+    assert!(policy
+        .resync_strategy
+        .contains("pu equals the previous local u"));
+
+    assert_eq!(cryptocom_orderbook_depth(10).expect("depth"), 10);
+    assert_eq!(
+        cryptocom_orderbook_update_frequency_ms(100).expect("frequency"),
+        100
+    );
+    assert!(cryptocom_orderbook_depth(20).is_err());
+    assert!(cryptocom_orderbook_update_frequency_ms(500).is_err());
+}
+
+#[test]
+fn cryptocom_public_orderbook_delta_subscription_should_match_snapshot_and_update_fixture() {
+    let payload = cryptocom_public_orderbook_delta_subscribe_payload(&symbol_scope(), 42, 10, 100)
+        .expect("payload");
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/cryptocom/ws/public_book_delta_subscribe.json"
+    ))
+    .expect("fixture");
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn cryptocom_orderbook_delta_parser_should_extract_u_pu_and_rebuild_decision() {
+    let exchange = exchange_id();
+    let symbol = symbol_scope();
+    let snapshot_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/cryptocom/ws/public_book_delta_snapshot.json"
+    ))
+    .expect("snapshot fixture");
+    let snapshot =
+        parse_cryptocom_orderbook_delta_details(&exchange, symbol.clone(), &snapshot_fixture)
+            .expect("snapshot");
+    assert_eq!(snapshot.update_id, Some(100));
+    assert_eq!(snapshot.previous_update_id, None);
+    assert_eq!(snapshot.update_type.as_deref(), Some("SNAPSHOT"));
+    assert_eq!(snapshot.snapshot.sequence, Some(100));
+    assert_eq!(
+        cryptocom_orderbook_sequence_action(None, snapshot.previous_update_id, snapshot.update_id),
+        CryptoComOrderBookSequenceAction::AcceptSnapshotOrFirstUpdate
+    );
+
+    let update_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/cryptocom/ws/public_book_delta_update.json"
+    ))
+    .expect("update fixture");
+    let update = parse_cryptocom_orderbook_delta_details(&exchange, symbol, &update_fixture)
+        .expect("update");
+    assert_eq!(update.update_id, Some(101));
+    assert_eq!(update.previous_update_id, Some(100));
+    assert_eq!(update.update_type.as_deref(), Some("UPDATE"));
+    assert_eq!(update.snapshot.bids[0].price, 65000.5);
+    assert_eq!(
+        cryptocom_orderbook_sequence_action(
+            snapshot.update_id,
+            update.previous_update_id,
+            update.update_id,
+        ),
+        CryptoComOrderBookSequenceAction::ApplyUpdate
+    );
+    assert_eq!(
+        cryptocom_orderbook_sequence_action(Some(99), update.previous_update_id, update.update_id),
+        CryptoComOrderBookSequenceAction::RebuildFromSnapshot
     );
 }
 

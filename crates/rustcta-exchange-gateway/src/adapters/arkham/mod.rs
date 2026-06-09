@@ -19,6 +19,7 @@ use crate::GatewayExchangeStatus;
 mod config;
 mod parser;
 mod private;
+mod private_parser;
 #[cfg(test)]
 mod private_tests;
 mod public;
@@ -44,6 +45,8 @@ impl ArkhamGatewayAdapter {
         let rest = ArkhamPublicRest::new(
             exchange_id.clone(),
             config.rest_base_url.clone(),
+            config.api_key.clone(),
+            config.api_secret.clone(),
             config.request_timeout_ms,
         )?;
         Ok(Self {
@@ -113,7 +116,8 @@ impl ExchangeClient for ArkhamGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = self.config.enabled_public_rest;
-        capabilities.supports_private_rest = false;
+        let private_read_enabled = self.config.private_rest_enabled();
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities =
@@ -125,9 +129,9 @@ impl ExchangeClient for ArkhamGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -262,7 +266,7 @@ impl ExchangeClient for ArkhamGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
-        self.unsupported("arkham.query_order_offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -270,7 +274,10 @@ impl ExchangeClient for ArkhamGatewayAdapter {
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("arkham.open_orders_offline_request_spec_only")
+        if let Some(market_type) = request.market_type {
+            self.ensure_supported_market_type(market_type)?;
+        }
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -278,7 +285,10 @@ impl ExchangeClient for ArkhamGatewayAdapter {
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("arkham.recent_fills_offline_request_spec_only")
+        if let Some(market_type) = request.market_type {
+            self.ensure_supported_market_type(market_type)?;
+        }
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

@@ -1,0 +1,21 @@
+{
+  "exchange": "ndax",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders",
+  "auth": "signed",
+  "query": {
+    "accountId": "1001",
+    "instrumentId": "1"
+  },
+  "headers": {
+    "X-NDAX-APIKEY": { "match": "present" },
+    "X-NDAX-SIGNATURE": { "match": "present" },
+    "X-NDAX-TIMESTAMP": { "match": "present" }
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["fixture-secret", "fixture-passphrase"],
+  "signing_vector": "../signing_vectors/rest_order_signature.json"
+}

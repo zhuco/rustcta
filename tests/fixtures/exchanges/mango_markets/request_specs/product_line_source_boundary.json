@@ -1,0 +1,19 @@
+{
+  "exchange": "mango_markets",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["margin", "perpetual"],
+  "official_product_lines": ["spot", "openbook", "margin", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Mango group accounts and OpenBook market accounts",
+      "evidence": "Mango group state can reference spot/OpenBook markets, but this adapter only records Mango group, perp market and MangoAccount source boundaries."
+    }
+  ],
+  "runtime_isolation": "Do not treat OpenBook account sources as shared spot runtime until market, book-side, event queue and MangoAccount ownership decoding are audited.",
+  "remaining_work": [
+    "decode Mango group spot market entries",
+    "decode OpenBook market, bids, asks and event queue accounts",
+    "add MangoAccount spot open-orders, slot/reorg guard and indexer reconciliation"
+  ]
+}

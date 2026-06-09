@@ -1,12 +1,14 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::Utc;
 use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
+
+use super::signing::novadax_private_request_headers;
 
 #[derive(Clone)]
 pub struct NovadaxRest {
@@ -66,6 +68,87 @@ impl NovadaxRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_json(
+        &self,
+        method: &str,
+        endpoint: &str,
+        api_key: &str,
+        api_secret: &str,
+        body: &Value,
+    ) -> ExchangeApiResult<Value> {
+        let body_text =
+            serde_json::to_string(body).map_err(|error| ExchangeApiError::Serialization {
+                message: error.to_string(),
+            })?;
+        let timestamp = Utc::now().timestamp_millis().to_string();
+        let headers = novadax_private_request_headers(
+            api_key,
+            api_secret,
+            &timestamp,
+            method,
+            endpoint,
+            &std::collections::BTreeMap::new(),
+            Some(&body_text),
+        )?;
+        let url = format!("{}{}", self.rest_base_url.trim_end_matches('/'), endpoint);
+        let response = self
+            .http
+            .post(url)
+            .header("X-Nova-Access-Key", headers["X-Nova-Access-Key"].as_str())
+            .header("X-Nova-Signature", headers["X-Nova-Signature"].as_str())
+            .header("X-Nova-Timestamp", headers["X-Nova-Timestamp"].as_str())
+            .header("Content-Type", "application/json")
+            .body(body_text)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        endpoint: &str,
+        params: &BTreeMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        let timestamp = Utc::now().timestamp_millis().to_string();
+        let headers = novadax_private_request_headers(
+            api_key, api_secret, &timestamp, "GET", endpoint, params, None,
+        )?;
+        let mut url = format!("{}{}", self.rest_base_url.trim_end_matches('/'), endpoint);
+        if !params.is_empty() {
+            let query = params
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        urlencoding::encode(key),
+                        urlencoding::encode(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            url.push('?');
+            url.push_str(&query);
+        }
+        let response = self
+            .http
+            .get(url)
+            .header("X-Nova-Access-Key", headers["X-Nova-Access-Key"].as_str())
+            .header("X-Nova-Signature", headers["X-Nova-Signature"].as_str())
+            .header("X-Nova-Timestamp", headers["X-Nova-Timestamp"].as_str())
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

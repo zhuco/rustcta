@@ -1,0 +1,24 @@
+{
+  "exchange": "latoken",
+  "operation": "latoken.get_fees",
+  "request_spec_only": false,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/v2/auth/trade/fee/{currency}/{quote}",
+  "path_params": {
+    "currency": "BTC",
+    "quote": "USDT"
+  },
+  "public_fallback_path": "/v2/trade/fee/{currency}/{quote}",
+  "auth": "hmac_sha256",
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256"
+  },
+  "canonical_payload": "GET/v2/auth/trade/fee/BTC/USDT",
+  "credential_scope": "read_only",
+  "runtime_status": "credential_gated_runtime",
+  "response_fixture": "tests/fixtures/exchanges/latoken/parser/fees_ack.json",
+  "runtime_boundary": "enabled only when LATOKEN private REST flag plus API key/secret are configured; pair-specific read-only fee endpoint"
+}

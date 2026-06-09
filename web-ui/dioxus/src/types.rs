@@ -1492,6 +1492,7 @@ pub(crate) struct CrossArbPanelData {
     pub(crate) valid_events: String,
     pub(crate) parse_errors: String,
     pub(crate) can_open_opportunities: String,
+    pub(crate) market_can_open_opportunities: String,
     pub(crate) open_signals: String,
     pub(crate) order_events: String,
     pub(crate) estimated_edge_usdt: f64,
@@ -1642,11 +1643,35 @@ impl CrossArbSettingsFormData {
             symbols_text: cross_arb_symbols_text(settings),
             target_notional: number_setting_text(settings, "target_notional_usdt", 5.0),
             max_notional: number_setting_text(settings, "max_notional_usdt", 5.2),
-            max_positions: number_setting_text(settings, "max_positions_per_exchange", 10.0),
-            min_open_spread: number_setting_text(settings, "min_open_raw_spread", 0.005),
-            min_net_edge: number_setting_text(settings, "min_open_maker_taker_net_edge", 0.005),
-            close_profit: number_setting_text(settings, "lock_profit_dual_taker_pct", 0.0005),
-            close_spread: number_setting_text(settings, "max_close_spread_pct", 0.0005),
+            max_positions: number_setting_text_any(
+                settings,
+                &["max_open_bundles", "max_positions_per_exchange"],
+                10.0,
+            ),
+            min_open_spread: pct_setting_text_any(
+                settings,
+                &["min_open_raw_spread", "min_open_spread_pct", "min_open_raw_spread_pct"],
+                0.01,
+            ),
+            min_net_edge: pct_setting_text_any(
+                settings,
+                &[
+                    "min_open_maker_taker_net_edge",
+                    "min_open_net_profit_pct",
+                    "min_open_net_edge_pct",
+                ],
+                0.002,
+            ),
+            close_profit: pct_setting_text_any(
+                settings,
+                &["close_min_net_profit_pct", "lock_profit_dual_taker_pct"],
+                0.002,
+            ),
+            close_spread: pct_setting_text_any(
+                settings,
+                &["expected_close_spread_pct", "max_close_spread_pct"],
+                0.002,
+            ),
             execution_profile: cross_arb_execution_profile(settings),
         }
     }
@@ -1853,6 +1878,11 @@ impl CrossArbPanelData {
             valid_events: text_at(summary, "valid_events", lang),
             parse_errors: text_at(summary, "parse_errors", lang),
             can_open_opportunities: text_at(summary, "can_open_opportunities", lang),
+            market_can_open_opportunities: text_at(
+                summary,
+                "market_can_open_opportunities",
+                lang,
+            ),
             open_signals: text_at(summary, "open_signals", lang),
             order_events: text_at(summary, "order_events", lang),
             estimated_edge_usdt: crate::utils::numeric_at(summary, "estimated_edge_usdt"),
@@ -1896,10 +1926,14 @@ impl CrossArbPanelData {
                 "required_notional_max_usdt",
             ),
             closed_arbitrages: text_at(profit_summary, "closed_arbitrages", lang),
-            win_rate: crate::utils::format_pct(crate::utils::numeric_at(
-                profit_summary,
-                "win_rate",
-            )),
+            win_rate: {
+                let pct = first_numeric(profit_summary, &["win_rate_pct", "win_rate"]);
+                if profit_summary.get("win_rate_pct").is_some() {
+                    crate::utils::format_pct(pct / 100.0)
+                } else {
+                    crate::utils::format_pct(pct)
+                }
+            },
         }
     }
 }
@@ -2125,6 +2159,9 @@ pub(crate) struct CrossArbOpportunityRowData {
     pub(crate) route: String,
     pub(crate) maker: String,
     pub(crate) taker: String,
+    pub(crate) long_entry_price: String,
+    pub(crate) short_entry_price: String,
+    pub(crate) raw_book_prices: String,
     pub(crate) raw_open_spread: f64,
     pub(crate) raw_open_spread_text: String,
     pub(crate) maker_taker_net_edge: f64,
@@ -2134,6 +2171,7 @@ pub(crate) struct CrossArbOpportunityRowData {
     pub(crate) fees: String,
     pub(crate) expected_funding_usdt: String,
     pub(crate) book_age_ms: String,
+    pub(crate) market_can_open: bool,
     pub(crate) can_open: bool,
     pub(crate) reject_reasons: String,
 }
@@ -2142,43 +2180,86 @@ impl CrossArbOpportunityRowData {
     pub(crate) fn from_value_rows(rows: &[Value], lang: Language) -> Vec<Self> {
         rows.iter()
             .map(|row| {
-                let raw_open_spread = crate::utils::numeric_at(row, "raw_open_spread");
-                let maker_taker_net_edge = crate::utils::numeric_at(row, "maker_taker_net_edge");
+                let raw_open_spread = first_numeric(
+                    row,
+                    &[
+                        "raw_open_spread_pct",
+                        "raw_spread_pct",
+                        "raw_open_spread",
+                        "spread_pct",
+                        "spread",
+                    ],
+                );
+                let maker_taker_net_edge = first_numeric(
+                    row,
+                    &[
+                        "maker_taker_net_edge",
+                        "expected_net_profit_pct",
+                        "net_profit_pct",
+                    ],
+                );
+                let long_exchange = text_at(row, "long_exchange", lang);
+                let short_exchange = text_at(row, "short_exchange", lang);
+                let maker_exchange = text_or_fallback(text_at(row, "maker_exchange", lang), || {
+                    long_exchange.clone()
+                });
+                let maker_side =
+                    text_or_fallback(text_at(row, "maker_side", lang), || "open_long".to_string());
+                let taker_exchange = text_or_fallback(text_at(row, "taker_exchange", lang), || {
+                    short_exchange.clone()
+                });
+                let taker_side = text_or_fallback(text_at(row, "taker_side", lang), || {
+                    "open_short".to_string()
+                });
                 Self {
                     canonical_symbol: text_at(row, "canonical_symbol", lang),
-                    route: format!(
+                    route: format!("{long_exchange} / {short_exchange}"),
+                    maker: format!("{maker_exchange} {maker_side}"),
+                    taker: format!("{taker_exchange} {taker_side}"),
+                    long_entry_price: first_price_text(row, &["long_entry_price", "long_price"]),
+                    short_entry_price: first_price_text(row, &["short_entry_price", "short_price"]),
+                    raw_book_prices: format!(
                         "{} / {}",
-                        text_at(row, "long_exchange", lang),
-                        text_at(row, "short_exchange", lang)
-                    ),
-                    maker: format!(
-                        "{} {}",
-                        text_at(row, "maker_exchange", lang),
-                        text_at(row, "maker_side", lang)
-                    ),
-                    taker: format!(
-                        "{} {}",
-                        text_at(row, "taker_exchange", lang),
-                        text_at(row, "taker_side", lang)
+                        first_price_text(row, &["long_best_ask_price", "long_entry_price"]),
+                        first_price_text(row, &["short_best_bid_price", "short_entry_price"])
                     ),
                     raw_open_spread,
                     raw_open_spread_text: crate::utils::format_pct(raw_open_spread),
                     maker_taker_net_edge,
                     maker_taker_net_edge_text: crate::utils::format_pct(maker_taker_net_edge),
-                    target_notional_usdt: crate::utils::money_text(row, "target_notional_usdt"),
-                    executable_notional_usdt: crate::utils::money_text(
+                    target_notional_usdt: first_money_text(
                         row,
-                        "executable_notional_usdt",
+                        &[
+                            "target_notional_usdt",
+                            "long_notional_usdt",
+                            "short_notional_usdt",
+                        ],
+                    ),
+                    executable_notional_usdt: first_money_text(
+                        row,
+                        &[
+                            "executable_notional_usdt",
+                            "executable_top_depth_usdt",
+                            "long_notional_usdt",
+                        ],
                     ),
                     fees: format!(
                         "{} / {}",
-                        crate::utils::money_text(row, "open_fee_est_usdt"),
-                        crate::utils::money_text(row, "close_fee_est_usdt")
+                        first_money_text(row, &["open_fee_est_usdt", "estimated_open_fee_usdt"]),
+                        first_money_text(
+                            row,
+                            &["close_fee_est_usdt", "estimated_round_trip_fee_usdt"]
+                        )
                     ),
                     expected_funding_usdt: crate::utils::money_text(row, "expected_funding_usdt"),
-                    book_age_ms: text_at(row, "book_age_ms", lang),
+                    book_age_ms: text_or_fallback(text_at(row, "book_age_ms", lang), || {
+                        text_at(row, "age_ms", lang)
+                    }),
+                    market_can_open: bool_at(row, "market_can_open"),
                     can_open: bool_at(row, "can_open"),
-                    reject_reasons: text_at(row, "reject_reasons", lang),
+                    reject_reasons: text_or_fallback(text_at(row, "reject_reasons", lang), || {
+                        text_at(row, "failure_reason", lang)
+                    }),
                 }
             })
             .collect()
@@ -2293,8 +2374,10 @@ pub(crate) struct CrossArbPositionBundleRowData {
     pub(crate) long_exchange: String,
     pub(crate) short_exchange: String,
     pub(crate) status: String,
+    pub(crate) entry_prices: String,
     pub(crate) entry_net_edge_pct: f64,
     pub(crate) entry_net_edge_pct_text: String,
+    pub(crate) close_prices: String,
     pub(crate) close_profit_now: f64,
     pub(crate) close_profit_now_text: String,
     pub(crate) close_threshold_pct: String,
@@ -2307,25 +2390,50 @@ impl CrossArbPositionBundleRowData {
     pub(crate) fn from_value_rows(rows: &[Value], lang: Language) -> Vec<Self> {
         rows.iter()
             .map(|row| {
-                let entry_net_edge_pct = crate::utils::numeric_at(row, "entry_net_edge_pct");
-                let close_profit_now = crate::utils::cross_arb_close_profit_now(row);
+                let entry_net_edge_pct =
+                    first_numeric(row, &["entry_net_edge_pct", "planned_spread_pct"]);
+                let close_profit_now = first_numeric(
+                    row,
+                    &[
+                        "close_net_profit_pct",
+                        "close_candidate_profit_pct",
+                        "net_profit_pct",
+                    ],
+                );
+                let closeable = bool_at(row, "closeable")
+                    || bool_at(row, "close_ready")
+                    || text_at(row, "close_reason", Language::En) != "-";
                 Self {
                     bundle_id: text_at(row, "bundle_id", lang),
-                    symbol: text_at(row, "symbol", lang),
+                    symbol: text_or_fallback(text_at(row, "symbol", lang), || {
+                        text_at(row, "canonical_symbol", lang)
+                    }),
                     long_exchange: text_at(row, "long_exchange", lang),
                     short_exchange: text_at(row, "short_exchange", lang),
-                    status: text_at(row, "status", lang),
+                    status: text_or_fallback(text_at(row, "status", lang), || "open".to_string()),
+                    entry_prices: format!(
+                        "{} / {}",
+                        first_price_text(row, &["long_entry_price"]),
+                        first_price_text(row, &["short_entry_price"])
+                    ),
                     entry_net_edge_pct,
                     entry_net_edge_pct_text: crate::utils::format_pct(entry_net_edge_pct),
+                    close_prices: format!(
+                        "{} / {}",
+                        first_price_text(row, &["long_close_price"]),
+                        first_price_text(row, &["short_close_price"])
+                    ),
                     close_profit_now,
                     close_profit_now_text: crate::utils::format_pct(close_profit_now),
-                    close_threshold_pct: crate::utils::format_pct(crate::utils::numeric_at(
+                    close_threshold_pct: crate::utils::format_pct(first_numeric(
                         row,
-                        "close_threshold_pct",
+                        &["close_threshold_pct", "close_min_net_profit_pct"],
                     )),
-                    closeable: bool_at(row, "closeable"),
+                    closeable,
                     close_route: crate::utils::cross_arb_close_route(row, lang),
-                    updated_at: text_at(row, "updated_at", lang),
+                    updated_at: text_or_fallback(text_at(row, "updated_at", lang), || {
+                        text_at(row, "evaluated_at", lang)
+                    }),
                 }
             })
             .collect()
@@ -2370,8 +2478,10 @@ impl CrossArbOpenOrderRowData {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CrossArbResultRowData {
     pub(crate) bundle_id: String,
+    pub(crate) lifecycle: String,
     pub(crate) symbol: String,
     pub(crate) route: String,
+    pub(crate) prices: String,
     pub(crate) target_notional_usdt: String,
     pub(crate) realized_profit_usdt: f64,
     pub(crate) realized_pnl: String,
@@ -2384,30 +2494,55 @@ impl CrossArbResultRowData {
     pub(crate) fn from_value_rows(rows: &[Value], lang: Language) -> Vec<Self> {
         rows.iter()
             .map(|row| {
-                let realized_profit_usdt = crate::utils::numeric_at(row, "realized_profit_usdt");
-                let cumulative_profit_usdt =
-                    crate::utils::numeric_at(row, "cumulative_profit_usdt");
+                let realized_profit_usdt = first_numeric(
+                    row,
+                    &[
+                        "realized_profit_usdt",
+                        "actual_pnl_usdt",
+                        "pnl_usdt",
+                        "profit_usdt",
+                    ],
+                );
+                let cumulative_profit_usdt = first_numeric(
+                    row,
+                    &[
+                        "cumulative_profit_usdt",
+                        "total_profit_usdt",
+                        "actual_pnl_usdt",
+                    ],
+                );
                 Self {
                     bundle_id: text_at(row, "bundle_id", lang),
-                    symbol: text_at(row, "symbol", lang),
+                    lifecycle: text_at(row, "lifecycle", lang),
+                    symbol: text_or_fallback(text_at(row, "symbol", lang), || {
+                        text_at(row, "canonical_symbol", lang)
+                    }),
                     route: format!(
                         "{} / {}",
-                        text_at(row, "long_exchange", lang),
-                        text_at(row, "short_exchange", lang)
+                        text_or_fallback(text_at(row, "long_exchange", lang), || {
+                            text_at(row, "exchange", lang)
+                        }),
+                        text_or_fallback(text_at(row, "short_exchange", lang), || "-".to_string())
                     ),
-                    target_notional_usdt: crate::utils::money_text(row, "target_notional_usdt"),
+                    prices: close_result_price_text(row),
+                    target_notional_usdt: first_money_text(
+                        row,
+                        &["target_notional_usdt", "close_notional_usdt", "quantity"],
+                    ),
                     realized_profit_usdt,
                     realized_pnl: format!(
                         "{} / {}",
                         crate::utils::signed_usdt(realized_profit_usdt),
-                        crate::utils::format_pct(crate::utils::numeric_at(
+                        crate::utils::format_pct(first_numeric(
                             row,
-                            "close_net_profit_pct",
+                            &["close_net_profit_pct", "net_profit_pct"],
                         ))
                     ),
                     cumulative_profit_usdt,
                     cumulative_profit: crate::utils::signed_usdt(cumulative_profit_usdt),
-                    updated_at: text_at(row, "updated_at", lang),
+                    updated_at: text_or_fallback(text_at(row, "updated_at", lang), || {
+                        text_at(row, "recorded_at", lang)
+                    }),
                 }
             })
             .collect()
@@ -2830,6 +2965,62 @@ fn text_or_fallback(value: String, fallback: impl FnOnce() -> String) -> String 
     }
 }
 
+fn first_numeric(value: &Value, keys: &[&str]) -> f64 {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_f64))
+        .unwrap_or(0.0)
+}
+
+fn first_price_text(value: &Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_f64))
+        .map(crate::utils::format_price)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn first_money_text(value: &Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_f64))
+        .map(|value| format!("{value:.4}"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn close_result_price_text(row: &Value) -> String {
+    let long_entry = first_price_text(row, &["long_entry_price"]);
+    let short_entry = first_price_text(row, &["short_entry_price"]);
+    let long_close = first_price_text(row, &["long_close_price"]);
+    let short_close = first_price_text(row, &["short_close_price"]);
+    if long_entry != "-" || short_entry != "-" || long_close != "-" || short_close != "-" {
+        return format!("{long_entry}/{short_entry} -> {long_close}/{short_close}");
+    }
+    let legs = row
+        .get("legs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !legs.is_empty() {
+        return legs
+            .iter()
+            .filter_map(|leg| {
+                let role = text_at(leg, "role", Language::En);
+                let price =
+                    first_price_text(leg, &["actual_fill_price", "planned_execution_price"]);
+                (price != "-").then(|| format!("{role}@{price}"))
+            })
+            .collect::<Vec<_>>()
+            .join(" / ");
+    }
+    let open_leg = row.get("filled_open_leg").unwrap_or(&Value::Null);
+    let close_leg = row.get("emergency_close_leg").unwrap_or(&Value::Null);
+    let open_price = first_price_text(open_leg, &["actual_fill_price"]);
+    let close_price = first_price_text(close_leg, &["actual_fill_price"]);
+    if open_price != "-" || close_price != "-" {
+        format!("{open_price} -> {close_price}")
+    } else {
+        "-".to_string()
+    }
+}
+
 fn rows_at(value: &Value, key: &str) -> Vec<Value> {
     match value.get(key).unwrap_or(&Value::Null) {
         Value::Array(rows) => rows.clone(),
@@ -3129,11 +3320,45 @@ fn value_array_text(settings: &Value, key: &str) -> String {
 }
 
 fn number_setting_text(settings: &Value, key: &str, default: f64) -> String {
-    let value = crate::utils::numeric_at(settings, key);
+    number_setting_text_any(settings, &[key], default)
+}
+
+fn number_setting_text_any(settings: &Value, keys: &[&str], default: f64) -> String {
+    let value = keys
+        .iter()
+        .find_map(|key| settings.get(*key).and_then(Value::as_f64))
+        .unwrap_or(default);
     if value.is_finite() {
         value.to_string()
     } else {
         default.to_string()
+    }
+}
+
+fn pct_setting_text_any(settings: &Value, keys: &[&str], default: f64) -> String {
+    let value = keys
+        .iter()
+        .find_map(|key| settings.get(*key).and_then(Value::as_f64))
+        .unwrap_or(default);
+    if value.is_finite() {
+        trim_number(value * 100.0)
+    } else {
+        trim_number(default * 100.0)
+    }
+}
+
+fn trim_number(value: f64) -> String {
+    let mut text = format!("{value:.8}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    if text.is_empty() {
+        "0".to_string()
+    } else {
+        text
     }
 }
 
@@ -3147,11 +3372,28 @@ fn optional_number_setting_text(settings: &Value, key: &str) -> String {
 }
 
 fn cross_arb_execution_profile(settings: &Value) -> String {
+    let execution = settings.get("execution").unwrap_or(&Value::Null);
+    if bool_at(execution, "live_orders_enabled") {
+        let place_path =
+            text_or_fallback(text_at(execution, "order_place_path", Language::En), || {
+                "rest".to_string()
+            });
+        let market_data = text_or_fallback(
+            text_at(execution, "market_data_source", Language::En),
+            || "websocket".to_string(),
+        );
+        return format!("live orders / {place_path} / {market_data}");
+    }
+    if bool_at(execution, "dry_run") {
+        return "dry_run".to_string();
+    }
     let mode = text_at(settings, "mode", Language::En).to_ascii_lowercase();
     if mode == "livesmall" && bool_at(settings, "execution_dry_run") {
         "live_small_dry_run".to_string()
     } else {
-        "simulation".to_string()
+        text_or_fallback(text_at(settings, "execution_profile", Language::En), || {
+            "simulation".to_string()
+        })
     }
 }
 

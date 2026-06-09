@@ -1,0 +1,13 @@
+{
+  "type": "message",
+  "topic": "obu",
+  "channel": "obu",
+  "subject": "depth50",
+  "data": {
+    "symbol": "BTC-USDT",
+    "sequence": "102",
+    "time": 1700000000100,
+    "bids": [["65000.00", "1.2"], ["64990.00", "0.9"]],
+    "asks": [["65010.00", "0.8"], ["65020.00", "1.5"]]
+  }
+}

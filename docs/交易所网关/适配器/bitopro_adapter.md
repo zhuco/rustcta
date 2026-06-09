@@ -1,6 +1,6 @@
 # BitoPro Gateway Adapter
 
-Status date: 2026-06-08
+Status date: 2026-06-09
 
 `bitopro` covers BitoPro Spot markets, with TWD quote markets treated as
 first-class Spot pairs. Venue symbols are lowercase underscore pairs such as
@@ -45,7 +45,7 @@ private read paths.
 | --- | --- |
 | Public REST | `get_symbol_rules` via `/provisioning/trading-pairs`; `get_order_book` via `/order-book/{pair}` |
 | Private read REST | Balances, query order, open orders, and recent fills are signed and parser-tested |
-| Private write REST | Place, cancel, cancel-all, batch place, and batch cancel are request-spec/signing fixtures only; runtime returns `Unsupported` |
+| Private write REST | Batch place, batch cancel, and cancel-all have signed runtime with mock/parser coverage behind explicit private REST credentials; single place/cancel remain request-spec/signing fixtures only |
 | WebSocket | URL-based public stream specs, private handshake auth header specs, heartbeat policy, parser fixtures |
 | Endpoint mapping | `crates/rustcta-exchange-gateway/src/adapters/bitopro/endpoint_mapping.yaml` |
 | Fixtures | `tests/fixtures/exchanges/bitopro/` |
@@ -59,6 +59,18 @@ the full order book every second when updated. Default limit is 5; valid limits
 are 1, 5, 10, 20, 30, and 50. Messages include `eventID` and timestamp, but the
 reviewed official docs do not expose a sequence/checksum suitable for delta book
 continuity.
+
+| Feed | Product | URL / request | Interval | Limits | Semantics | Sequence / checksum | Reconnect / resync |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Public order book | Spot | URL path subscription: `/v1/pub/order-books/{PAIR}:{limit}`; multiple pairs use `pairs=` query | 1s when book changed | Default 5; supported 1/5/10/20/30/50 | Snapshot-only full order book; no delta stream | No continuity sequence or checksum; `eventID` is not used as a book sequence | Fetch REST `/order-book/{pair}` snapshot, then reconnect/resubscribe |
+| Public trades | Spot | `/v1/pub/trades/{PAIR}` | Venue-driven | Not applicable | Trade stream only | Not an order-book continuity source | Reconnect/resubscribe |
+| Public ticker | Spot | `/v1/pub/tickers/{PAIR}` | Venue-driven | Not applicable | Ticker stream only | Not an order-book continuity source | Reconnect/resubscribe |
+
+The adapter exposes the public order book as `OrderBookSnapshot` only. It
+rejects `OrderBookDelta` because the official stream publishes complete books
+without replayable sequence/checksum fields. For local recovery, consumers
+should discard the old local book and reload REST `get_order_book` before
+resuming the WS snapshot feed.
 
 ## Rate Limits
 
@@ -74,13 +86,28 @@ Current official Open API scope does not show standard futures, perpetuals, or
 options. This adapter therefore writes standard contract trading as
 `交易所不支持合约`.
 
+费率项目未实现/未启用：BitoPro public limitations-and-fees/VIP schedule 已作为离线配置源记录到 `tests/fixtures/exchanges/bitopro/request_specs/get_fees_source_boundary.json`，适用产品线为 Spot。该边界只能作为 fee table/config source；生产账户有效费率仍需 VIP level config、pair scope、fee table version 或明确 account override，不能用零费率占位替代。shared `get_fees` runtime 仍未启用，剩 VIP/config loader、maker/taker parser 和 `FeeRateSnapshot` 映射。
+
 The adapter does not expose margin, leverage, positions, funding, mark price,
 open interest, risk tiers, wallet deposits, withdrawals, transfers, order amend,
 order lists, or dead-man/cancel-all-after.
 
-Private writes are deliberately limited to offline request-spec/signing
-verification. They must not be promoted to live trading without a separate
-credentialed live-dry-run task.
+Batch place (`POST /orders/batch`), batch cancel (`PUT /orders`), and
+cancel-all (`DELETE /orders/all` or pair-scoped `DELETE /orders/{pair}`) are now
+exposed through the shared runtime when private REST credentials and API
+identity are explicitly configured. Focused tests cover signed request bodies or
+DELETE headers, success response parsing, and fallback ack/cancelled states
+without live exchange writes.
+
+Advanced-order boundary: native batch place (`POST /orders/batch`), batch
+cancel (`PUT /orders`), and cancel-all (`DELETE /orders/all` or
+`DELETE /orders/{pair}`) are runtime-backed behind the private REST guard.
+In-place amend and OCO/order-list semantics are explicitly unsupported because
+no equivalent BitoPro v3 endpoint was found in the reviewed official docs.
+
+Remaining public WS boundaries: no order-book delta runtime, no sequence-gap
+detector, no checksum validation, and no high-frequency/BBO order-book feed
+beyond the 1s snapshot stream documented above.
 
 ## Validation
 

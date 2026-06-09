@@ -57,8 +57,14 @@ Covered as private request-spec/signing fixtures:
 - `POST /trading-api/v2/orders`
 - `POST /trading-api/v2/command` for cancel/amend/cancel-all-style commands
 
-Native batch place/cancel is unsupported; no official native batch endpoint was
-found in the audited REST surface.
+Advanced-order boundary: plain amend and cancel-all command shapes are covered
+as offline request-spec/signing fixtures and exposed in `capabilities_v2` as
+runtime-disabled private command endpoints. `amend_order` stays offline because
+the code has no JWT refresh/login lifecycle, monotonic BX-NONCE window guard,
+amend response parser/readback reconciliation, or dry-run guard for live private
+writes. Native batch place/cancel is unsupported; no official native batch
+endpoint was found in the audited REST surface. OCO/OTO order-list remains
+unsupported.
 
 ## WebSocket
 
@@ -71,13 +77,18 @@ Bullish WS uses JSON-RPC 2.0 command messages.
   routing in this adapter.
 
 Official public order book topics are `l1Orderbook` and `l2Orderbook` on the
-multi-order-book WS endpoint. The feed is live/realtime but the official docs
-do not give a fixed millisecond interval or a fixed depth parameter. L1 docs
-show monotonically increasing `sequenceNumber`; out-of-sequence messages require
-disconnect/reconnect, and L2 hybrid book consumers should combine REST snapshot
-with WS updates. Mapping still needs L1/L2, sequence/reconnect and no-fixed-ms
-fields. Source batch:
-[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+multi-order-book WS endpoint `/trading-api/v1/market-data/orderbook`. The feed
+is live/realtime but the official docs do not give a fixed millisecond interval
+or a fixed depth parameter. L1 docs show monotonically increasing
+`sequenceNumber`; L2/hybrid messages can carry `sequenceNumberRange`.
+Out-of-sequence messages require disconnect/reconnect, and consumers must use
+the REST hybrid order-book snapshot as the resync source.
+
+2026-06-08 implementation update: `subscribe_public_stream` now returns a JSON
+spec containing the URL, JSON-RPC subscribe/unsubscribe payloads, keepalive
+payload, L1/L2 topics, sequence fields, reconnect policy, and REST resync
+metadata. Parser fixtures cover L1 `bid`/`ask`, L2 `bids`/`asks`, and
+`sequenceNumberRange`.
 
 ## Fixtures
 
@@ -100,9 +111,14 @@ Fixtures live under `tests/fixtures/exchanges/bullish/`:
 
 ## Unsupported Boundary
 
-The current adapter is not live-trade-enabled. It returns explicit
-`Unsupported` for private read execution, all private write execution, batch,
-order lists, and live private WS.
+The current adapter is not live-trade-enabled. P4 amend and cancel-all are
+fixture-only/offline until JWT lifecycle, nonce-window handling, parser readback,
+reconciliation, and dry-run guards are added. Native batch and order-list
+operations remain exchange-unsupported in this profile.
+
+2026-06-09 update: `amend_order` and `cancel_all_orders` now return explicit
+`*_offline_request_spec_only` guard operations, and `capabilities_v2.endpoints`
+records signed `/trading-api/v2/command` boundaries for those two operations.
 
 Before promotion, add parser tests, transport tests with mocked responses, JWT
 lifecycle handling, nonce-bound fixtures, and reconciliation tests against

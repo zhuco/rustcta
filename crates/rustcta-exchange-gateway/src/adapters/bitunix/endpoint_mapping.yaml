@@ -35,12 +35,24 @@ websocket:
   public:
     support: spec_only
     heartbeat: { mode: client_ping, interval_ms: 15000, timeout_ms: 30000 }
+    order_book:
+      channels: [depth_books, depth_book1, depth_book5, depth_book15]
+      supported_depths: [1, 5, 15]
+      interval: no fixed ms
+      sequence: not_published
+      checksum: not_published
+      resync: rest_depth_fallback
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
     support: spec_only
     heartbeat: { mode: client_ping, interval_ms: 15000, timeout_ms: 30000 }
     auth_renewal: { mode: relogin }
     resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+
+unsupported:
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：public/private fee endpoint 未验证，当前只返回零费率占位。"
+
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -153,6 +165,70 @@ endpoints:
     testnet: false
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_route_private_order_mutations }
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/futures/trade/batch_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_route_private_order_mutations }
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/futures/trade/cancel_orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_route_private_order_mutations }
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/futures/trade/modify_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    notes: Perp amend is native; Spot amend remains unsupported in the shared model.
+  - operation: place_order_list
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitunix/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bitunix.order_list_unsupported
   - operation: open_orders
     product: perpetual
     market_types: [spot, perpetual]

@@ -1,5 +1,7 @@
 use rustcta_exchange_api::{
-    BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest, PublicStreamKind,
+    AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelAllOrdersRequest,
+    CancelOrderRequest, ExchangeApiError, ExchangeClient, OrderListConditionalLeg,
+    OrderListLegType, OrderListRequest, PlaceOrderRequest, PublicStreamKind,
     PublicStreamSubscription, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderType};
@@ -71,30 +73,83 @@ fn capabilities_should_keep_derive_chain_perps_as_chain_profile_audit_only() {
 }
 
 #[tokio::test]
-async fn derive_chain_perps_bulk_orders_should_stay_signing_unverified() {
+async fn derive_chain_perps_advanced_orders_should_stay_signing_unverified_or_unsupported() {
     let adapter = DeriveChainPerpsGatewayAdapter::new(DeriveChainPerpsGatewayConfig::default())
         .expect("adapter");
+    let symbol = derive_chain_perps_symbol(MarketType::Perpetual);
+    let place = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: derive_chain_perps_context("order"),
+        symbol: symbol.clone(),
+        client_order_id: Some("client-1".to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: None,
+        quantity: "1".to_string(),
+        price: Some("3200".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: derive_chain_perps_context("amend"),
+            symbol: symbol.clone(),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("order-1".to_string()),
+            new_client_order_id: None,
+            new_quantity: "2".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "derive_chain_perps.amend_order_signing_unverified"
+        }
+    ));
+
+    let order_list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: derive_chain_perps_context("oco"),
+            symbol: symbol.clone(),
+            list_client_order_id: Some("oco-1".to_string()),
+            side: OrderSide::Sell,
+            quantity: "1".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some("3600".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("2800".to_string()),
+                stop_price: Some("3000".to_string()),
+                time_in_force: None,
+                client_order_id: Some("oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        order_list_error,
+        ExchangeApiError::Unsupported {
+            operation: "derive_chain_perps.order_list_unsupported"
+        }
+    ));
+
     let request = BatchPlaceOrdersRequest {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         context: derive_chain_perps_context("batch"),
         exchange: derive_chain_perps_exchange_id(),
-        orders: vec![PlaceOrderRequest {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            context: derive_chain_perps_context("order"),
-            symbol: derive_chain_perps_symbol(MarketType::Perpetual),
-            client_order_id: Some("client-1".to_string()),
-            side: OrderSide::Buy,
-            position_side: None,
-            order_type: OrderType::Limit,
-            time_in_force: None,
-            quantity: "1".to_string(),
-            price: Some("3200".to_string()),
-            quote_quantity: None,
-            reduce_only: false,
-            post_only: false,
-        }],
+        orders: vec![place],
     };
-
     let error = adapter
         .batch_place_orders(request)
         .await
@@ -103,6 +158,46 @@ async fn derive_chain_perps_bulk_orders_should_stay_signing_unverified() {
         error,
         ExchangeApiError::Unsupported {
             operation: "derive_chain_perps.batch_place_order_signing_unverified"
+        }
+    ));
+
+    let cancel = CancelOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: derive_chain_perps_context("cancel"),
+        symbol,
+        client_order_id: None,
+        exchange_order_id: Some("order-1".to_string()),
+    };
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: derive_chain_perps_context("batch-cancel"),
+            exchange: derive_chain_perps_exchange_id(),
+            cancels: vec![cancel],
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "derive_chain_perps.batch_cancel_order_signing_unverified"
+        }
+    ));
+
+    let cancel_all_error = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: derive_chain_perps_context("cancel-all"),
+            exchange: derive_chain_perps_exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbol: None,
+        })
+        .await
+        .expect_err("cancel-all unsupported");
+    assert!(matches!(
+        cancel_all_error,
+        ExchangeApiError::Unsupported {
+            operation: "derive_chain_perps.cancel_all_orders_signing_unverified"
         }
     ));
 }

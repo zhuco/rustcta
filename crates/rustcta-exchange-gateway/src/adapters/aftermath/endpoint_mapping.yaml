@@ -19,6 +19,7 @@ auth:
   private_write: Sui transaction build/sign/submit; unsupported in this adapter
 rate_limits:
   public_ccxt: { scope: ip, interval_ms: 10000, limit: 1000 }
+  account_source: { scope: account, interval_ms: 1000, limit: 1 }
   unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   markets: { mode: none }
@@ -37,13 +38,35 @@ websocket:
   public:
     support: spec_only
     endpoint: /api/perpetuals/ws/updates
+    channels: [updates.orderbook]
+    order_book:
+      channel: updates.orderbook
+      subscription: { action: subscribe, topic: orderbook, chId: "<channel_id>" }
+      unsubscription: { action: unsubscribe, topic: orderbook, chId: "<channel_id>" }
+      interval: "no fixed ms"
+      depth: unspecified
+      sequence: none_documented
+      checksum: none_documented
+      resync: { mode: rest_snapshot, endpoint_operation: order_book, sdk_method: getOrderbook }
     heartbeat: { mode: none, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
     parser_fixtures:
       - tests/fixtures/exchanges/aftermath/ws/updates_orderbook_delta.json
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
-streams:
+unsupported:
+  - operation: spot_product
+    reason: Aftermath adapter/profile maps Aftermath Perpetuals; spot products are outside this profile.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：Sui perpetual profile 未建立可映射成 gateway account fee 的稳定来源。"
+  - operation: get_balances
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/aftermath/request_specs/get_balances_account_source.json
+    reason: "Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending Sui account-cap read path, balance parser, and chain/indexer reconciliation."
+  - operation: get_positions
+    status: project_unimplemented
+    source_fixture: tests/fixtures/exchanges/aftermath/request_specs/get_positions_account_source.json
+    reason: "Official/SDK position readback exists, but shared get_positions runtime is project-unimplemented pending Sui account-cap/account-id read path, positions parser, available collateral/total equity mapping, and chain/indexer reconciliation."
   - operation: public_orderbook_delta
     product: perpetual
     channel: updates.orderbook
@@ -142,36 +165,42 @@ endpoints:
     support: parser_only
     reason: aftermath.ohlcv_not_exposed_by_gateway_interface
     response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/aftermath/ohlcv.json }
-  - operation: balances
+  - operation: get_balances
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/aftermath/balances
-    auth: unsupported
-    rate_limit_bucket: aftermath_unsupported
-    weight: 0
-    request_spec_required: false
+    method: SDK_READ
+    path: sdk://aftermath/perpetuals/account/balances
+    auth: none
+    rate_limit_bucket: aftermath_account_source
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: aftermath.balances_require_sui_account_cap
-  - operation: positions
+    support: spec_only
+    reason: "SDK/account source boundary only; shared get_balances runtime remains project-unimplemented pending Sui account-cap/account-id read path, collateral/equity parser, and chain/indexer reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/aftermath/request_specs/get_balances_account_source.json }
+    response_parser: { status: planned, fixture: tests/fixtures/exchanges/aftermath/request_specs/get_balances_account_source.json }
+    notes: "No live Sui RPC/indexer call is executed by this adapter; fixture records sanitized account-cap/account-id balance and equity source semantics only."
+  - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: GET
-    path: /unsupported/aftermath/positions
-    auth: unsupported
-    rate_limit_bucket: aftermath_unsupported
-    weight: 0
-    request_spec_required: false
+    method: SDK_READ
+    path: sdk://aftermath/perpetuals/account/positions
+    auth: none
+    rate_limit_bucket: aftermath_account_source
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
+    atomicity: not_applicable
     testnet: false
-    support: unsupported
-    reason: aftermath.positions_require_sui_account_cap
+    support: spec_only
+    reason: "SDK/account source boundary only; shared get_positions runtime remains project-unimplemented pending Sui account-cap/account-id read path, account object decoder, available collateral/total equity mapping, checkpoint freshness, and chain/indexer reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/aftermath/request_specs/get_positions_account_source.json }
+    response_parser: { status: fixture_only, parser: parse_position_source_boundary, fixture: tests/fixtures/exchanges/aftermath/request_specs/get_positions_account_source.json }
+    notes: "No live Sui RPC/indexer call is executed by this adapter; fixture records sanitized account-cap/account-id source semantics only. Parser coverage validates the source-boundary shape, not decoded live positions."
   - operation: fees
     product: perpetual
     market_types: [perpetual]
@@ -192,15 +221,15 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/aftermath/place_order
-    auth: unsupported
+    path: sui_tx/aftermath_perpetuals_place_order
+    auth: signed
     rate_limit_bucket: aftermath_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: aftermath.place_order_requires_sui_transaction_signing
     request_spec_fixture: tests/fixtures/exchanges/aftermath/request_specs/build_create_orders_unsupported.json
   - operation: cancel_order
@@ -208,22 +237,22 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/aftermath/cancel_order
-    auth: unsupported
+    path: sui_tx/aftermath_perpetuals_cancel_order
+    auth: signed
     rate_limit_bucket: aftermath_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: aftermath.cancel_order_requires_sui_transaction_signing
     request_spec_fixture: tests/fixtures/exchanges/aftermath/request_specs/build_cancel_orders_unsupported.json
   - operation: amend_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/aftermath/amend_order
     auth: unsupported
     rate_limit_bucket: aftermath_unsupported
@@ -234,11 +263,26 @@ endpoints:
     testnet: false
     support: unsupported
     reason: aftermath.amend_order_unsupported
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/aftermath/order_list
+    auth: unsupported
+    rate_limit_bucket: aftermath_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aftermath.order_list_requires_sui_transaction_signing
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/aftermath/batch_place_orders
     auth: unsupported
     rate_limit_bucket: aftermath_unsupported
@@ -253,7 +297,7 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/aftermath/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: aftermath_unsupported
@@ -284,43 +328,43 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aftermath/query_order
-    auth: unsupported
+    path: sui_source/aftermath_perpetuals_order
+    auth: none
     rate_limit_bucket: aftermath_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: aftermath.query_order_requires_sui_account_scope
   - operation: open_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aftermath/open_orders
-    auth: unsupported
+    path: sui_source/aftermath_perpetuals_open_orders
+    auth: none
     rate_limit_bucket: aftermath_unsupported
     weight: 0
     request_spec_required: false
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: aftermath.open_orders_require_sui_account_scope
   - operation: recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aftermath/recent_fills
-    auth: unsupported
+    path: sui_source/aftermath_perpetuals_fills
+    auth: none
     rate_limit_bucket: aftermath_unsupported
     weight: 0
     request_spec_required: false
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: aftermath.recent_fills_require_sui_account_scope

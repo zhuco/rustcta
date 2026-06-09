@@ -151,7 +151,9 @@ pub fn parse_orderbook_snapshot(
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
     snapshot.sequence = data
-        .get("last")
+        .get("update_id")
+        .or_else(|| book.get("update_id"))
+        .or_else(|| data.get("last"))
         .or_else(|| book.get("last"))
         .or_else(|| data.get("sequence"))
         .or_else(|| book.get("sequence"))

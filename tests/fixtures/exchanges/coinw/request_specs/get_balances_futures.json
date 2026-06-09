@@ -1,0 +1,26 @@
+{
+  "exchange": "coinw",
+  "operation": "get_balances",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/perpum/account/getUserAssets",
+  "auth": "hmac",
+  "headers": {
+    "api_key": {
+      "match": "non_empty"
+    },
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "sign": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "body": null
+}

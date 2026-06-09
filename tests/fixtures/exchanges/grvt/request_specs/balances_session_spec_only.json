@@ -1,0 +1,45 @@
+{
+  "exchange": "grvt",
+  "operation": "get_balances",
+  "status": "session_spec_only",
+  "product": "mixed",
+  "transport": "rest",
+  "method": "POST",
+  "base_url": "https://trades.testnet.grvt.io/full",
+  "path": "/source/grvt/account-balance",
+  "headers": {
+    "Cookie": "<redacted-session-cookie>",
+    "X-Grvt-Account-Id": "<redacted-account-id>"
+  },
+  "body": {
+    "sub_account_id": "<redacted-sub-account-id>"
+  },
+  "auth": "session_cookie",
+  "request_spec_required": true,
+  "account_scope": {
+    "required": ["session_cookie", "account_id", "sub_account_id"],
+    "credential_scopes": ["read_only"]
+  },
+  "source_boundary": {
+    "kind": "private_account_balance_readback",
+    "stable_rest_path": "not_pinned",
+    "ws_reconciliation_source": "private account/balance stream after session audit",
+    "parser_status": "not_wired",
+    "runtime_status": "disabled"
+  },
+  "response_sample": {
+    "sub_account_id": "<redacted-sub-account-id>",
+    "balances": [
+      {
+        "asset": "USDC",
+        "available": "500.00",
+        "total": "750.00",
+        "collateral_value": "750.00"
+      }
+    ]
+  },
+  "runtime_boundary": "GRVT get_balances is request-spec/source-boundary only until session-cookie auth smoke, account/sub-account scope guard, balance parser, and private WS/readback reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

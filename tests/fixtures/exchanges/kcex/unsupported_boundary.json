@@ -1,0 +1,20 @@
+{
+  "exchange": "kcex",
+  "adapter_id": "kcex",
+  "product_lines_seen": ["spot", "perpetual"],
+  "official_openapi_verified": false,
+  "public_rest_enabled": false,
+  "public_stream_enabled": false,
+  "private_rest_enabled": false,
+  "trade_enabled": false,
+  "unsupported_operations": [
+    "kcex.symbol_rules_unverified_openapi",
+    "kcex.order_book_unverified_openapi",
+    "kcex.public_streams_unverified_openapi",
+    "kcex.private_streams_unverified_openapi",
+    "kcex.place_order_unverified_openapi",
+    "kcex.cancel_order_unverified_openapi",
+    "kcex.batch_place_orders_unverified_openapi",
+    "kcex.batch_cancel_orders_unverified_openapi"
+  ]
+}

@@ -1,8 +1,11 @@
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest, QueryOrderRequest,
-    RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
+    BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelAllOrdersRequest,
+    CancelOrderRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest, PlaceOrderRequest,
+    QueryOrderRequest, RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{ExchangeErrorClass, MarketType, OrderSide, OrderStatus};
+use rustcta_types::{
+    ExchangeErrorClass, MarketType, OrderSide, OrderStatus, OrderType, TimeInForce,
+};
 use serde_json::{json, Value};
 
 use super::private::{
@@ -29,6 +32,15 @@ fn fixture(name: &str) -> Value {
         "fills_success.json" => {
             include_str!("../../../../../tests/fixtures/exchanges/bitopro/fills_success.json")
         }
+        "batch_place_orders_success.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/bitopro/batch_place_orders_success.json"
+        ),
+        "batch_cancel_orders_success.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/bitopro/batch_cancel_orders_success.json"
+        ),
+        "cancel_all_orders_success.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/bitopro/cancel_all_orders_success.json"
+        ),
         "error_response.json" => {
             include_str!("../../../../../tests/fixtures/exchanges/bitopro/error_response.json")
         }
@@ -55,6 +67,9 @@ fn fixture(name: &str) -> Value {
         ),
         "request_specs/cancel_all_orders.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/bitopro/request_specs/cancel_all_orders.json"
+        ),
+        "request_specs/cancel_all_orders_by_pair.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/bitopro/request_specs/cancel_all_orders_by_pair.json"
         ),
         "request_specs/batch_place_orders.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/bitopro/request_specs/batch_place_orders.json"
@@ -135,6 +150,10 @@ fn bitopro_request_spec_fixtures_should_cover_private_reads_and_writes() {
     assert_request_spec(
         &cancel_all_orders_spec(None).expect("cancel all"),
         fixture("request_specs/cancel_all_orders.json"),
+    );
+    assert_request_spec(
+        &cancel_all_orders_spec(Some("btc_twd")).expect("cancel all pair"),
+        fixture("request_specs/cancel_all_orders_by_pair.json"),
     );
     assert_request_spec(
         &batch_place_orders_spec(json!([{
@@ -288,11 +307,24 @@ async fn bitopro_private_reads_should_sign_requests_when_enabled() {
 }
 
 #[tokio::test]
-async fn bitopro_private_writes_should_remain_offline_request_spec_only() {
-    let adapter = BitoproGatewayAdapter::new(BitoproGatewayConfig::default()).expect("adapter");
+async fn bitopro_private_writes_should_guard_unpromoted_or_disabled_paths() {
+    let adapter = BitoproGatewayAdapter::new(BitoproGatewayConfig {
+        enabled_private_rest: false,
+        api_key: None,
+        api_secret: None,
+        api_identity: None,
+        ..Default::default()
+    })
+    .expect("adapter");
     let boundary = fixture("unsupported_boundary.json");
     assert_eq!(boundary["trade_enabled"], false);
+    assert_eq!(
+        boundary["private_write_runtime"],
+        "batch_and_cancel_all_runtime_require_explicit_private_rest"
+    );
     assert!(!adapter.capabilities().supports_place_order);
+    assert!(!adapter.capabilities().supports_cancel_order);
+    assert!(!adapter.capabilities().supports_cancel_all_orders);
 
     let error = adapter
         .place_order(rustcta_exchange_api::PlaceOrderRequest {
@@ -313,6 +345,241 @@ async fn bitopro_private_writes_should_remain_offline_request_spec_only() {
         .await
         .expect_err("unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+
+    let error = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("8917255503".to_string()),
+        })
+        .await
+        .expect_err("unsupported");
+    assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+
+    let error = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all-disabled"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: None,
+        })
+        .await
+        .expect_err("disabled private REST");
+    assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[tokio::test]
+async fn bitopro_single_writes_should_sign_requests_when_enabled() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        fixture("order_success.json"),
+        fixture("order_success.json"),
+    ])
+    .await;
+    let adapter = BitoproGatewayAdapter::new(BitoproGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("bitopro-key".to_string()),
+        api_secret: Some("bitopro-secret".to_string()),
+        api_identity: Some("support@example.test".to_string()),
+        enabled_private_rest: true,
+        ..Default::default()
+    })
+    .expect("adapter");
+    assert!(adapter.capabilities().supports_place_order);
+    assert!(adapter.capabilities().supports_cancel_order);
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("place"),
+            symbol: symbol_scope(),
+            client_order_id: Some("12345".to_string()),
+            side: OrderSide::Buy,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTX),
+            quantity: "0.01".to_string(),
+            price: Some("3000000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: true,
+        })
+        .await
+        .expect("place");
+    assert_eq!(
+        placed.order.exchange_order_id.as_deref(),
+        Some("8917255503")
+    );
+    assert_eq!(placed.order.client_order_id.as_deref(), Some("12345"));
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel"),
+            symbol: symbol_scope(),
+            client_order_id: Some("12345".to_string()),
+            exchange_order_id: Some("8917255503".to_string()),
+        })
+        .await
+        .expect("cancel");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+    assert_eq!(
+        cancelled.order.exchange_order_id.as_deref(),
+        Some("8917255503")
+    );
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/orders/btc_twd");
+    assert_eq!(requests[0].body.as_ref().unwrap()["action"], "BUY");
+    assert_eq!(requests[0].body.as_ref().unwrap()["amount"], "0.01");
+    assert_eq!(requests[0].body.as_ref().unwrap()["price"], "3000000");
+    assert_eq!(
+        requests[0].body.as_ref().unwrap()["timeInForce"],
+        "POST_ONLY"
+    );
+    assert!(requests[0].body.as_ref().unwrap().get("pair").is_none());
+    assert_eq!(requests[1].method, "DELETE");
+    assert_eq!(requests[1].path, "/orders/btc_twd/8917255503");
+    assert!(requests[1].body.is_none());
+    for request in &requests {
+        assert_bitopro_signed_request(request, "bitopro-key");
+    }
+}
+
+#[tokio::test]
+async fn bitopro_batch_and_cancel_all_writes_should_sign_requests_when_enabled() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        fixture("batch_place_orders_success.json"),
+        fixture("batch_cancel_orders_success.json"),
+        fixture("cancel_all_orders_success.json"),
+    ])
+    .await;
+    let adapter = BitoproGatewayAdapter::new(BitoproGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("bitopro-key".to_string()),
+        api_secret: Some("bitopro-secret".to_string()),
+        api_identity: Some("support@example.test".to_string()),
+        enabled_private_rest: true,
+        ..Default::default()
+    })
+    .expect("adapter");
+    assert!(adapter.capabilities().supports_batch_place_order);
+    assert!(adapter.capabilities().supports_batch_cancel_order);
+    assert!(adapter.capabilities().supports_cancel_all_orders);
+
+    let batch_place = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![
+                PlaceOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("place-1"),
+                    symbol: symbol_scope(),
+                    client_order_id: Some("12345".to_string()),
+                    side: OrderSide::Buy,
+                    position_side: None,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: "0.01".to_string(),
+                    price: Some("3000000".to_string()),
+                    quote_quantity: None,
+                    reduce_only: false,
+                    post_only: false,
+                },
+                PlaceOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("place-2"),
+                    symbol: symbol_scope(),
+                    client_order_id: Some("12346".to_string()),
+                    side: OrderSide::Sell,
+                    position_side: None,
+                    order_type: OrderType::Limit,
+                    time_in_force: None,
+                    quantity: "0.02".to_string(),
+                    price: Some("3100000".to_string()),
+                    quote_quantity: None,
+                    reduce_only: false,
+                    post_only: true,
+                },
+            ],
+        })
+        .await
+        .expect("batch place");
+    assert_eq!(batch_place.orders.len(), 2);
+    assert_eq!(
+        batch_place.orders[0].exchange_order_id.as_deref(),
+        Some("8917255503")
+    );
+
+    let batch_cancel = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("cancel-1"),
+                    symbol: symbol_scope(),
+                    client_order_id: None,
+                    exchange_order_id: Some("8917255503".to_string()),
+                },
+                CancelOrderRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: context("cancel-2"),
+                    symbol: symbol_scope(),
+                    client_order_id: None,
+                    exchange_order_id: Some("8917255504".to_string()),
+                },
+            ],
+        })
+        .await
+        .expect("batch cancel");
+    assert_eq!(batch_cancel.cancelled_count, 2);
+    assert_eq!(batch_cancel.orders[0].status, OrderStatus::Cancelled);
+
+    let cancel_all = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect("cancel all");
+    assert_eq!(cancel_all.cancelled_count, 2);
+    assert!(cancel_all
+        .orders
+        .iter()
+        .all(|order| order.status == OrderStatus::Cancelled));
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/orders/batch");
+    assert_eq!(requests[0].body.as_ref().unwrap()[0]["pair"], "btc_twd");
+    assert_eq!(
+        requests[0].body.as_ref().unwrap()[1]["timeInForce"],
+        "POST_ONLY"
+    );
+    assert_eq!(requests[1].method, "PUT");
+    assert_eq!(requests[1].path, "/orders");
+    assert_eq!(
+        requests[1].body.as_ref().unwrap()["BTC_TWD"],
+        json!(["8917255503", "8917255504"])
+    );
+    assert_eq!(requests[2].method, "DELETE");
+    assert_eq!(requests[2].path, "/orders/btc_twd");
+    assert!(requests[2].body.is_none());
+    for request in &requests {
+        assert_bitopro_signed_request(request, "bitopro-key");
+    }
 }
 
 #[tokio::test]

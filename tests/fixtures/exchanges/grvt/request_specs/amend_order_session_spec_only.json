@@ -1,0 +1,31 @@
+{
+  "exchange": "grvt",
+  "operation": "amend_order",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "base_url": "https://trades.testnet.grvt.io/full",
+  "path": "/v1/amend_order",
+  "headers": {
+    "Cookie": "<redacted-session-cookie>",
+    "X-Grvt-Account-Id": "<redacted-account-id>"
+  },
+  "body": {
+    "order_id": "<redacted-order-id>",
+    "sub_account_id": "<redacted-sub-account-id>",
+    "new_size": "0.002",
+    "new_limit_price": "65000",
+    "signature": "<external-eip712-signature-required>"
+  },
+  "auth": "session_cookie_plus_external_signer",
+  "request_spec_required": true,
+  "trade_enabled": false,
+  "signing_boundary": "tests/fixtures/exchanges/grvt/signing_vectors/session_cookie_boundary.json",
+  "remaining_runtime": [
+    "session_cookie_auth_smoke",
+    "eip712_external_signer",
+    "amend_response_parser",
+    "private_readback_reconciliation",
+    "live_dry_run_guard"
+  ],
+  "expected_error": "grvt.amend_requires_session_renewal_eip712_signer_and_reconciliation"
+}

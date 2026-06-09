@@ -141,6 +141,54 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_orderbook10_snapshot(
+    exchange_id: &ExchangeId,
+    symbol: SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderBookSnapshot> {
+    let rows = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "BitMEX orderBook10 response is not an array",
+            value,
+        )
+    })?;
+    let row = rows.first().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "BitMEX orderBook10 response is empty",
+            value,
+        )
+    })?;
+    let mut bids = parse_orderbook10_levels(exchange_id, row.get("bids"), "bids")?;
+    let mut asks = parse_orderbook10_levels(exchange_id, row.get("asks"), "asks")?;
+    bids.sort_by(|left, right| right.price.total_cmp(&left.price));
+    asks.sort_by(|left, right| left.price.total_cmp(&right.price));
+
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "bitmex order book request requires canonical_symbol".to_string(),
+            })?;
+    let mut snapshot = OrderBookSnapshot::new(
+        exchange_id.clone(),
+        symbol.market_type,
+        canonical_symbol,
+        bids,
+        asks,
+        Utc::now(),
+    )
+    .map_err(validation_error)?;
+    snapshot.exchange_symbol = Some(symbol.exchange_symbol);
+    snapshot.exchange_timestamp = row
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(parse_rfc3339);
+    Ok(snapshot)
+}
+
 pub fn normalize_bitmex_symbol(symbol: &str) -> ExchangeApiResult<String> {
     let normalized = symbol.trim().replace(['/', '-'], "").to_ascii_uppercase();
     if normalized.is_empty() {
@@ -181,6 +229,47 @@ fn is_tradeable_instrument(value: &Value) -> bool {
         .unwrap_or_default()
         .to_ascii_uppercase();
     typ == "IFXXXP" || typ.starts_with("FFW")
+}
+
+fn parse_orderbook10_levels(
+    exchange_id: &ExchangeId,
+    value: Option<&Value>,
+    side: &str,
+) -> ExchangeApiResult<Vec<OrderBookLevel>> {
+    let levels = value.and_then(Value::as_array).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            &format!("BitMEX orderBook10 missing {side}"),
+            value.unwrap_or(&Value::Null),
+        )
+    })?;
+    levels
+        .iter()
+        .map(|level| {
+            let pair = level.as_array().ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "BitMEX orderBook10 level is not [price, size]",
+                    level,
+                )
+            })?;
+            let price = number_from_value(pair.first()).ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "BitMEX orderBook10 level missing price",
+                    level,
+                )
+            })?;
+            let quantity = number_from_value(pair.get(1)).ok_or_else(|| {
+                parse_error(
+                    exchange_id.clone(),
+                    "BitMEX orderBook10 level missing size",
+                    level,
+                )
+            })?;
+            OrderBookLevel::new(price, quantity).map_err(validation_error)
+        })
+        .collect()
 }
 
 fn instrument_assets(symbol: &str, value: &Value) -> (String, String) {

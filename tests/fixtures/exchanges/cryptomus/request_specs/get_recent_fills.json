@@ -1,0 +1,16 @@
+{
+  "operation": "cryptomus.get_recent_fills",
+  "method": "GET",
+  "path": "/v2/user-api/exchange/orders/history",
+  "auth": "cryptomus_md5_base64_body",
+  "headers": {
+    "userId": "<redacted-user-uuid>",
+    "sign": "<md5-base64-body-plus-api-key>",
+    "Content-Type": "application/json"
+  },
+  "query": {
+    "market": "TRX_USDT",
+    "limit": "100"
+  },
+  "body": {}
+}

@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/accounts/<accountId>/BTC-BRL/orders/<orderId>",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

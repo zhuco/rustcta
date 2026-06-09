@@ -1,0 +1,23 @@
+{
+  "exchange": "hibachi",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "project_unimplemented",
+  "method": "PATCH",
+  "path": "/trade/order",
+  "auth": "signed",
+  "body": {
+    "accountId": 42,
+    "nonce": 1714701600000001,
+    "orderId": "<redacted-order-id>",
+    "symbol": "BTC/USDT-P",
+    "quantity": "1",
+    "price": "11",
+    "signature": "<redacted-signature>"
+  },
+  "strict_body": false,
+  "signing_vector": "tests/fixtures/exchanges/hibachi/signing_vectors/exchange_managed_hmac.json",
+  "expected_error": "hibachi.amend_requires_price_signer_nonce_and_reconciliation",
+  "trade_enabled": false
+}

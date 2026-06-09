@@ -1,0 +1,18 @@
+{
+  "id": 12345,
+  "datetime": "2026-06-08 10:47:20",
+  "type": "buy",
+  "price": 5000000,
+  "amount_original": 0.02,
+  "amount_outstanding": 0.01,
+  "status": "part",
+  "trades": [
+    {
+      "trade_id": "9001",
+      "amount": 0.01,
+      "price": 5000000,
+      "datetime": "2026-06-08 10:48:20",
+      "fee": 0.0001
+    }
+  ]
+}

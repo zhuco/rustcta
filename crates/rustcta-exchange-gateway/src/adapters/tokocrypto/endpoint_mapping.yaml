@@ -74,9 +74,35 @@ websocket:
     protocol: binance-style-json
     topics:
       order_book: "{symbol}@depth"
+      partial_depth_5: "{symbol}@depth5"
+      partial_depth_5_100ms: "{symbol}@depth5@100ms"
+      partial_depth_10: "{symbol}@depth10"
+      partial_depth_10_100ms: "{symbol}@depth10@100ms"
+      partial_depth_20: "{symbol}@depth20"
+      partial_depth_20_100ms: "{symbol}@depth20@100ms"
+      diff_depth_1000ms: "{symbol}@depth"
+      diff_depth_100ms: "{symbol}@depth@100ms"
       trades: "{symbol}@trade"
       ticker: "{symbol}@ticker"
       candles: "{symbol}@kline_{interval}"
+    order_book:
+      partial_depth_channels:
+        - "{symbol}@depth5"
+        - "{symbol}@depth5@100ms"
+        - "{symbol}@depth10"
+        - "{symbol}@depth10@100ms"
+        - "{symbol}@depth20"
+        - "{symbol}@depth20@100ms"
+      diff_depth_channels:
+        - "{symbol}@depth"
+        - "{symbol}@depth@100ms"
+      supported_depths: [5, 10, 20]
+      push_intervals_ms: [1000, 100]
+      sequence_fields: [U, u]
+      snapshot_sequence_field: lastUpdateId
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
     heartbeat:
       direction: exchange_defined
     resync: rest_order_book_snapshot
@@ -127,7 +153,14 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 5
     request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/account_get.json
+    response_parser:
+      status: planned
+    notes: Signed account endpoint request spec exists, but balance parser/runtime promotion and reconciliation are not implemented; runtime returns tokocrypto.get_balances.offline_request_spec_only.
   - operation: place_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -141,6 +174,7 @@ endpoints:
       fixture: tests/fixtures/exchanges/tokocrypto/request_specs/place_limit_order.json
     notes: "Offline request-spec only; runtime does not expose live order placement."
   - operation: cancel_order
+    support: spec_only
     product: spot
     transport: rest
     method: POST
@@ -153,6 +187,7 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/tokocrypto/request_specs/cancel_order.json
   - operation: query_order
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -164,7 +199,11 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/tokocrypto/request_specs/query_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/tokocrypto/order_success.json
+    notes: Runtime is fail-closed unless TOKOCRYPTO_PRIVATE_REST_ENABLED and X-MBX-APIKEY/HMAC credentials are present; exchange_order_id is required and client_order_id lookup is not promoted.
   - operation: get_open_orders
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -174,7 +213,13 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/open_orders_get.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/tokocrypto/open_orders_success.json
+    notes: Runtime is fail-closed unless TOKOCRYPTO_PRIVATE_REST_ENABLED and X-MBX-APIKEY/HMAC credentials are present; optional symbol scope is supported.
   - operation: get_recent_fills
+    support: native
     product: spot
     transport: rest
     method: GET
@@ -184,6 +229,11 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 5
     request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/recent_fills_get.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/tokocrypto/recent_fills_success.json
+    notes: Runtime is fail-closed unless TOKOCRYPTO_PRIVATE_REST_ENABLED, X-MBX-APIKEY/HMAC credentials, symbol, and context tenant/account are present; optional order/time/fromId/limit filters are mapped.
   - operation: create_user_listen_token
     product: spot
     transport: rest
@@ -201,6 +251,20 @@ streams:
     product: spot
     channel: "{symbol}@depth"
     support: spec_only
+    partial_depth_channels:
+      - "{symbol}@depth5"
+      - "{symbol}@depth5@100ms"
+      - "{symbol}@depth10"
+      - "{symbol}@depth10@100ms"
+      - "{symbol}@depth20"
+      - "{symbol}@depth20@100ms"
+    diff_depth_channels:
+      - "{symbol}@depth"
+      - "{symbol}@depth@100ms"
+    supported_depths: [5, 10, 20]
+    push_intervals_ms: [1000, 100]
+    sequence_fields: [U, u]
+    snapshot_sequence_field: lastUpdateId
     resync:
       endpoint_operation: get_order_book
   - operation: subscribe_public_trades
@@ -214,13 +278,15 @@ streams:
     auth_renewal:
       endpoint_operation: create_user_listen_token
 unsupported:
-  - operation: futures_or_perpetuals
-    reason: "A-34 scopes Tokocrypto as Binance ecosystem spot; no official futures/perpetual gateway mapping is enabled."
+  - operation: contract_product
+    reason: "A-34 scopes Tokocrypto as Binance ecosystem spot; no official standard futures/perpetual/options gateway mapping is enabled."
   - operation: live_private_write
-    reason: "Private trade endpoints are delivered as offline request specs/signing vectors only."
+    reason: "Private write endpoints remain offline request specs/signing vectors only; read-only order/fill readbacks are credential-gated runtime."
   - operation: withdrawals
     reason: "Wallet withdrawal endpoints are documented but out of exchange gateway trading runtime scope."
   - operation: symbol_type_3_nextme_live_routing
     reason: "Type=3 Nextme symbols use cloudme-toko.2meta.app endpoints and require a later dedicated profile."
   - operation: public_ws_runtime
     reason: "WebSocket subscribe/auth payloads are documented as fixtures; runtime stream connection is not enabled."
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：fee readback 仅保留 offline request-spec 边界，未提升为 runtime。"

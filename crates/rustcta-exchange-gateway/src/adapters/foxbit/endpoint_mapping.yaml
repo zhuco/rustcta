@@ -6,7 +6,7 @@ metadata:
   status: draft
   source: docs/foxbit_adapter.md
   last_reviewed: "2026-06-08"
-  notes: Foxbit Exchange REST/WS v3 spot adapter. BRL spot markets use lowercase compact symbols such as btcbrl. Live private writes remain offline request-spec only.
+  notes: Foxbit Exchange REST/WS v3 spot adapter. BRL spot markets use lowercase compact symbols such as btcbrl. Private readbacks are guarded by FOXBIT_PRIVATE_REST_ENABLED plus API credentials; live private writes remain offline request-spec only.
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -21,18 +21,42 @@ pagination:
   private_history: { mode: cursor_or_time, notes: audit before live promotion }
 reconciliation:
   private_state: rest_fallback
-  notes: Private WS is documented for account events only; not promoted until live read-only validation.
+  notes: Private REST readback is runtime behind an explicit env guard; Private WS is documented for account events only and remains auth-payload-only.
 batch:
-  place: { support: unsupported, reason: foxbit.native_batch_place_unsupported }
-  cancel: { support: unsupported, reason: foxbit.native_batch_cancel_unsupported }
+  place: { support: unsupported, reason: foxbit.batch_place_orders_unsupported }
+  cancel: { support: unsupported, reason: foxbit.batch_cancel_orders_unsupported }
 websocket:
   public:
     support: payload_helper
-    channels: [orderbook-100, orderbook-250, orderbook-500, orderbook-1000, trades, ticker]
+    channels: [orderbook, trades, ticker]
     heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 45000, stale_message_ms: 60000 }
+    order_book:
+      channel: orderbook
+      payload_family: orderbook
+      payload_variants_requiring_semantic_recheck: [100, 250, 500, 1000]
+      fixed_update_interval_ms: null
+      update_interval_boundary: no fixed ms documented
+      depth_boundary: no fixed depth documented
+      sequence: unsupported_no_official_sequence
+      checksum: unsupported_no_official_checksum
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: order_book
+        path: /markets/{market_symbol}/orderbook
   private:
     support: auth_payload_only
     auth_renewal: { mode: reconnect_and_login }
+unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile does not expose standard futures/perpetual/options products."
+  - amend_order
+  - place_order_list
+  - oco_order_list
+  - oto_order_list
+  - batch_place_orders
+  - batch_cancel_orders
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前已核资料没有稳定 trading fee-rate endpoint；成交手续费金额不能等同 maker/taker rate readback。"
 endpoints:
   - operation: symbol_rules
     product: spot
@@ -77,6 +101,9 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: spec_only
+    reason: "Foxbit account balance readback is fixture-backed, but shared get_balances runtime remains disabled pending HMAC auth smoke, balance parser normalization, account scope guard, and REST/private-stream reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/foxbit/request_specs/balances.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/foxbit/balances.json }
   - operation: open_orders
     product: spot
     market_types: [spot]
@@ -91,7 +118,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    reason: "Foxbit open-order readback uses guarded HMAC REST GET /orders with symbol scope and state=ACTIVE; fails closed unless FOXBIT_PRIVATE_REST_ENABLED plus API key/secret are configured."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/foxbit/request_specs/open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/foxbit/open_orders.json }
   - operation: query_order
     product: spot
     market_types: [spot]
@@ -106,7 +136,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    reason: "Foxbit order query uses guarded HMAC REST GET /orders/{order_id}; client-order-id query remains unsupported and runtime fails closed without FOXBIT_PRIVATE_REST_ENABLED plus API key/secret."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/foxbit/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/foxbit/order_ack.json }
   - operation: recent_fills
     product: spot
     market_types: [spot]
@@ -121,7 +154,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
+    reason: "Foxbit fill history uses guarded HMAC REST GET /trades with symbol scope and optional order_id/limit; runtime fails closed without FOXBIT_PRIVATE_REST_ENABLED plus API key/secret and context tenant/account."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/foxbit/request_specs/recent_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/foxbit/fills.json }
   - operation: place_order
     product: spot
     market_types: [spot]
@@ -137,6 +173,9 @@ endpoints:
     atomicity: non_atomic
     testnet: false
     support: spec_only
+    reason: "Foxbit single-order write is fixture-backed offline; runtime stays disabled pending HMAC auth smoke, order parser, post-write readback reconciliation, and live dry-run controls."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/foxbit/request_specs/create_order.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/foxbit/order_ack.json }
   - operation: cancel_order
     product: spot
     market_types: [spot]
@@ -152,12 +191,78 @@ endpoints:
     atomicity: non_atomic
     testnet: false
     support: spec_only
+    reason: "Foxbit cancel is fixture-backed offline; runtime stays disabled pending HMAC auth smoke, cancel parser/readback, reconciliation, and live dry-run controls."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/foxbit/request_specs/cancel_order.json }
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/foxbit/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: foxbit_private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: foxbit.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/foxbit/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: foxbit_private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: foxbit.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/foxbit/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: foxbit_private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: foxbit.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/foxbit/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: foxbit_private_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: foxbit.batch_cancel_orders_unsupported
 streams:
   - operation: public_orderbook_subscribe
     product: spot
     market_types: [spot]
     transport: websocket
-    channel: orderbook-1000
+    channel: orderbook
     auth: none
     support: spec_only
     resync: { endpoint_operation: order_book }

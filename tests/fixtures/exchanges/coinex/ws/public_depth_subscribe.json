@@ -1,0 +1,14 @@
+{
+  "id": 1,
+  "method": "depth.subscribe",
+  "params": {
+    "market_list": [
+      [
+        "BTCUSDT",
+        50,
+        "0",
+        false
+      ]
+    ]
+  }
+}

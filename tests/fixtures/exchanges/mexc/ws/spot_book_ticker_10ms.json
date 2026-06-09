@@ -1,0 +1,12 @@
+{
+  "channel": "spot@public.aggre.bookTicker.v3.api.pb@10ms@BTCUSDT",
+  "symbol": "BTCUSDT",
+  "sendTime": 1700000000100,
+  "publicBookTicker": {
+    "bidPrice": "65000.00",
+    "bidQuantity": "1.2",
+    "askPrice": "65010.00",
+    "askQuantity": "0.8",
+    "version": "102"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "exchange": "bitbank",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/user/assets",
+  "auth": "hmac",
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "non_empty"
+    },
+    "ACCESS-NONCE": {
+      "match": "non_empty"
+    },
+    "ACCESS-SIGNATURE": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "runtime_boundary": {
+    "status": "implemented",
+    "reason": "Credential-gated read-only runtime signs GET /v1/user/assets and parses data.assets into shared Balance snapshots.",
+    "test": "crates/rustcta-exchange-gateway/src/adapters/bitbank/tests.rs::bitbank_balances_should_sign_assets_request_and_parse_assets"
+  },
+  "body": null
+}

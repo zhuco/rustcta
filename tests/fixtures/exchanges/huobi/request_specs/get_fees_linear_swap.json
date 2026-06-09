@@ -1,0 +1,25 @@
+{
+  "exchange": "huobi",
+  "operation": "get_fees",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/linear-swap-api/v1/swap_fee",
+  "auth": "signed",
+  "credential_scope": "read_only",
+  "query": {
+    "AccessKeyId": { "match": "non_empty" },
+    "SignatureMethod": { "match": "exact", "value": "HmacSHA256" },
+    "SignatureVersion": { "match": "exact", "value": "2" },
+    "Timestamp": { "match": "non_empty" },
+    "Signature": { "match": "non_empty" }
+  },
+  "body": {
+    "contract_code": "BTC-USDT"
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "strict_body": true,
+  "official_source": "HTX/Huobi USDT-M swap_fee returns a user's commission rate for linear swap contracts.",
+  "runtime_boundary": "guarded_runtime; Huobi legacy shared get_fees reuses HTX signed swap_fee when HUOBI private REST credentials are configured."
+}

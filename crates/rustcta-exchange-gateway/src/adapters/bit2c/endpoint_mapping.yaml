@@ -25,14 +25,24 @@ reconciliation:
   private_stream_fallback: rest
   readbacks: [get_open_orders, query_order]
   unknown_order_policy: private_rest_disabled_until_signature_verified
+websocket:
+  public:
+    support: unsupported
+    reason: "Official Bit2C API scope exposes REST orderbook/top-book only; no public exchange-gateway order book WebSocket is documented."
+    order_book:
+      support: unsupported
+      fallback: rest_order_book_snapshot
+  private:
+    support: unsupported
+    reason: "No official private WebSocket stream is documented in the current API scope."
 websocket_policy:
   public_streams: unsupported
   private_streams: unsupported
   heartbeat: not_applicable_no_official_ws
   resync: rest_order_book_snapshot
 unsupported:
-  - perpetuals
-  - futures
+  - operation: contract_product
+    reason: "Current official/API profile is Spot-only and exposes no standard futures/perpetual/options product line."
   - margin
   - positions
   - leverage
@@ -48,6 +58,8 @@ unsupported:
   - withdrawals
   - merchant_checkout
   - broker_conversion
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：当前 private REST including fees 明确不启用。"
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -104,8 +116,13 @@ endpoints:
     weight: 1
     request_spec_required: true
     support: spec_only
+    reason: "Bit2C balance request spec is fixture-backed, but shared get_balances runtime remains disabled pending official response fixture, HMAC read-only runtime, balance parser, credential scope guard, and reconciliation."
     request_spec:
-      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_open_orders.json
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_balances.json
+    response_parser:
+      status: planned
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_balances.json
+      source: request_spec_only
   - operation: get_open_orders
     product: spot
     transport: rest
@@ -116,9 +133,14 @@ endpoints:
     rate_limit_bucket: bit2c_private
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
-      fixture: tests/fixtures/exchanges/bit2c/request_specs/query_order.json
+      status: implemented
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_open_orders.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bit2c/open_orders_success.json
+    notes: "Credential-gated signed GET runtime; requires Spot symbol/pair and keeps pagination unsupported until Bit2C semantics are pinned."
   - operation: query_order
     product: spot
     transport: rest
@@ -129,9 +151,14 @@ endpoints:
     rate_limit_bucket: bit2c_private
     weight: 1
     request_spec_required: true
-    support: spec_only
+    support: native
     request_spec:
-      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_balances.json
+      status: implemented
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/query_order.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bit2c/query_order_success.json
+    notes: "Credential-gated signed GET runtime; requires exchange_order_id and rejects client_order_id because Bit2C order lookup is id based."
   - operation: place_order
     product: spot
     transport: rest
@@ -160,3 +187,51 @@ endpoints:
     request_spec:
       fixture: tests/fixtures/exchanges/bit2c/request_specs/cancel_order.json
     notes: "Offline request-spec only; runtime private trading remains disabled."
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bit2c/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bit2c_private
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bit2c.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bit2c/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bit2c_private
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bit2c.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bit2c/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bit2c_private
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bit2c.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bit2c/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bit2c_private
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bit2c.batch_cancel_orders_unsupported

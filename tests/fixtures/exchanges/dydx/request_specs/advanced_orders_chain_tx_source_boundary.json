@@ -1,0 +1,54 @@
+{
+  "exchange": "dydx",
+  "boundary_type": "advanced_orders_chain_tx_source_boundary",
+  "runtime_status": "offline_source_boundary",
+  "operations": [
+    "amend_order",
+    "batch_place_orders",
+    "batch_cancel_orders"
+  ],
+  "official_capability": {
+    "product": "perpetual",
+    "chain": "dydx v4",
+    "order_messages": [
+      "MsgPlaceOrder",
+      "MsgCancelOrder"
+    ],
+    "amend_model": "replacement order transaction",
+    "batch_model": "multiple order messages in a signed chain transaction"
+  },
+  "offline_request_fixtures": [
+    "tests/fixtures/exchanges/dydx/request_specs/amend_order_node_tx_boundary.json",
+    "tests/fixtures/exchanges/dydx/request_specs/batch_place_orders_node_tx_boundary.json",
+    "tests/fixtures/exchanges/dydx/request_specs/batch_cancel_orders_node_tx_boundary.json"
+  ],
+  "parser_boundaries": [
+    "tests/fixtures/exchanges/dydx/parser/amend_order_tx_response_boundary.json",
+    "tests/fixtures/exchanges/dydx/parser/batch_place_orders_tx_response_boundary.json",
+    "tests/fixtures/exchanges/dydx/parser/batch_cancel_orders_tx_response_boundary.json"
+  ],
+  "unsupported_separation": {
+    "project_unimplemented": [
+      "amend_order",
+      "batch_place_orders",
+      "batch_cancel_orders"
+    ],
+    "unsupported": [
+      "place_order_list"
+    ]
+  },
+  "runtime_blockers": [
+    "wallet_transaction_signing",
+    "account_number_sequence_management",
+    "chain_id_and_subaccount_scope_guard",
+    "simulate_or_dry_run_safe_broadcast_guard",
+    "tx_response_parser",
+    "indexer_reconciliation_after_broadcast"
+  ],
+  "trade_enabled": false,
+  "expected_runtime_errors": {
+    "amend_order": "dydx.amend_requires_wallet_signer_account_sequence_subaccount_guard_dry_run_and_indexer_reconciliation",
+    "batch_place_orders": "dydx.batch_place_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation",
+    "batch_cancel_orders": "dydx.batch_cancel_requires_batch_tx_builder_wallet_signer_sequence_partial_parser_dry_run_and_indexer_reconciliation"
+  }
+}

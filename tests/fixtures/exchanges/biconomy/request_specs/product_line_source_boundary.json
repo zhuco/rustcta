@@ -1,0 +1,55 @@
+{
+  "exchange": "biconomy",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "operations": ["contract_product", "futures_product"],
+  "current_adapter_scope": ["spot"],
+  "official_product_lines": ["futures", "perpetual"],
+  "official_sources": [
+    {
+      "url": "https://www.biconomy.com/",
+      "evidence": "Official Biconomy product material includes Futures/Perpetual surfaces, but stable endpoint specs are not pinned in the spot adapter."
+    }
+  ],
+  "runtime_isolation": "Do not infer Biconomy futures/perpetual runtime from spot REST endpoints or spot private account parsers.",
+  "unsupported_runtime_reason": "Biconomy futures/perpetual surfaces have official product-line clues, but stable endpoint specs, contract metadata, positions/risk and order lifecycle parsers are not pinned.",
+  "required_endpoints": {
+    "market_metadata": [
+      "futures/perpetual instruments",
+      "contract specifications",
+      "settlement asset and precision rules"
+    ],
+    "public_market_data": [
+      "futures/perpetual order book",
+      "futures/perpetual ticker",
+      "futures/perpetual trades"
+    ],
+    "private_account": [
+      "margin balances",
+      "positions",
+      "risk limits or leverage settings"
+    ],
+    "private_order_lifecycle": [
+      "futures/perpetual place order",
+      "futures/perpetual cancel order",
+      "futures/perpetual query/open orders",
+      "futures/perpetual fills"
+    ]
+  },
+  "required_auth_and_scope": [
+    "stable futures/perpetual API host and auth scheme",
+    "read-only and trade permission scope guard",
+    "product-scoped live-dry-run guard"
+  ],
+  "unsafe_to_promote_without": [
+    "stable official futures/perpetual endpoint specs",
+    "contract metadata and risk parser fixtures",
+    "position readback and order lifecycle parser coverage",
+    "write/readback reconciliation"
+  ],
+  "remaining_work": [
+    "verify stable futures/perpetual API endpoint specs",
+    "add contract metadata, leverage and position readbacks",
+    "add futures order lifecycle request specs and parser fixtures"
+  ]
+}

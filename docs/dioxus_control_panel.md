@@ -119,10 +119,11 @@ Port `8091` is the canonical local control panel entrypoint. The
 `rustcta-control-api` process serves both the Dioxus static assets and every
 `/api/*` route on `127.0.0.1:8091`.
 
-Do not use `dx serve` to run the operator control panel. `dx serve` starts a
-separate frontend-only development server on another port and is useful only for
-isolated UI work; it is not the live control API endpoint. For normal local
-operation use `rustcta-control-api` with `RUSTCTA_CONTROL_API_STATIC_DIR`.
+Do not run any RustCTA control-panel Web service on another port. Do not use
+`dx serve`, port `8080`, or an alternate `RUSTCTA_CONTROL_API_BIND` for this
+panel. Build the Dioxus static assets and serve them through
+`rustcta-control-api` on `127.0.0.1:8091`; that one process owns both static
+files and `/api/*` routes.
 
 Static assets are public on the local listener. `/api/*` routes return
 secret-free read models and audited command responses.
@@ -301,7 +302,7 @@ The smoke test checks:
 
 ## Troubleshooting
 
-- Wrong port or blank UI: use `http://127.0.0.1:8091`. Do not use an ad-hoc `dx serve` port for operator access.
+- Wrong port or blank UI: use `http://127.0.0.1:8091`. Do not run an ad-hoc frontend server, `dx serve`, or any RustCTA control-panel Web service on another port.
 - Empty/default workspace: the supervisor registry or typed runtime snapshots are not configured yet.
 - Missing static UI: build Dioxus and confirm `web-ui/dioxus/dist/index.html` exists, then set `RUSTCTA_CONTROL_API_STATIC_DIR`.
 - Public link unreachable over SSH tunnel: confirm `rustcta-control-api` is listening on `127.0.0.1:8091` on the server and the SSH session is still open.

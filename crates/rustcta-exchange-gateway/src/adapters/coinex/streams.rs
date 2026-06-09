@@ -9,13 +9,37 @@ use rustcta_exchange_api::{PrivateOrderStreamEventKind, PrivateStreamCapabilitie
 use rustcta_types::MarketType;
 use serde_json::{json, Value};
 
-use super::parser::normalize_coinex_symbol;
+use super::parser::{normalize_coinex_symbol, parse_error, parse_orderbook_snapshot};
 use super::signing::sign_request;
 use super::CoinExGatewayAdapter;
 use crate::adapters::ensure_exchange_api_schema;
 
 pub const COINEX_PUBLIC_WS_URL: &str = "wss://socket.coinex.com/v2/spot";
 pub const COINEX_PRIVATE_WS_URL: &str = "wss://socket.coinex.com/v2/spot";
+pub const COINEX_PUBLIC_DEPTH_PUSH_DELAY_MS: u16 = 200;
+pub const COINEX_PUBLIC_DEPTH_FULL_REFRESH_MS: u32 = 60_000;
+pub const COINEX_PUBLIC_DEPTH_LIMITS: [u16; 4] = [5, 10, 20, 50];
+pub const COINEX_PUBLIC_DEPTH_DEFAULT_LIMIT: u16 = 50;
+pub const COINEX_PUBLIC_DEPTH_DEFAULT_INTERVAL: &str = "0";
+pub const COINEX_PUBLIC_DEPTH_INTERVALS: [&str; 17] = [
+    "0",
+    "0.00000000001",
+    "0.000000000001",
+    "0.0000000001",
+    "0.000000001",
+    "0.00000001",
+    "0.0000001",
+    "0.000001",
+    "0.00001",
+    "0.0001",
+    "0.001",
+    "0.01",
+    "0.1",
+    "1",
+    "10",
+    "100",
+    "1000",
+];
 
 impl CoinExGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
@@ -125,6 +149,80 @@ pub enum CoinExStreamControlMessage {
     Data(Value),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoinExPublicOrderBookWsPolicy {
+    pub subscribe_method: &'static str,
+    pub update_method: &'static str,
+    pub push_delay_ms: u16,
+    pub full_refresh_interval_ms: u32,
+    pub supported_limits: &'static [u16],
+    pub default_limit: u16,
+    pub supported_merge_intervals: &'static [&'static str],
+    pub default_merge_interval: &'static str,
+    pub checksum_algorithm: &'static str,
+    pub checksum_type: &'static str,
+    pub resync_strategy: &'static str,
+}
+
+impl CoinExPublicOrderBookWsPolicy {
+    pub fn as_json(&self) -> Value {
+        json!({
+            "subscribe_method": self.subscribe_method,
+            "update_method": self.update_method,
+            "push_delay_ms": self.push_delay_ms,
+            "full_refresh_interval_ms": self.full_refresh_interval_ms,
+            "limit": {
+                "default": self.default_limit,
+                "supported": self.supported_limits,
+            },
+            "merge_interval": {
+                "default": self.default_merge_interval,
+                "supported": self.supported_merge_intervals,
+            },
+            "params_shape": {
+                "field": "market_list",
+                "item": ["market", "limit", "interval", "is_full"],
+            },
+            "semantics": {
+                "is_full_true": "every changed push carries the full subscribed depth; full market depth refresh is also sent about every minute",
+                "is_full_false": "pushes incremental changed levels about every 200ms; quantity 0 deletes a level",
+            },
+            "checksum": {
+                "algorithm": self.checksum_algorithm,
+                "type": self.checksum_type,
+                "string": "bid1_price:bid1_amount:bid2_price:bid2_amount:ask1_price:ask1_amount:...",
+                "resync_on_mismatch": true,
+            },
+            "resync": self.resync_strategy,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoinExDepthSubscriptionSpec {
+    pub market: String,
+    pub limit: u16,
+    pub merge_interval: String,
+    pub is_full: bool,
+}
+
+impl CoinExDepthSubscriptionSpec {
+    pub fn params_entry(&self) -> Value {
+        json!([self.market, self.limit, self.merge_interval, self.is_full])
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoinExPublicOrderBookUpdate {
+    pub market: String,
+    pub is_full: bool,
+    pub order_book: rustcta_types::OrderBookSnapshot,
+    pub deleted_bid_prices: Vec<String>,
+    pub deleted_ask_prices: Vec<String>,
+    pub checksum: Option<i64>,
+    pub checksum_matches_payload: Option<bool>,
+}
+
 pub fn coinex_private_stream_capabilities(enabled: bool) -> PrivateStreamCapabilities {
     if !enabled {
         return PrivateStreamCapabilities::unsupported(EXCHANGE_API_SCHEMA_VERSION);
@@ -166,6 +264,22 @@ pub fn coinex_public_ws_policy(
     })
 }
 
+pub fn coinex_public_orderbook_ws_policy() -> CoinExPublicOrderBookWsPolicy {
+    CoinExPublicOrderBookWsPolicy {
+        subscribe_method: "depth.subscribe",
+        update_method: "depth.update",
+        push_delay_ms: COINEX_PUBLIC_DEPTH_PUSH_DELAY_MS,
+        full_refresh_interval_ms: COINEX_PUBLIC_DEPTH_FULL_REFRESH_MS,
+        supported_limits: &COINEX_PUBLIC_DEPTH_LIMITS,
+        default_limit: COINEX_PUBLIC_DEPTH_DEFAULT_LIMIT,
+        supported_merge_intervals: &COINEX_PUBLIC_DEPTH_INTERVALS,
+        default_merge_interval: COINEX_PUBLIC_DEPTH_DEFAULT_INTERVAL,
+        checksum_algorithm: "crc32",
+        checksum_type: "signed_i32",
+        resync_strategy: "build from REST /spot/depth, subscribe to depth.update, apply full or incremental pushes, and rebuild/resubscribe after reconnect, stale stream, parse error, or checksum mismatch",
+    }
+}
+
 pub fn coinex_private_ws_policy(
     subscription: &PrivateStreamSubscription,
     api_key: &str,
@@ -201,7 +315,11 @@ pub fn coinex_public_subscribe_payload(
     let market = normalize_coinex_symbol(&subscription.symbol.exchange_symbol.symbol)?;
     let (method, params) = match &subscription.kind {
         PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => {
-            ("depth.subscribe", json!([market, 50, "0", true]))
+            let spec = coinex_depth_subscription_spec(&market, &subscription.kind)?;
+            (
+                "depth.subscribe",
+                json!({ "market_list": [spec.params_entry()] }),
+            )
         }
         PublicStreamKind::Trades => ("deals.subscribe", json!([market])),
         PublicStreamKind::Ticker => ("state.subscribe", json!([market])),
@@ -212,6 +330,51 @@ pub fn coinex_public_subscribe_payload(
         "method": method,
         "params": params,
     }))
+}
+
+pub fn coinex_depth_subscription_spec(
+    market: &str,
+    kind: &PublicStreamKind,
+) -> ExchangeApiResult<CoinExDepthSubscriptionSpec> {
+    let is_full = match kind {
+        PublicStreamKind::OrderBookSnapshot => true,
+        PublicStreamKind::OrderBookDelta => false,
+        _ => {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "coinex.depth_subscription_kind",
+            });
+        }
+    };
+    coinex_custom_depth_subscription_spec(
+        market,
+        COINEX_PUBLIC_DEPTH_DEFAULT_LIMIT,
+        COINEX_PUBLIC_DEPTH_DEFAULT_INTERVAL,
+        is_full,
+    )
+}
+
+pub fn coinex_custom_depth_subscription_spec(
+    market: &str,
+    limit: u16,
+    merge_interval: &str,
+    is_full: bool,
+) -> ExchangeApiResult<CoinExDepthSubscriptionSpec> {
+    if !COINEX_PUBLIC_DEPTH_LIMITS.contains(&limit) {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "coinex.depth_limit",
+        });
+    }
+    if !COINEX_PUBLIC_DEPTH_INTERVALS.contains(&merge_interval) {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "coinex.depth_merge_interval",
+        });
+    }
+    Ok(CoinExDepthSubscriptionSpec {
+        market: normalize_coinex_symbol(market)?,
+        limit,
+        merge_interval: merge_interval.to_string(),
+        is_full,
+    })
 }
 
 pub fn coinex_public_channel(
@@ -238,10 +401,17 @@ pub fn coinex_public_unsubscribe_payload(
         PublicStreamKind::Ticker => "state.unsubscribe",
         PublicStreamKind::Candles { .. } => "kline.unsubscribe",
     };
+    let market = normalize_coinex_symbol(&subscription.symbol.exchange_symbol.symbol)?;
+    let params = match &subscription.kind {
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => {
+            json!({ "market_list": [market] })
+        }
+        _ => json!([market]),
+    };
     Ok(json!({
         "id": id,
         "method": method,
-        "params": [normalize_coinex_symbol(&subscription.symbol.exchange_symbol.symbol)?],
+        "params": params,
     }))
 }
 
@@ -383,8 +553,181 @@ pub fn parse_coinex_stream_control(value: &Value) -> CoinExStreamControlMessage 
     CoinExStreamControlMessage::Data(value.clone())
 }
 
+pub fn parse_coinex_public_orderbook_update(
+    exchange_id: &rustcta_types::ExchangeId,
+    symbol: rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<CoinExPublicOrderBookUpdate> {
+    if value.get("method").and_then(Value::as_str) != Some("depth.update") {
+        return Err(parse_error(
+            exchange_id.clone(),
+            "CoinEx public order book message is not depth.update",
+            value,
+        ));
+    }
+    let data = value.get("data").ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "CoinEx depth.update missing data",
+            value,
+        )
+    })?;
+    let market = data
+        .get("market")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| symbol.exchange_symbol.symbol.clone());
+    let is_full = data
+        .get("is_full")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let deleted_bid_prices =
+        coinex_zero_quantity_prices(data.get("depth").unwrap_or(data), "bids")?;
+    let deleted_ask_prices =
+        coinex_zero_quantity_prices(data.get("depth").unwrap_or(data), "asks")?;
+    let book_data = coinex_nonzero_depth_data(data);
+    let order_book = parse_orderbook_snapshot(exchange_id, symbol, &book_data)?;
+    let depth = data.get("depth").unwrap_or(data);
+    let checksum = depth.get("checksum").and_then(value_as_i64);
+    let checksum_matches_payload = coinex_depth_checksum_matches(depth)?;
+    Ok(CoinExPublicOrderBookUpdate {
+        market,
+        is_full,
+        order_book,
+        deleted_bid_prices,
+        deleted_ask_prices,
+        checksum,
+        checksum_matches_payload,
+    })
+}
+
+pub fn coinex_depth_checksum_matches(depth: &Value) -> ExchangeApiResult<Option<bool>> {
+    let expected = match depth.get("checksum").and_then(value_as_i64) {
+        Some(checksum) => checksum,
+        None => return Ok(None),
+    };
+    let checksum_string = coinex_depth_checksum_string(depth)?;
+    let signed = coinex_crc32_signed(checksum_string.as_bytes());
+    let unsigned = coinex_crc32_unsigned(checksum_string.as_bytes()) as i64;
+    Ok(Some(expected == signed || expected == unsigned))
+}
+
+pub fn coinex_depth_checksum_string(depth: &Value) -> ExchangeApiResult<String> {
+    let mut parts = Vec::new();
+    append_coinex_checksum_levels(&mut parts, depth.get("bids"))?;
+    append_coinex_checksum_levels(&mut parts, depth.get("asks"))?;
+    Ok(parts.join(":"))
+}
+
+pub fn coinex_crc32_signed(bytes: &[u8]) -> i64 {
+    coinex_crc32_unsigned(bytes) as i32 as i64
+}
+
+pub fn coinex_crc32_unsigned(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffff_u32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
+}
+
 pub fn coinex_ws_now_ms() -> i64 {
     Utc::now().timestamp_millis()
+}
+
+fn append_coinex_checksum_levels(
+    parts: &mut Vec<String>,
+    levels: Option<&Value>,
+) -> ExchangeApiResult<()> {
+    let Some(levels) = levels.and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for level in levels {
+        let array = level.as_array().ok_or_else(|| {
+            parse_error(
+                rustcta_types::ExchangeId::new("coinex").expect("coinex exchange id"),
+                "CoinEx checksum level is not an array",
+                level,
+            )
+        })?;
+        let price = checksum_part(array.first()).ok_or_else(|| {
+            parse_error(
+                rustcta_types::ExchangeId::new("coinex").expect("coinex exchange id"),
+                "CoinEx checksum level missing price",
+                level,
+            )
+        })?;
+        let amount = checksum_part(array.get(1)).ok_or_else(|| {
+            parse_error(
+                rustcta_types::ExchangeId::new("coinex").expect("coinex exchange id"),
+                "CoinEx checksum level missing amount",
+                level,
+            )
+        })?;
+        parts.push(price);
+        parts.push(amount);
+    }
+    Ok(())
+}
+
+fn coinex_zero_quantity_prices(depth: &Value, side: &str) -> ExchangeApiResult<Vec<String>> {
+    let Some(levels) = depth.get(side).and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut prices = Vec::new();
+    for level in levels {
+        let array = level.as_array().ok_or_else(|| {
+            parse_error(
+                rustcta_types::ExchangeId::new("coinex").expect("coinex exchange id"),
+                "CoinEx depth level is not an array",
+                level,
+            )
+        })?;
+        if array.get(1).is_some_and(is_zero_quantity) {
+            if let Some(price) = checksum_part(array.first()) {
+                prices.push(price);
+            }
+        }
+    }
+    Ok(prices)
+}
+
+fn coinex_nonzero_depth_data(data: &Value) -> Value {
+    let mut normalized = data.clone();
+    let Some(depth) = normalized.get_mut("depth").and_then(Value::as_object_mut) else {
+        return normalized;
+    };
+    for side in ["bids", "asks"] {
+        if let Some(levels) = depth.get_mut(side).and_then(Value::as_array_mut) {
+            levels.retain(|level| {
+                level
+                    .as_array()
+                    .and_then(|array| array.get(1))
+                    .is_none_or(|quantity| !is_zero_quantity(quantity))
+            });
+        }
+    }
+    normalized
+}
+
+fn is_zero_quantity(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.parse::<f64>().is_ok_and(|number| number == 0.0),
+        Value::Number(number) => number.as_f64().is_some_and(|number| number == 0.0),
+        _ => false,
+    }
+}
+
+fn checksum_part(value: Option<&Value>) -> Option<String> {
+    value.and_then(|value| match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    })
 }
 
 fn value_as_i64(value: &Value) -> Option<i64> {

@@ -17,6 +17,10 @@
     "post_only",
     "client_order_id",
     "cancel_all_orders",
+    "amend_order",
+    "place_order_list",
+    "batch_place_orders",
+    "batch_cancel_orders",
     "batch_orders"
   ],
   "expected_runtime_errors": [
@@ -24,8 +28,23 @@
     "coinmetro.reduce_only_unsupported_spot",
     "coinmetro.post_only_unsupported",
     "coinmetro.client_order_id_unsupported",
+    "coinmetro.modify_order_unmapped_requires_native_qty_fields",
+    "coinmetro.order_list_unsupported",
+    "coinmetro.batch_place_orders_composed_not_exposed",
+    "coinmetro.batch_cancel_orders_composed_not_exposed",
     "coinmetro.cancel_all_orders_no_native_endpoint"
   ],
+  "advanced_order_boundary": {
+    "support": "unsupported",
+    "operations": [
+      "amend_order",
+      "place_order_list",
+      "batch_place_orders",
+      "batch_cancel_orders",
+      "cancel_all_orders"
+    ],
+    "reason": "Current Coinmetro spot adapter intentionally exposes only single-order REST lifecycle. Shared amend lacks a safe native Coinmetro quantity/currency remap, OCO/OTO/order-list has no mapped endpoint, and native batch/cancel-all semantics are not documented for this profile."
+  },
   "trade_enabled": true,
   "funding_enabled": false
 }

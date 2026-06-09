@@ -311,6 +311,53 @@ fn dual_taker_open_should_use_one_shared_quantity_and_configured_spread_window()
 }
 
 #[test]
+fn dual_taker_open_should_keep_only_best_route_per_symbol() {
+    let now = fixed_now();
+    let edge = CanonicalSymbol::new("EDGE", "USDT");
+    let drift = CanonicalSymbol::new("DRIFT", "USDT");
+    let mut precision = precision_registry(&edge);
+    for exchange in ["binance", "gate", "bitget"] {
+        precision.insert(
+            ExchangeId::new(exchange),
+            drift.clone(),
+            SymbolPrecision {
+                price_tick: 0.01,
+                quantity_step: 0.001,
+                min_quantity: 0.001,
+                min_notional_usdt: 0.0,
+                quantity_unit: QuantityUnit::Base,
+                contract_size: 1.0,
+            },
+        );
+    }
+    let fee_model = FeeModel::default();
+    let config = DualTakerArbitrageConfig {
+        target_notional_usdt: 5.5,
+        min_open_spread_pct: 0.001,
+        max_open_spread_pct: 0.05,
+        ..DualTakerArbitrageConfig::default()
+    };
+    let books = vec![
+        book("binance", &edge, 99.9, 100.0, 20.0, 20.0, now),
+        book("gate", &edge, 100.6, 100.7, 20.0, 20.0, now),
+        book("bitget", &edge, 100.9, 101.0, 20.0, 20.0, now),
+        book("binance", &drift, 49.9, 50.0, 20.0, 20.0, now),
+        book("gate", &drift, 50.3, 50.4, 20.0, 20.0, now),
+    ];
+
+    let opportunities =
+        evaluate_dual_taker_open_opportunities(&books, &precision, &fee_model, &config, now);
+
+    assert_eq!(opportunities.len(), 2);
+    assert_eq!(opportunities[0].canonical_symbol, edge);
+    assert_eq!(opportunities[0].long_exchange, ExchangeId::new("binance"));
+    assert_eq!(opportunities[0].short_exchange, ExchangeId::new("bitget"));
+    assert_eq!(opportunities[1].canonical_symbol, drift);
+    assert_eq!(opportunities[1].long_exchange, ExchangeId::new("binance"));
+    assert_eq!(opportunities[1].short_exchange, ExchangeId::new("gate"));
+}
+
+#[test]
 fn open_quantity_should_use_top_depth_usdt_capacity_and_skip_thin_books() {
     let now = fixed_now();
     let symbol = CanonicalSymbol::new("EDGE", "USDT");
@@ -343,6 +390,54 @@ fn open_quantity_should_use_top_depth_usdt_capacity_and_skip_thin_books() {
             .is_empty(),
         "6 USDT top depth * 80% is below the 5.5 USDT target"
     );
+}
+
+#[test]
+fn open_quantity_should_allow_step_rounded_notional_below_target() {
+    let now = fixed_now();
+    let symbol = CanonicalSymbol::new("ESPORTS", "USDT");
+    let mut precision = PrecisionRegistry::default();
+    for exchange in ["binance", "bitget"] {
+        precision.insert(
+            ExchangeId::new(exchange),
+            symbol.clone(),
+            SymbolPrecision {
+                price_tick: 0.00001,
+                quantity_step: 1.0,
+                min_quantity: 1.0,
+                min_notional_usdt: 5.0,
+                quantity_unit: QuantityUnit::Base,
+                contract_size: 1.0,
+            },
+        );
+    }
+    let config = DualTakerArbitrageConfig {
+        target_notional_usdt: 5.5,
+        min_open_spread_pct: 0.004,
+        max_open_spread_pct: 0.05,
+        top_of_book_capacity_ratio: 0.8,
+        ..DualTakerArbitrageConfig::default()
+    };
+    let books = vec![
+        book("binance", &symbol, 0.06872, 0.06874, 445.0, 2364.0, now),
+        book("bitget", &symbol, 0.06941, 0.06949, 260.0, 519.0, now),
+    ];
+
+    let opportunity = evaluate_dual_taker_open_opportunities(
+        &books,
+        &precision,
+        &FeeModel::default(),
+        &config,
+        now,
+    )
+    .pop()
+    .expect("step-rounded 5 USDT+ order should remain executable");
+
+    assert_eq!(opportunity.quantity, 80.0);
+    assert!(opportunity.long_notional_usdt < config.target_notional_usdt);
+    assert!(opportunity.long_notional_usdt >= 5.0);
+    assert_eq!(opportunity.orders[0].quantity, 80.0);
+    assert_eq!(opportunity.orders[1].quantity, 80.0);
 }
 
 #[test]
@@ -545,6 +640,88 @@ fn close_evaluation_should_require_net_profit_after_four_taker_fees() {
 }
 
 #[test]
+fn close_evaluation_should_not_close_on_max_hold_when_profit_required() {
+    let now = fixed_now();
+    let symbol = CanonicalSymbol::new("EDGE", "USDT");
+    let precision = precision_registry(&symbol);
+    let fee_model = FeeModel::default();
+    let config = DualTakerArbitrageConfig {
+        close_min_net_profit_pct: 0.002,
+        max_hold_secs: 60,
+        close_on_max_hold_requires_profit: true,
+        ..DualTakerArbitrageConfig::default()
+    };
+    let position = OpenArbitragePosition {
+        bundle_id: "bundle-max-hold-profit-required".to_string(),
+        canonical_symbol: symbol.clone(),
+        long_exchange: ExchangeId::new("binance"),
+        short_exchange: ExchangeId::new("gate"),
+        quantity: 0.054,
+        long_entry_price: 100.0,
+        short_entry_price: 100.6,
+        opened_at: now - Duration::seconds(61),
+    };
+    let long_book = book("binance", &symbol, 100.0, 100.1, 20.0, 20.0, now);
+    let short_book = book("gate", &symbol, 100.6, 100.7, 20.0, 20.0, now);
+
+    let close = evaluate_dual_taker_close(
+        &position,
+        &long_book,
+        &short_book,
+        &precision,
+        &fee_model,
+        &config,
+        now,
+    )
+    .expect("fresh close books should evaluate");
+
+    assert!(!close.should_close);
+    assert_eq!(close.reason, None);
+    assert!(close.net_profit_pct < config.close_min_net_profit_pct);
+}
+
+#[test]
+fn close_evaluation_should_keep_legacy_max_hold_close_when_profit_not_required() {
+    let now = fixed_now();
+    let symbol = CanonicalSymbol::new("EDGE", "USDT");
+    let precision = precision_registry(&symbol);
+    let fee_model = FeeModel::default();
+    let config = DualTakerArbitrageConfig {
+        close_min_net_profit_pct: 0.002,
+        max_hold_secs: 60,
+        close_on_max_hold_requires_profit: false,
+        ..DualTakerArbitrageConfig::default()
+    };
+    let position = OpenArbitragePosition {
+        bundle_id: "bundle-max-hold-legacy".to_string(),
+        canonical_symbol: symbol.clone(),
+        long_exchange: ExchangeId::new("binance"),
+        short_exchange: ExchangeId::new("gate"),
+        quantity: 0.054,
+        long_entry_price: 100.0,
+        short_entry_price: 100.6,
+        opened_at: now - Duration::seconds(61),
+    };
+    let long_book = book("binance", &symbol, 100.0, 100.1, 20.0, 20.0, now);
+    let short_book = book("gate", &symbol, 100.6, 100.7, 20.0, 20.0, now);
+
+    let close = evaluate_dual_taker_close(
+        &position,
+        &long_book,
+        &short_book,
+        &precision,
+        &fee_model,
+        &config,
+        now,
+    )
+    .expect("fresh close books should evaluate");
+
+    assert!(close.should_close);
+    assert_eq!(close.reason, Some(CloseReason::MaxHoldTime));
+    assert!(close.net_profit_pct < config.close_min_net_profit_pct);
+}
+
+#[test]
 fn risk_state_should_limit_symbol_concurrency_cooldown_and_exchange_positions() {
     let now = fixed_now();
     let symbol = CanonicalSymbol::new("EDGE", "USDT");
@@ -575,8 +752,35 @@ fn risk_state_should_limit_symbol_concurrency_cooldown_and_exchange_positions() 
         Err(OpenBlockReason::SymbolCoolingDown)
     );
 
+    let mut max_bundles = ArbitrageRiskState::default();
+    let max_bundle_config = DualTakerArbitrageConfig {
+        max_open_bundles: 1,
+        max_positions_per_exchange: 10,
+        ..DualTakerArbitrageConfig::default()
+    };
+    max_bundles.record_open(open_position(
+        "bundle-total-limit",
+        CanonicalSymbol::new("TOTAL", "USDT"),
+        now,
+    ));
+    assert_eq!(
+        max_bundles.can_open(
+            &CanonicalSymbol::new("NEXT", "USDT"),
+            &ExchangeId::new("binance"),
+            &ExchangeId::new("bitget"),
+            &max_bundle_config,
+            now,
+        ),
+        Err(OpenBlockReason::MaxOpenBundles)
+    );
+
+    let exchange_limit_config = DualTakerArbitrageConfig {
+        max_open_bundles: 20,
+        max_positions_per_exchange: 2,
+        ..DualTakerArbitrageConfig::default()
+    };
     let mut saturated = ArbitrageRiskState::default();
-    for index in 0..config.max_positions_per_exchange {
+    for index in 0..exchange_limit_config.max_positions_per_exchange {
         saturated.record_open(open_position(
             &format!("bundle-{index}"),
             CanonicalSymbol::new(format!("EDGE{index}"), "USDT"),
@@ -588,7 +792,7 @@ fn risk_state_should_limit_symbol_concurrency_cooldown_and_exchange_positions() 
             &CanonicalSymbol::new("NEXT", "USDT"),
             &ExchangeId::new("binance"),
             &ExchangeId::new("bitget"),
-            &config,
+            &exchange_limit_config,
             now,
         ),
         Err(OpenBlockReason::ExchangePositionLimit)

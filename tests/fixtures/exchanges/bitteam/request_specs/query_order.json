@@ -1,0 +1,20 @@
+{
+  "exchange": "bitteam",
+  "operation": "bitteam.query_order",
+  "request_spec_only": false,
+  "runtime_enabled": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/trade/api/ccxt/order",
+  "auth": "api_key",
+  "credential_scope": "read_only",
+  "headers_shape": [
+    "Authorization"
+  ],
+  "query": {
+    "orderId": "btm_order_1",
+    "pair": "BTC_USDT"
+  },
+  "runtime_guard": "BITTEAM_PRIVATE_REST_ENABLED plus Basic auth credentials",
+  "source_boundary": "BIT.TEAM private query_order is credential-gated read-only runtime; writes remain offline until live dry-run controls are validated."
+}

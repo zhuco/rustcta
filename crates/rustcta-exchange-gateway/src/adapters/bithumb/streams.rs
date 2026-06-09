@@ -15,6 +15,22 @@ const BITHUMB_WS_PING_INTERVAL_MS: i64 = 30_000;
 const BITHUMB_WS_PONG_TIMEOUT_MS: i64 = 45_000;
 const BITHUMB_WS_STALE_MESSAGE_MS: i64 = 60_000;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BithumbPublicOrderBookWsPolicy {
+    pub url: &'static str,
+    pub channel: &'static str,
+    pub request_protocol: &'static str,
+    pub snapshot_switch: &'static str,
+    pub realtime_switch: &'static str,
+    pub default_level: i64,
+    pub level_semantics: &'static str,
+    pub fixed_update_interval_ms: Option<i64>,
+    pub sequence_field: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub rest_snapshot_endpoint: &'static str,
+    pub resync_strategy: &'static str,
+}
+
 impl BithumbGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -79,6 +95,23 @@ pub fn bithumb_private_stream_capabilities(enabled: bool) -> PrivateStreamCapabi
 pub fn bithumb_public_subscribe_payload(
     subscription: &PublicStreamSubscription,
 ) -> ExchangeApiResult<Value> {
+    if matches!(
+        subscription.kind,
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot
+    ) {
+        let market = normalize_bithumb_symbol(&subscription.symbol.exchange_symbol.symbol)?;
+        return Ok(json!([
+            {"ticket": "rustcta"},
+            {
+                "type": "orderbook",
+                "codes": [market],
+                "is_only_snapshot": matches!(subscription.kind, PublicStreamKind::OrderBookSnapshot),
+                "is_only_realtime": matches!(subscription.kind, PublicStreamKind::OrderBookDelta),
+                "level": bithumb_public_order_book_ws_policy().default_level
+            },
+            {"format": "DEFAULT"}
+        ]));
+    }
     Ok(json!({
         "type": bithumb_public_channel(subscription)?,
         "symbols": [legacy_ws_symbol(&subscription.symbol.exchange_symbol.symbol)?],
@@ -104,13 +137,30 @@ pub fn bithumb_reconnect_policy_ms() -> (i64, i64, i64) {
     )
 }
 
+pub fn bithumb_public_order_book_ws_policy() -> BithumbPublicOrderBookWsPolicy {
+    BithumbPublicOrderBookWsPolicy {
+        url: "wss://ws-api.bithumb.com/websocket/v1",
+        channel: "orderbook",
+        request_protocol: "json_array_ticket_type_format",
+        snapshot_switch: "is_only_snapshot",
+        realtime_switch: "is_only_realtime",
+        default_level: 0,
+        level_semantics: "price aggregation unit; not a fixed depth selector",
+        fixed_update_interval_ms: None,
+        sequence_field: None,
+        checksum: None,
+        rest_snapshot_endpoint: "/v1/orderbook",
+        resync_strategy: "fetch REST /v1/orderbook snapshot on connect/reconnect or stale stream, then resubscribe because no orderbook sequence/checksum is documented",
+    }
+}
+
 pub fn bithumb_public_channel(
     subscription: &PublicStreamSubscription,
 ) -> ExchangeApiResult<&'static str> {
     Ok(match subscription.kind {
         PublicStreamKind::Ticker => "ticker",
         PublicStreamKind::Trades => "transaction",
-        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => "orderbookdepth",
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => "orderbook",
         PublicStreamKind::Candles { .. } => {
             return Err(ExchangeApiError::Unsupported {
                 operation: "bithumb.websocket_candles",

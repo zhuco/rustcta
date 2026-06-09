@@ -58,6 +58,7 @@ pub fn parse_balances(
                 .unwrap_or(available);
             let locked = row
                 .get("frozen")
+                .or_else(|| row.get("margin_frozen"))
                 .or_else(|| row.get("lock"))
                 .and_then(value_as_f64)
                 .unwrap_or(0.0);
@@ -233,16 +234,26 @@ pub fn cancelled_order(
 }
 
 pub fn parse_fee_rates(symbols: &[SymbolScope], value: &Value) -> Vec<FeeRateSnapshot> {
+    let row = rows(value)
+        .first()
+        .or_else(|| value.as_object().map(|_| value))
+        .unwrap_or(value);
     let maker = text(
-        value
-            .get("maker_fee_rate")
-            .or_else(|| value.get("maker-fee-rate")),
+        row.get("maker_fee_rate")
+            .or_else(|| row.get("maker-fee-rate"))
+            .or_else(|| row.get("maker_fee"))
+            .or_else(|| row.get("maker"))
+            .or_else(|| row.get("fee_rate"))
+            .or_else(|| row.get("fee-rate")),
     )
     .unwrap_or_else(|| "0.002".to_string());
     let taker = text(
-        value
-            .get("taker_fee_rate")
-            .or_else(|| value.get("taker-fee-rate")),
+        row.get("taker_fee_rate")
+            .or_else(|| row.get("taker-fee-rate"))
+            .or_else(|| row.get("taker_fee"))
+            .or_else(|| row.get("taker"))
+            .or_else(|| row.get("fee_rate"))
+            .or_else(|| row.get("fee-rate")),
     )
     .unwrap_or_else(|| "0.002".to_string());
     symbols

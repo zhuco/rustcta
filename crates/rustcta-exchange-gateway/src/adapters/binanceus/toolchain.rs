@@ -190,6 +190,16 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             "/unsupported/binanceus/place_order_list",
             CredentialScope::Trade,
         ),
+        (
+            "batch_place_orders",
+            "/unsupported/binanceus/batch_place_orders",
+            CredentialScope::Trade,
+        ),
+        (
+            "batch_cancel_orders",
+            "/unsupported/binanceus/batch_cancel_orders",
+            CredentialScope::Trade,
+        ),
     ] {
         endpoints.push(rest_endpoint(
             operation,

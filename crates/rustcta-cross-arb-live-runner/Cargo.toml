@@ -8,15 +8,21 @@ publish.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
 rustcta-exchange-api.workspace = true
 rustcta-exchange-gateway.workspace = true
 rustcta-execution-api.workspace = true
 rustcta-execution-router.workspace = true
+rustcta-event-ledger.workspace = true
 rustcta-strategy-sdk.workspace = true
 rustcta-types.workspace = true
+rustcta-tools-ops.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
 
 rustcta-strategy-cross-exchange-arbitrage = { path = "../../strategies/cross-exchange-arbitrage" }

@@ -1,0 +1,35 @@
+{
+  "exchange": "yobit",
+  "operation": "yobit.get_fees",
+  "boundary_type": "public_info_pair_fee_source",
+  "runtime_status": "offline_source_boundary",
+  "trade_enabled": false,
+  "source": {
+    "kind": "public_api_v3_info_pair_metadata",
+    "source_url": "https://www.yobit.net/en/api/",
+    "last_reviewed": "2026-06-09",
+    "products": ["spot"],
+    "transport": "rest",
+    "method": "GET",
+    "path": "/api/3/info",
+    "auth": "none",
+    "effective_fee_kind": "single_pair_fee_field",
+    "account_effective_fee_requires": [
+      "pair_fee_parser",
+      "single_rate_maker_taker_policy",
+      "symbol_scope"
+    ]
+  },
+  "default_or_override_strategy": {
+    "public_pair_fee_allowed_when_no_account_tier_exists": true,
+    "production_requires_pair_specific_source_version": true,
+    "zero_fee_placeholder_allowed": false
+  },
+  "expected_error_until_promoted": "yobit.fees_pair_info_source_only",
+  "remaining_work": [
+    "public_info_fee_parser",
+    "single_fee_rate_to_maker_taker_policy",
+    "symbol_mapping",
+    "shared_get_fees_response_mapping"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "Channel": "orderbook-xbt",
+  "Nonce": 42,
+  "Data": {
+    "OrderType": "LimitBid",
+    "OrderGuid": "dbe7b832-b9b7-4eac-84ce-9f49c2a93b87",
+    "ClientId": "client-42",
+    "Price": {
+      "aud": 2500,
+      "usd": 1816.5,
+      "sgd": 2453
+    },
+    "Volume": 1
+  },
+  "Time": 1689718320139,
+  "Event": "NewOrder"
+}

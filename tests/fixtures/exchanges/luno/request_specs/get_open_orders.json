@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/api/1/listorders",
+  "auth": "http_basic_api_key",
+  "headers": {
+    "Authorization": "Basic <redacted>",
+    "Accept": "application/json"
+  },
+  "query": {
+    "pair": "XBTZAR"
+  }
+}

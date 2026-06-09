@@ -10,7 +10,9 @@ use rustcta_exchange_api::{
 use rustcta_types::{ExchangeId, Fill, MarketType, OrderBookSnapshot, OrderSide};
 use serde_json::{json, Value};
 
-use super::parser::{normalize_bitmex_symbol, parse_orderbook_snapshot};
+use super::parser::{
+    normalize_bitmex_symbol, parse_orderbook10_snapshot, parse_orderbook_snapshot,
+};
 use super::private_parser::{
     parse_margin_balances, parse_order_state, parse_positions, parse_recent_fills,
 };
@@ -114,9 +116,49 @@ impl BitmexGatewayAdapter {
 #[allow(dead_code)]
 pub enum BitmexPublicStreamMessage {
     OrderBook(OrderBookSnapshot),
+    OrderBookTableDiff(BitmexOrderBookTableDiff),
     Trades(Vec<BitmexPublicTrade>),
     SubscriptionAck,
     Pong,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum BitmexOrderBookAction {
+    Partial,
+    Insert,
+    Update,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub struct BitmexOrderBookTableDiff {
+    pub table: String,
+    pub action: BitmexOrderBookAction,
+    pub key_fields: Vec<&'static str>,
+    pub rows: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum BitmexOrderBookChannel {
+    L2Top25,
+    Top10,
+    L2Full,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct BitmexOrderBookWsPolicy {
+    pub channel: &'static str,
+    pub depth: &'static str,
+    pub push_interval_ms: Option<u64>,
+    pub actions: &'static [&'static str],
+    pub key_fields: &'static [&'static str],
+    pub checksum: &'static str,
+    pub sequence: &'static str,
+    pub resync: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -392,13 +434,37 @@ pub fn parse_bitmex_public_stream_message(
         return Ok(BitmexPublicStreamMessage::Pong);
     }
     match value.get("table").and_then(Value::as_str) {
-        Some("orderBookL2") => {
+        Some("orderBookL2") | Some("orderBookL2_25") => {
+            let action = bitmex_orderbook_action(value)?;
+            let data = value
+                .get("data")
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new()));
+            if action == BitmexOrderBookAction::Partial {
+                return Ok(BitmexPublicStreamMessage::OrderBook(
+                    parse_orderbook_snapshot(exchange_id, symbol, &data)?,
+                ));
+            }
+            Ok(BitmexPublicStreamMessage::OrderBookTableDiff(
+                BitmexOrderBookTableDiff {
+                    table: value
+                        .get("table")
+                        .and_then(Value::as_str)
+                        .unwrap_or("orderBookL2")
+                        .to_string(),
+                    action,
+                    key_fields: vec!["symbol", "id", "side"],
+                    rows: data.as_array().cloned().unwrap_or_default(),
+                },
+            ))
+        }
+        Some("orderBook10") => {
             let data = value
                 .get("data")
                 .cloned()
                 .unwrap_or(Value::Array(Vec::new()));
             Ok(BitmexPublicStreamMessage::OrderBook(
-                parse_orderbook_snapshot(exchange_id, symbol, &data)?,
+                parse_orderbook10_snapshot(exchange_id, symbol, &data)?,
             ))
         }
         Some("trade") => Ok(BitmexPublicStreamMessage::Trades(parse_public_trades(
@@ -491,10 +557,19 @@ pub fn parse_bitmex_private_stream_message(
 pub fn bitmex_public_subscribe_payload(
     subscription: &PublicStreamSubscription,
 ) -> ExchangeApiResult<Value> {
+    bitmex_public_subscribe_payload_for_channel(subscription, None)
+}
+
+pub fn bitmex_public_subscribe_payload_for_channel(
+    subscription: &PublicStreamSubscription,
+    orderbook_channel: Option<BitmexOrderBookChannel>,
+) -> ExchangeApiResult<Value> {
     let symbol = normalize_bitmex_symbol(&subscription.symbol.exchange_symbol.symbol)?;
     let channel = match &subscription.kind {
         PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => {
-            format!("orderBookL2:{symbol}")
+            let channel = orderbook_channel
+                .unwrap_or_else(|| bitmex_default_orderbook_channel(&subscription.kind));
+            format!("{}:{symbol}", bitmex_orderbook_channel_name(channel))
         }
         PublicStreamKind::Trades => format!("trade:{symbol}"),
         PublicStreamKind::Ticker => format!("quote:{symbol}"),
@@ -506,6 +581,49 @@ pub fn bitmex_public_subscribe_payload(
         "op": "subscribe",
         "args": [channel],
     }))
+}
+
+pub fn bitmex_public_orderbook_ws_policies() -> Vec<BitmexOrderBookWsPolicy> {
+    vec![
+        BitmexOrderBookWsPolicy {
+            channel: "orderBookL2_25",
+            depth: "25",
+            push_interval_ms: Some(100),
+            actions: &["partial", "insert", "update", "delete"],
+            key_fields: &["symbol", "id", "side"],
+            checksum: "none",
+            sequence: "none; table key/id continuity only",
+            resync: "REST /api/v1/orderBook/L2 snapshot, then resubscribe after reconnect or local table gap",
+        },
+        BitmexOrderBookWsPolicy {
+            channel: "orderBook10",
+            depth: "10",
+            push_interval_ms: None,
+            actions: &["partial"],
+            key_fields: &["symbol"],
+            checksum: "none",
+            sequence: "none",
+            resync: "REST /api/v1/orderBook/L2 snapshot or wait for next orderBook10 snapshot after reconnect",
+        },
+        BitmexOrderBookWsPolicy {
+            channel: "orderBookL2",
+            depth: "full_l2",
+            push_interval_ms: None,
+            actions: &["partial", "insert", "update", "delete"],
+            key_fields: &["symbol", "id", "side"],
+            checksum: "none",
+            sequence: "none; no monotonic sequence field, keyed table diff must resync on missing key",
+            resync: "REST /api/v1/orderBook/L2 snapshot, then resubscribe after reconnect or local table gap",
+        },
+    ]
+}
+
+pub fn bitmex_orderbook_channel_name(channel: BitmexOrderBookChannel) -> &'static str {
+    match channel {
+        BitmexOrderBookChannel::L2Top25 => "orderBookL2_25",
+        BitmexOrderBookChannel::Top10 => "orderBook10",
+        BitmexOrderBookChannel::L2Full => "orderBookL2",
+    }
 }
 
 pub fn bitmex_private_auth_payload(api_key: &str, api_secret: &str, expires: i64) -> Value {
@@ -576,6 +694,32 @@ fn normalize_interval(interval: &str) -> ExchangeApiResult<String> {
         "1d" | "1day" => Ok("1d".to_string()),
         _ => Err(ExchangeApiError::Unsupported {
             operation: "bitmex.candle_interval",
+        }),
+    }
+}
+
+fn bitmex_default_orderbook_channel(kind: &PublicStreamKind) -> BitmexOrderBookChannel {
+    match kind {
+        PublicStreamKind::OrderBookSnapshot => BitmexOrderBookChannel::L2Top25,
+        PublicStreamKind::OrderBookDelta => BitmexOrderBookChannel::L2Full,
+        _ => BitmexOrderBookChannel::L2Full,
+    }
+}
+
+fn bitmex_orderbook_action(value: &Value) -> ExchangeApiResult<BitmexOrderBookAction> {
+    match value
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("partial")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "partial" => Ok(BitmexOrderBookAction::Partial),
+        "insert" => Ok(BitmexOrderBookAction::Insert),
+        "update" => Ok(BitmexOrderBookAction::Update),
+        "delete" => Ok(BitmexOrderBookAction::Delete),
+        other => Err(ExchangeApiError::InvalidRequest {
+            message: format!("unsupported BitMEX order book action {other}"),
         }),
     }
 }

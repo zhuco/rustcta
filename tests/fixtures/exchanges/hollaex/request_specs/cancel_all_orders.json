@@ -1,0 +1,31 @@
+{
+  "exchange": "hollaex",
+  "operation": "cancel_all_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/v2/order/all",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "xht-usdt"
+    }
+  },
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "api-signature": {
+      "match": "present"
+    },
+    "api-expires": {
+      "match": "present"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "strict_body": true,
+  "expected_error_until_promoted": "hollaex.cancel_all_orders_request_spec_only"
+}

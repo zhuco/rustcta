@@ -1,0 +1,19 @@
+{
+  "exchange": "delta",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["futures", "option", "perpetual"],
+  "official_product_lines": ["spot", "futures", "option", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Delta Exchange products and derivative private endpoints",
+      "evidence": "Delta product material includes spot alongside derivatives, while this adapter maps futures, options and perpetual derivatives."
+    }
+  ],
+  "runtime_isolation": "Keep Delta spot out of the derivative runtime until product filters, wallet/account scope and order lifecycle are verified for spot.",
+  "remaining_work": [
+    "filter spot products and add spot book/ticker specs",
+    "add spot wallet/account readback fixtures",
+    "wire spot place/cancel/query/open/fills with reconciliation"
+  ]
+}

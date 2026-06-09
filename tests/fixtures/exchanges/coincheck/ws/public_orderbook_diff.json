@@ -1,0 +1,30 @@
+{
+  "type": "message",
+  "channel": "btc_jpy-orderbook",
+  "bids": [
+    [
+      "10000000",
+      "0.20"
+    ],
+    [
+      "9999000",
+      "0"
+    ]
+  ],
+  "asks": [
+    [
+      "10001000",
+      "0.30"
+    ],
+    [
+      "10002000",
+      "0"
+    ]
+  ],
+  "fixture_notes": {
+    "semantics": "Coincheck orderbook WS publishes differences; zero amount removes a price level in local book handling.",
+    "sequence": null,
+    "checksum": null,
+    "resync": "REST GET /api/order_books after reconnect or suspected missed message"
+  }
+}

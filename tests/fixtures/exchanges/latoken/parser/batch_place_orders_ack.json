@@ -1,0 +1,17 @@
+{
+  "status": "SUCCESS",
+  "message": [
+    {
+      "id": "latoken_created_order_id_001",
+      "clientOrderId": "latoken_batch_client_order_001",
+      "message": "order accepted for placing",
+      "status": "SUCCESS"
+    },
+    {
+      "clientOrderId": "latoken_batch_client_order_002",
+      "message": "Not enough balance on the spot account for currency (USDT), need (11)",
+      "error": "INSUFFICIENT_FUNDS",
+      "status": "FAILURE"
+    }
+  ]
+}

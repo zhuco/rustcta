@@ -1,8 +1,9 @@
 use rustcta_exchange_api::{
-    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
-    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, CapabilitySupport, ExchangeApiError,
+    ExchangeClient, FeesRequest, OpenOrdersRequest, OrderListConditionalLeg, OrderListLegType,
+    OrderListRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -16,6 +17,15 @@ use super::test_support::{
     spawn_rest_server, symbol_scope,
 };
 use super::CoinsPhGatewayAdapter;
+
+fn coinsph_fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/coinsph/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("coinsph fixture");
+    serde_json::from_str(&text).expect("coinsph fixture json")
+}
 
 #[test]
 fn coinsph_signing_should_match_official_query_example() {
@@ -101,6 +111,133 @@ async fn coinsph_adapter_should_return_unsupported_for_funding_boundaries() {
             .await
             .expect_err("cancel all unsupported"),
         ExchangeApiError::Unsupported { .. }
+    ));
+}
+
+#[tokio::test]
+async fn coinsph_adapter_should_pin_advanced_order_unsupported_boundary() {
+    let (base_url, _seen) = spawn_rest_server(vec![]).await;
+    let adapter = CoinsPhGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_cancel_all_orders);
+    assert!(matches!(
+        capabilities.capabilities_v2.batch_place_orders.support,
+        CapabilitySupport::Unsupported { .. }
+    ));
+    assert!(matches!(
+        capabilities.capabilities_v2.batch_cancel_orders.support,
+        CapabilitySupport::Unsupported { .. }
+    ));
+    for operation in [
+        "amend_order",
+        "place_order_list",
+        "batch_place_orders",
+        "batch_cancel_orders",
+        "cancel_all_orders",
+    ] {
+        assert!(
+            capabilities
+                .capabilities_v2
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.operation == operation
+                    && matches!(endpoint.support, CapabilitySupport::Unsupported { .. })),
+            "missing unsupported capabilities_v2 endpoint for {operation}"
+        );
+    }
+
+    let boundary = coinsph_fixture("unsupported_boundary.json");
+    assert_eq!(boundary["advanced_order_runtime"], false);
+    assert_eq!(
+        boundary["unsupported_operations"]["batch_cancel_orders"],
+        "coinsph.batch_cancel_orders"
+    );
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol_scope("BTCPHP"),
+            client_order_id: None,
+            exchange_order_id: Some("33".to_string()),
+            new_client_order_id: Some("cli-new".to_string()),
+            new_quantity: "0.01000000".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinsph.amend_order"
+        }
+    ));
+
+    let order_list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("oco"),
+            symbol: symbol_scope("BTCPHP"),
+            list_client_order_id: Some("coinsph-oco".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.01000000".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::Limit,
+                price: Some("3600000.00".to_string()),
+                stop_price: None,
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("coinsph-oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("3400000.00".to_string()),
+                stop_price: Some("3450000.00".to_string()),
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("coinsph-oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        order_list_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinsph.place_order_list"
+        }
+    ));
+
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: Vec::new(),
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinsph.batch_place_orders"
+        }
+    ));
+
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: Vec::new(),
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "coinsph.batch_cancel_orders"
+        }
     ));
 }
 

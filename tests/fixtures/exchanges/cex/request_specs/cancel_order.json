@@ -1,0 +1,16 @@
+{
+  "exchange": "cex",
+  "operation": "cancel_order",
+  "method": "POST",
+  "path": "/cancel_order/",
+  "transport": "rest",
+  "auth": "hmac",
+  "credential_scope": "trade",
+  "body": {
+    "nonce": "1700000000000",
+    "key": "fixture-key",
+    "signature": "33BF9004BAEBB373F6879ADFD86757EF6B36AF67CF246C4D00C0ABF8E6B7EF17",
+    "id": "1234"
+  },
+  "unsupported_boundary": "CEX.IO private cancel REST is request-spec only; adapter returns cex.cancel_order_request_spec_only."
+}

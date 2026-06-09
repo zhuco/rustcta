@@ -140,6 +140,30 @@ pub(super) fn perpetual_symbol_scope() -> SymbolScope {
     }
 }
 
+pub(super) fn futures_symbol_scope() -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Futures,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USD").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Futures, "BTC-USD-240329")
+            .expect("symbol"),
+    }
+}
+
+pub(super) fn option_symbol_scope() -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Option,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USD").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(
+            exchange_id(),
+            MarketType::Option,
+            "BTC-USD-240329-65000-C",
+        )
+        .expect("symbol"),
+    }
+}
+
 pub(super) fn private_config(base_url: String) -> OkxGatewayConfig {
     OkxGatewayConfig {
         rest_base_url: base_url,

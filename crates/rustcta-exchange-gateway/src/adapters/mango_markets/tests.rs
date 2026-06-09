@@ -1,6 +1,6 @@
 use rustcta_exchange_api::{
     BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, OrderBookRequest, PlaceOrderRequest,
-    PublicStreamKind, PublicStreamSubscription, RequestContext, SymbolScope,
+    PositionsRequest, PublicStreamKind, PublicStreamSubscription, RequestContext, SymbolScope,
     EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
@@ -9,7 +9,7 @@ use rustcta_types::{
 };
 use serde_json::{json, Value};
 
-use super::parser::parse_symbol_rules;
+use super::parser::{parse_position_source_boundary, parse_symbol_rules};
 use super::streams::{
     mango_markets_public_subscribe_payload, mango_markets_public_unsubscribe_payload,
     mango_markets_reconnect_policy_ms,
@@ -57,6 +57,9 @@ fn fixture(name: &str) -> Value {
         "signing_boundary" => include_str!(
             "../../../../../tests/fixtures/exchanges/mango_markets/signing_vectors/solana_transaction_boundary.json"
         ),
+        "positions_source" => include_str!(
+            "../../../../../tests/fixtures/exchanges/mango_markets/request_specs/get_positions_account_source.json"
+        ),
         "ws_subscribe" => include_str!(
             "../../../../../tests/fixtures/exchanges/mango_markets/ws/account_subscribe.json"
         ),
@@ -76,6 +79,26 @@ fn request_spec(name: &str) -> RequestSpec {
         _ => panic!("unknown request spec {name}"),
     };
     serde_json::from_str(text).expect(name)
+}
+
+#[test]
+fn parser_should_validate_position_source_boundary_fixture() {
+    let audit = parse_position_source_boundary(&exchange_id(), &fixture("positions_source"))
+        .expect("audit");
+
+    assert_eq!(audit.boundary, "solana_mango_account_source_only");
+    assert!(audit
+        .required_sources
+        .iter()
+        .any(|source| source == "mango_account_public_key"));
+    assert!(audit
+        .position_fields
+        .iter()
+        .any(|field| field == "base_lots"));
+    assert!(audit
+        .reconciliation_required
+        .iter()
+        .any(|gap| gap == "slot and commitment freshness"));
 }
 
 #[test]
@@ -132,6 +155,29 @@ fn capabilities_should_expose_g0_scan_only_boundary() {
     assert_eq!(boundary["scan_only"], true);
     assert_eq!(boundary["trade_enabled"], false);
     assert_eq!(boundary["private_write_enabled"], false);
+}
+
+#[tokio::test]
+async fn get_positions_should_return_mango_account_source_boundary() {
+    let adapter =
+        MangoMarketsGatewayAdapter::new(MangoMarketsGatewayConfig::default()).expect("adapter");
+    let error = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![symbol().exchange_symbol],
+        })
+        .await
+        .expect_err("positions boundary");
+
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: private::POSITIONS_UNSUPPORTED
+        }
+    ));
 }
 
 #[tokio::test]

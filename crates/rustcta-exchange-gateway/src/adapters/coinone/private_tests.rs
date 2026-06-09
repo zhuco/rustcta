@@ -1,6 +1,8 @@
 use rustcta_exchange_api::{
-    BalancesRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest,
-    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelOrderRequest, ExchangeApiError, ExchangeClient, OrderListConditionalLeg,
+    OrderListLegType, OrderListRequest, PlaceOrderRequest, RecentFillsRequest, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -74,6 +76,124 @@ fn coinone_request_specs_and_unsupported_fixture_should_document_boundaries() {
     assert_eq!(unsupported["payment"], "unsupported");
     assert_eq!(unsupported["wallet"], "unsupported");
     assert_eq!(unsupported["fiat_transfer"], "unsupported");
+    assert_eq!(
+        unsupported["advanced_order_boundary"]["support"],
+        "unsupported"
+    );
+    assert_eq!(
+        unsupported["advanced_order_boundary"]["expected_runtime_errors"]["batch_cancel_orders"],
+        "coinone.batch_cancel_orders"
+    );
+}
+
+#[tokio::test]
+async fn coinone_advanced_order_boundary_should_remain_unsupported() {
+    let adapter = CoinoneGatewayAdapter::new(CoinoneGatewayConfig {
+        rest_base_url: "http://127.0.0.1:9".to_string(),
+        access_token: Some("token".to_string()),
+        secret_key: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..CoinoneGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(capabilities.supports_cancel_all_orders);
+    assert!(!capabilities
+        .capabilities_v2
+        .batch_place_orders
+        .support
+        .is_supported());
+    assert!(!capabilities
+        .capabilities_v2
+        .batch_cancel_orders
+        .support
+        .is_supported());
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol_scope(),
+            client_order_id: Some("C-1".to_string()),
+            exchange_order_id: Some("O-1".to_string()),
+            new_client_order_id: Some("C-1-R".to_string()),
+            new_quantity: "0.02".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert_unsupported_operation(amend_error, "coinone.amend_order");
+
+    let order_list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("order-list"),
+            symbol: symbol_scope(),
+            list_client_order_id: Some("oco-1".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.01".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::Limit,
+                price: Some("110000000".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("90000000".to_string()),
+                stop_price: Some("95000000".to_string()),
+                time_in_force: None,
+                client_order_id: Some("oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert_unsupported_operation(order_list_error, "coinone.order_list_unsupported");
+
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![],
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert_unsupported_operation(batch_place_error, "coinone.batch_place_orders");
+
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![],
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert_unsupported_operation(batch_cancel_error, "coinone.batch_cancel_orders");
+}
+
+#[test]
+fn coinone_advanced_order_mapping_should_stay_unsupported() {
+    let mapping = include_str!("endpoint_mapping.yaml");
+    for operation in [
+        "amend_order",
+        "place_order_list",
+        "batch_place_orders",
+        "batch_cancel_orders",
+    ] {
+        assert!(
+            mapping.contains(&format!("operation: {operation}")),
+            "missing {operation} endpoint"
+        );
+    }
+    assert!(mapping.contains("support: unsupported"));
+    assert!(mapping.contains("auth: unsupported"));
+    assert!(mapping.contains("native_batch: false"));
 }
 
 #[tokio::test]
@@ -254,4 +374,11 @@ fn assert_signed_request(request: &SeenRequest, path: &str) {
         .headers
         .get("x-coinone-signature")
         .is_some_and(|value| !value.is_empty()));
+}
+
+fn assert_unsupported_operation(error: ExchangeApiError, expected: &'static str) {
+    match error {
+        ExchangeApiError::Unsupported { operation } => assert_eq!(operation, expected),
+        other => panic!("expected unsupported {expected}, got {other:?}"),
+    }
 }

@@ -60,6 +60,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 PY
 )}"
   RUSTCTA_CONTROL_API_BIND="$bind" \
+  RUSTCTA_CONTROL_API_ALLOW_NON_CANONICAL_BIND=true \
   RUSTCTA_CONTROL_API_AGENT_ID=ci-agent \
   RUSTCTA_CONTROL_API_TENANT_ID=ci-tenant \
   RUSTCTA_CONTROL_API_AGENT_CAPABILITIES=control-api,supervisor-reader \

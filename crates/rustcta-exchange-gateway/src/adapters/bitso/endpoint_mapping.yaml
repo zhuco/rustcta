@@ -5,8 +5,8 @@ status_date: "2026-06-08"
 metadata:
   status: draft
   source: docs/bitso_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: Latin America spot adapter. Live private write REST remains offline request-spec only.
+  last_reviewed: "2026-06-09"
+  notes: Latin America spot adapter. Credential-gated read-only private REST is promoted for order/fill readbacks; live private write REST remains offline request-spec only.
 market_types: [spot]
 products: [spot]
 base_urls:
@@ -22,14 +22,40 @@ pagination:
   private_history: { mode: cursor_or_time, notes: audit before live promotion }
 reconciliation:
   private_state: rest_fallback
-  notes: Private streams are not promoted; orders/fills reconcile through private REST request specs.
+  after_ws_gap: rest_order_book_snapshot
+  notes: Private streams are not promoted; orders/fills reconcile through credential-gated private REST readbacks.
 batch:
   place: { support: unsupported, reason: bitso.native_batch_place_unsupported }
   cancel: { support: cancel_all_only, reason: bitso.delete_orders_all_available_but_offline_only }
 websocket:
   public:
     support: payload_helper
+    url: wss://ws.bitso.com
+    protocol: json_websocket
+    subscribe:
+      action: subscribe
+      payload: { action: subscribe, book: "{book}", type: "{channel}" }
     channels: [trades, orders, diff-orders]
+    order_book:
+      channels: ["orderbook:orders", "orderbook:diff-orders", "orders", "diff-orders"]
+      snapshot_channel: orders
+      delta_channel: diff-orders
+      depths: [20]
+      snapshot_depth_per_side: 20
+      delta_depth: full_order_book_mutations
+      fixed_update_interval_ms: null
+      interval_note: official docs do not publish a fixed millisecond push interval
+      sequence:
+        snapshot_field: sequence from REST /order_book payload
+        delta_field: sequence
+        continuity: strictly increasing by one; skipped sequence means a dropped message
+        gap_policy: fetch REST /order_book snapshot, discard stale buffered diff-orders, replay later sequences, and rebuild again on reconnect/gap/regression
+      checksum: unsupported
+      resync:
+        mode: rest_snapshot_then_replay_delta
+        endpoint_operation: order_book
+        endpoint: /order_book
+        notes: initialize from REST snapshot sequence, buffer diff-orders during snapshot fetch, apply only diff-orders with sequence greater than the snapshot sequence, and require contiguous sequence thereafter
     heartbeat: { mode: connection, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
   private:
     support: unsupported
@@ -78,6 +104,9 @@ endpoints:
     atomicity: non_atomic
     testnet: true
     support: spec_only
+    reason: "Bitso private core trading is fixture-backed offline; runtime stays disabled pending HMAC auth smoke, order parser, post-write readback reconciliation, and live dry-run controls."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bitso/request_specs/place_order_limit.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bitso/order_ack.json }
   - operation: cancel_order
     product: spot
     market_types: [spot]
@@ -93,6 +122,8 @@ endpoints:
     atomicity: non_atomic
     testnet: true
     support: spec_only
+    reason: "Bitso private core trading is fixture-backed offline; runtime stays disabled pending HMAC auth smoke, cancel parser/readback, reconciliation, and live dry-run controls."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bitso/request_specs/cancel_order.json }
   - operation: balances
     product: spot
     market_types: [spot]
@@ -108,6 +139,9 @@ endpoints:
     atomicity: not_applicable
     testnet: true
     support: spec_only
+    reason: "Bitso account balance readback is fixture-backed, but shared get_balances runtime remains disabled pending HMAC auth smoke, balance parser normalization, fiat/crypto account scope guard, and reconciliation."
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bitso/request_specs/get_balances.json }
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bitso/balances_success.json }
   - operation: open_orders
     product: spot
     market_types: [spot]
@@ -122,7 +156,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
+    support: native
+    reason: "Credential-gated signed GET /open_orders runtime is enabled for symbol/book-scoped read-only reconciliation behind BITSO_PRIVATE_REST_ENABLED plus API credentials; pagination remains unsupported until audited."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/bitso/request_specs/get_open_orders.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitso/open_orders_success.json }
   - operation: query_order
     product: spot
     market_types: [spot]
@@ -137,7 +174,10 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: spec_only
+    support: native
+    reason: "Credential-gated signed GET /orders/{oid} runtime is enabled for exchange-order-id readback behind BITSO_PRIVATE_REST_ENABLED plus API credentials; client-order-id lookup remains unsupported until a documented mapping is audited."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/bitso/request_specs/query_order.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitso/open_orders_success.json }
   - operation: recent_fills
     product: spot
     market_types: [spot]
@@ -152,4 +192,112 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
+    support: native
+    reason: "Credential-gated signed GET /user_trades runtime is enabled for symbol/book-scoped recent fill readback behind BITSO_PRIVATE_REST_ENABLED plus API credentials; advanced filters and cursor pagination remain unsupported until audited."
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/bitso/request_specs/get_recent_fills.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitso/fills_success.json }
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
     support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitso/request_specs/get_fees.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitso/fees_success.json
+    reason: bitso.get_fees_signed_request_spec_only
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitso/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitso_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: bitso.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitso/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitso_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: bitso.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitso/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitso_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: bitso.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bitso/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bitso_private
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: bitso.batch_cancel_orders_unsupported
+unsupported:
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_standard_futures_perpetual_options_api
+    scope: standard_contracts_only
+    reason: "Current official/API profile covers Spot plus Margin Trading [WIP], but no standard futures/perpetual/options contract product line is exposed; Margin [WIP] remains project-unimplemented, not unsupported."
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: margin_trading_wip
+    boundary: project_unimplemented_product_line
+    scope: bitso_margin
+    source_boundary_fixture: tests/fixtures/exchanges/bitso/request_specs/product_line_source_boundary.json
+    official_doc: https://docs.bitso.com/bitso-api/reference/margin-trading
+    required_audit_gaps: [margin_wip_api_stability, region_account_eligibility, collateral_balance_position_risk_parsers, margin_order_lifecycle, reconciliation_dry_run_gate]
+    reason: "Official Margin Trading [WIP] is a separate project-unimplemented product line in this spot adapter and must not be promoted through Spot private request-specs."
+  - operation: get_fees
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/bitso/request_specs/get_fees.json
+    response_fixture: tests/fixtures/exchanges/bitso/fees_success.json
+    signing_vector: tests/fixtures/exchanges/bitso/signing_vectors/rest_get_fees.json
+    reason: "Official signed GET /fees source exists and is mapped as offline request-spec; shared get_fees runtime remains project-unimplemented pending maker/taker parser, book-symbol mapping, and read-only credential guard."

@@ -433,9 +433,13 @@ pub fn parse_woo_public_stream_message(
     }
 
     match topic_family(value.get("topic").and_then(Value::as_str)) {
-        "orderbook" | "orderbook10" | "orderbookupdate" => Ok(WooPublicStreamMessage::OrderBook(
-            parse_orderbook_snapshot(exchange_id, symbol_hint, &normalize_book_message(value))?,
-        )),
+        "bbo" | "orderbook" | "orderbook10" | "orderbookupdate" => {
+            Ok(WooPublicStreamMessage::OrderBook(parse_orderbook_snapshot(
+                exchange_id,
+                symbol_hint,
+                &normalize_book_message(value),
+            )?))
+        }
         "trade" => Ok(WooPublicStreamMessage::Trade(parse_public_trade(
             exchange_id,
             symbol_hint,
@@ -519,9 +523,9 @@ fn woo_public_topic(subscription: &PublicStreamSubscription) -> ExchangeApiResul
     let symbol = normalize_woo_symbol(&subscription.symbol)?;
     match &subscription.kind {
         PublicStreamKind::Trades => Ok(format!("trade@{symbol}")),
-        PublicStreamKind::Ticker => Ok(format!("ticker@{symbol}")),
-        PublicStreamKind::OrderBookDelta => Ok(format!("orderbookupdate@{symbol}@50")),
-        PublicStreamKind::OrderBookSnapshot => Ok(format!("orderbook10@{symbol}")),
+        PublicStreamKind::Ticker => Ok(format!("bbo@{symbol}")),
+        PublicStreamKind::OrderBookDelta => Ok(format!("orderbookupdate@{symbol}@100")),
+        PublicStreamKind::OrderBookSnapshot => Ok(format!("orderbook@{symbol}@100")),
         PublicStreamKind::Candles { interval } => {
             Ok(format!("kline@{symbol}@{}", normalize_interval(interval)?))
         }
@@ -742,11 +746,91 @@ fn normalize_book_message(value: &Value) -> Value {
     json!({
         "data": {
             "symbol": data.get("s").or_else(|| data.get("symbol")).cloned().unwrap_or(Value::Null),
-            "bids": data.get("bids").cloned().unwrap_or_else(|| json!([])),
-            "asks": data.get("asks").cloned().unwrap_or_else(|| json!([])),
+            "bids": stream_side_levels(
+                data,
+                &["bids", "bid", "b"],
+                &["bidPrice", "bestBidPrice", "bp", "bid_price"],
+                &["bidQuantity", "bidQty", "bestBidQuantity", "bq", "bid_quantity"],
+            ),
+            "asks": stream_side_levels(
+                data,
+                &["asks", "ask", "a"],
+                &["askPrice", "bestAskPrice", "ap", "ask_price"],
+                &["askQuantity", "askQty", "bestAskQuantity", "aq", "ask_quantity"],
+            ),
+            "seq": data
+                .get("seq")
+                .or_else(|| data.get("sequence"))
+                .or_else(|| value.get("seq"))
+                .or_else(|| value.get("sequence"))
+                .cloned()
+                .unwrap_or(Value::Null),
             "timestamp": data.get("ts").or_else(|| value.get("ts")).cloned().unwrap_or(Value::Null),
         }
     })
+}
+
+fn stream_side_levels(
+    value: &Value,
+    array_fields: &[&str],
+    price_fields: &[&str],
+    quantity_fields: &[&str],
+) -> Value {
+    if let Some(levels) = array_fields
+        .iter()
+        .find_map(|field| value.get(*field).filter(|candidate| candidate.is_array()))
+    {
+        return normalize_level_array(levels);
+    }
+    let Some(price) = price_fields
+        .iter()
+        .find_map(|field| string_or_number(value.get(*field)))
+    else {
+        return json!([]);
+    };
+    let Some(quantity) = quantity_fields
+        .iter()
+        .find_map(|field| string_or_number(value.get(*field)))
+    else {
+        return json!([]);
+    };
+    json!([[price, quantity]])
+}
+
+fn normalize_level_array(levels: &Value) -> Value {
+    let Some(rows) = levels.as_array() else {
+        return json!([]);
+    };
+    if rows
+        .first()
+        .is_some_and(|first| first.is_array() || first.is_object())
+    {
+        return Value::Array(
+            rows.iter()
+                .filter(|row| level_quantity(row).is_none_or(|quantity| quantity != 0.0))
+                .cloned()
+                .collect(),
+        );
+    }
+    if rows.len() >= 2 {
+        return json!([levels.clone()]);
+    }
+    json!([])
+}
+
+fn level_quantity(level: &Value) -> Option<f64> {
+    match level {
+        Value::Array(items) => items
+            .get(1)
+            .and_then(|value| string_or_number(Some(value)))
+            .and_then(|value| value.parse().ok()),
+        Value::Object(map) => map
+            .get("quantity")
+            .or_else(|| map.get("size"))
+            .and_then(|value| string_or_number(Some(value)))
+            .and_then(|value| value.parse().ok()),
+        _ => None,
+    }
 }
 
 fn normalize_execution_report(value: &Value) -> Value {

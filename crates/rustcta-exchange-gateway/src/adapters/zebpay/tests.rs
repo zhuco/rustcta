@@ -1,21 +1,24 @@
 use rustcta_exchange_api::{
-    BalancesRequest, BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, PlaceOrderRequest,
-    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
+    BalancesRequest, BatchPlaceOrdersRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest,
+    PlaceOrderRequest, PositionsRequest, PrivateStreamKind, PrivateStreamSubscription,
+    PublicStreamKind, PublicStreamSubscription, QueryOrderRequest, RecentFillsRequest,
     EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{AccountId, MarketType, OrderSide, OrderType};
+use rustcta_types::{AccountId, ExchangeSymbol, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::private::{
-    build_private_request_spec, request_spec_body_from_order, zebpay_supports_order_type,
+    build_private_get_request_spec, build_private_request_spec, open_orders_query,
+    query_order_query, recent_fills_path, request_spec_body_from_order, zebpay_supports_order_type,
     ZEBPAY_BALANCE_PATH, ZEBPAY_CANCEL_ALL_ORDERS_PATH, ZEBPAY_CANCEL_ORDER_PATH,
-    ZEBPAY_OPEN_ORDERS_PATH, ZEBPAY_PLACE_ORDER_PATH, ZEBPAY_RECENT_FILLS_PATH,
+    ZEBPAY_OPEN_ORDERS_PATH, ZEBPAY_PLACE_ORDER_PATH, ZEBPAY_QUERY_ORDER_PATH,
+    ZEBPAY_RECENT_FILLS_PATH,
 };
 use super::public::{market_query, order_book_endpoint, order_book_query};
 use super::signing::build_bearer_private_headers;
 use super::streams::zebpay_rest_reconciliation_fallback;
-use super::test_support::{context, exchange_id, symbol_scope};
+use super::test_support::{context, exchange_id, spawn_rest_server, symbol_scope};
 use super::{ZebpayGatewayAdapter, ZebpayGatewayConfig};
 use crate::adapters::AdapterBackedGateway;
 
@@ -27,6 +30,15 @@ fn fixture(name: &str) -> serde_json::Value {
         "order_book_success.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/zebpay/order_book_success.json"
         ),
+        "order_success.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/zebpay/order_success.json")
+        }
+        "open_orders_success.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/zebpay/open_orders_success.json"
+        ),
+        "recent_fills_success.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/zebpay/recent_fills_success.json"
+        ),
         "request_specs/place_order_limit_buy.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/zebpay/request_specs/place_order_limit_buy.json"
         ),
@@ -36,11 +48,17 @@ fn fixture(name: &str) -> serde_json::Value {
         "request_specs/cancel_order.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/zebpay/request_specs/cancel_order.json"
         ),
+        "request_specs/query_order.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/zebpay/request_specs/query_order.json"
+        ),
         "request_specs/get_open_orders.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/zebpay/request_specs/get_open_orders.json"
         ),
         "request_specs/get_recent_fills.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/zebpay/request_specs/get_recent_fills.json"
+        ),
+        "request_specs/product_line_source_boundary.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/zebpay/request_specs/product_line_source_boundary.json"
         ),
         "signing_vectors/bearer_auth.json" => include_str!(
             "../../../../../tests/fixtures/exchanges/zebpay/signing_vectors/bearer_auth.json"
@@ -72,6 +90,23 @@ fn zebpay_capabilities_should_expose_scan_only_spot_public_rest() {
     assert!(!capabilities.supports_private_streams);
     assert!(capabilities.capabilities_v2.public_rest.is_supported());
     assert!(!capabilities.capabilities_v2.private_rest.is_supported());
+    assert!(!capabilities.supports_query_order);
+
+    for operation in ["contract_product", "futures_product"] {
+        let endpoint = capabilities
+            .capabilities_v2
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.operation == operation)
+            .expect("product-line boundary endpoint");
+        assert!(!endpoint.support.is_supported());
+        assert_eq!(
+            endpoint.market_types,
+            vec![MarketType::Futures, MarketType::Perpetual]
+        );
+        assert_eq!(endpoint.method, None);
+        assert_eq!(endpoint.path, None);
+    }
 
     let boundary = fixture("unsupported_boundary.json");
     assert_eq!(boundary["scan_only"], true);
@@ -80,6 +115,32 @@ fn zebpay_capabilities_should_expose_scan_only_spot_public_rest() {
     assert_eq!(
         boundary["region_kyc_boundary"],
         "requires_zebpay_api_onboarding"
+    );
+}
+
+#[test]
+fn zebpay_product_line_boundary_should_pin_futures_and_perpetual_gap() {
+    let boundary = fixture("request_specs/product_line_source_boundary.json");
+    assert_eq!(boundary["exchange"], "zebpay");
+    assert_eq!(boundary["status"], "project_unimplemented");
+    assert_eq!(boundary["current_adapter_scope"][0], "spot");
+    assert_eq!(boundary["official_product_lines"][0], "futures");
+    assert_eq!(boundary["official_product_lines"][1], "perpetual");
+    assert_eq!(
+        boundary["runtime_isolation"],
+        "ZebPay futures/perpetual API access requires onboarding, product scope and bearer-token validation separate from the scan-only spot adapter."
+    );
+    assert_eq!(
+        boundary["required_endpoints"]["market_metadata"][0],
+        "futures/perpetual instruments"
+    );
+    assert_eq!(
+        boundary["required_endpoints"]["private_order_lifecycle"][0],
+        "futures/perpetual place order"
+    );
+    assert_eq!(
+        boundary["unsafe_to_promote_without"][0],
+        "ZebPay API onboarding approval for futures/perpetual scope"
     );
 }
 
@@ -144,7 +205,7 @@ async fn zebpay_private_operations_should_stay_unsupported_even_with_credentials
     .expect("adapter");
 
     assert!(adapter.config.private_rest_configured());
-    assert!(!adapter.capabilities().supports_private_rest);
+    assert!(adapter.capabilities().supports_query_order);
     let error = adapter
         .get_balances(BalancesRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -159,6 +220,184 @@ async fn zebpay_private_operations_should_stay_unsupported_even_with_credentials
         error,
         ExchangeApiError::Unsupported {
             operation: "zebpay.balances_request_spec_only"
+        }
+    ));
+}
+
+#[tokio::test]
+async fn zebpay_readbacks_should_fail_closed_without_private_rest_guard() {
+    let adapter = ZebpayGatewayAdapter::new(ZebpayGatewayConfig {
+        client_id: "zebpay-client-id".to_string(),
+        client_secret: "zebpay-client-secret".to_string(),
+        access_token: "zebpay-access-token".to_string(),
+        enabled_private_rest: false,
+        ..ZebpayGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let error = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query-disabled"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("12345".to_string()),
+        })
+        .await
+        .expect_err("disabled private readback");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "zebpay.query_order"
+        }
+    ));
+}
+
+#[tokio::test]
+async fn zebpay_should_query_order_over_guarded_bearer_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("order_success.json")]).await;
+    let adapter = ZebpayGatewayAdapter::new(ZebpayGatewayConfig {
+        rest_base_url: base_url,
+        client_id: "zebpay-client-id".to_string(),
+        client_secret: "zebpay-client-secret".to_string(),
+        access_token: "zebpay-access-token".to_string(),
+        enabled_private_rest: true,
+        ..ZebpayGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("12345".to_string()),
+        })
+        .await
+        .expect("query order");
+
+    let order = response.order.expect("order");
+    assert_eq!(order.exchange_order_id.as_deref(), Some("12345"));
+    assert_eq!(order.status, OrderStatus::PartiallyFilled);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, ZEBPAY_QUERY_ORDER_PATH);
+    assert_eq!(
+        request.headers.get("client_id").map(String::as_str),
+        Some("zebpay-client-id")
+    );
+    assert_eq!(
+        request.headers.get("authorization").map(String::as_str),
+        Some("Bearer zebpay-access-token")
+    );
+    assert!(request.headers.get("timestamp").is_some());
+    assert!(request.headers.get("requestid").is_some());
+    assert_eq!(
+        request.query.get("trade_pair").map(String::as_str),
+        Some("BTC-INR")
+    );
+    assert_eq!(
+        request.query.get("orderid").map(String::as_str),
+        Some("12345")
+    );
+    assert!(request.body.is_empty());
+}
+
+#[tokio::test]
+async fn zebpay_should_fetch_open_orders_over_guarded_bearer_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("open_orders_success.json")]).await;
+    let adapter = ZebpayGatewayAdapter::new(ZebpayGatewayConfig {
+        rest_base_url: base_url,
+        client_id: "zebpay-client-id".to_string(),
+        client_secret: "zebpay-client-secret".to_string(),
+        access_token: "zebpay-access-token".to_string(),
+        enabled_private_rest: true,
+        ..ZebpayGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("open-orders"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+            page: None,
+        })
+        .await
+        .expect("open orders");
+
+    assert_eq!(response.orders.len(), 2);
+    assert_eq!(response.orders[0].status, OrderStatus::PartiallyFilled);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, ZEBPAY_OPEN_ORDERS_PATH);
+    assert_eq!(
+        request.query.get("status").map(String::as_str),
+        Some("pending")
+    );
+    assert_eq!(request.query.get("limit").map(String::as_str), Some("500"));
+}
+
+#[tokio::test]
+async fn zebpay_should_fetch_recent_fills_over_guarded_bearer_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("recent_fills_success.json")]).await;
+    let adapter = ZebpayGatewayAdapter::new(ZebpayGatewayConfig {
+        rest_base_url: base_url,
+        client_id: "zebpay-client-id".to_string(),
+        client_secret: "zebpay-client-secret".to_string(),
+        access_token: "zebpay-access-token".to_string(),
+        enabled_private_rest: true,
+        ..ZebpayGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_recent_fills(RecentFillsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fills"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+            client_order_id: None,
+            exchange_order_id: Some("12345".to_string()),
+            from_trade_id: None,
+            start_time: None,
+            end_time: None,
+            limit: None,
+            page: None,
+        })
+        .await
+        .expect("recent fills");
+
+    assert_eq!(response.fills.len(), 2);
+    assert_eq!(response.fills[0].fill_id.as_deref(), Some("zebpay-fill-1"));
+    assert_eq!(response.fills[0].order_id.as_deref(), Some("12345"));
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, "/orders/12345/fills");
+    assert!(request.query.is_empty());
+}
+
+#[tokio::test]
+async fn zebpay_futures_positions_should_stop_at_product_line_boundary() {
+    let adapter = ZebpayGatewayAdapter::default_public().expect("adapter");
+    let error = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("futures-positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![perpetual_symbol()],
+        })
+        .await
+        .expect_err("perpetual product line is not wired");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "zebpay.non_spot_market_type"
         }
     ));
 }
@@ -288,15 +527,23 @@ fn zebpay_private_request_specs_should_be_sanitized_and_request_spec_only() {
     assert_eq!(open_orders["method"], "GET");
     assert_eq!(open_orders["path"], ZEBPAY_OPEN_ORDERS_PATH);
     assert_eq!(open_orders["query"]["limit"], 500);
-    assert_eq!(open_orders["request_spec_only"], true);
+    assert_eq!(open_orders["request_spec_only"], false);
+    assert_eq!(open_orders["runtime"], "guarded_private_rest");
     assert_eq!(open_orders["credential_scope"], "read_only");
 
     let recent_fills = fixture("request_specs/get_recent_fills.json");
     assert_eq!(recent_fills["operation"], "zebpay.get_recent_fills");
     assert_eq!(recent_fills["method"], "GET");
     assert_eq!(recent_fills["path"], ZEBPAY_RECENT_FILLS_PATH);
-    assert_eq!(recent_fills["request_spec_only"], true);
+    assert_eq!(recent_fills["request_spec_only"], false);
+    assert_eq!(recent_fills["runtime"], "guarded_private_rest");
     assert_eq!(recent_fills["credential_scope"], "read_only");
+
+    let query_order = fixture("request_specs/query_order.json");
+    assert_eq!(query_order["operation"], "zebpay.query_order");
+    assert_eq!(query_order["method"], "GET");
+    assert_eq!(query_order["path"], ZEBPAY_QUERY_ORDER_PATH);
+    assert_eq!(query_order["request_spec_only"], false);
 
     let spec = build_private_request_spec(
         "GET",
@@ -312,6 +559,19 @@ fn zebpay_private_request_specs_should_be_sanitized_and_request_spec_only() {
     assert_eq!(spec.headers.client_id, "zebpay-client-id");
     assert_eq!(spec.headers.authorization, "Bearer zebpay-access-token");
     assert_eq!(ZEBPAY_CANCEL_ALL_ORDERS_PATH, "/orders/CancelAll");
+
+    let read_spec = build_private_get_request_spec(
+        ZEBPAY_QUERY_ORDER_PATH,
+        query_order_query("BTC-INR", "12345"),
+        "zebpay-client-id",
+        "zebpay-access-token",
+        "1717200000000",
+        "00000000-0000-4000-8000-000000000001",
+    )
+    .expect("read request spec");
+    assert_eq!(read_spec.query.len(), 4);
+    assert_eq!(open_orders_query("BTC-INR", Some(999))[4].1, "500");
+    assert_eq!(recent_fills_path("12345"), "/orders/12345/fills");
 }
 
 #[test]
@@ -349,4 +609,8 @@ fn place_order_request() -> PlaceOrderRequest {
         reduce_only: false,
         post_only: false,
     }
+}
+
+fn perpetual_symbol() -> ExchangeSymbol {
+    ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, "BTC-USDT-PERP").expect("symbol")
 }

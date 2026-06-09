@@ -110,7 +110,11 @@ pub fn parse_order_book(
         exchange_symbol: Some(symbol.exchange_symbol.clone()),
         bids: levels(bids)?,
         asks: levels(asks)?,
-        sequence: data.get("version").and_then(value_as_u64),
+        sequence: data
+            .get("version")
+            .or_else(|| data.get("seqNum"))
+            .or_else(|| data.get("seqId"))
+            .and_then(value_as_u64),
         exchange_timestamp: timestamp(data, &["ts", "mrid"]),
         received_at: Utc::now(),
         is_stale: false,

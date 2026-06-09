@@ -1,0 +1,38 @@
+{
+  "exchange": "huobi",
+  "profile_of": "htx",
+  "operation": "get_positions",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/linear-swap-api/v1/swap_cross_position_info",
+  "auth": "signed",
+  "signing": {
+    "mode": "hmac_sha256_base64_query_v2",
+    "canonical_payload": "POST\napi.hbdm.com\n/linear-swap-api/v1/swap_cross_position_info\nAccessKeyId=mock-access-key&SignatureMethod=HmacSHA256&SignatureVersion=2&Timestamp=2026-06-09T00%3A00%3A00"
+  },
+  "query": {
+    "AccessKeyId": { "match": "non_empty" },
+    "SignatureMethod": { "match": "exact", "value": "HmacSHA256" },
+    "SignatureVersion": { "match": "exact", "value": "2" },
+    "Timestamp": { "match": "non_empty" },
+    "Signature": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "contract_code": "BTC-USDT"
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "strict_body": false,
+  "forbid_values_containing": [
+    "real",
+    "secret",
+    "private"
+  ],
+  "source_boundary": {
+    "rest": "/linear-swap-api/v1/swap_cross_position_info",
+    "private_stream": "positions_cross.*",
+    "runtime_status": "request_spec_only"
+  },
+  "runtime_boundary": "Huobi legacy profile does not enable shared get_positions until HTX parser/delegation wiring, REST/positions_cross reconciliation, and read-only runtime gating are audited."
+}

@@ -1,0 +1,35 @@
+{
+  "exchange": "myokx",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v5/account/trade-fee",
+  "auth": "signed",
+  "credential_scope": "read_only",
+  "query": {
+    "instType": "SPOT",
+    "instId": "BTC-USDT"
+  },
+  "headers": {
+    "OK-ACCESS-KEY": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-PASSPHRASE": {
+      "match": "non_empty"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "regional_host": "https://eea.okx.com",
+  "official_source": "OKX V5 Get fee rates returns maker/taker rates for the requested instType/instId.",
+  "runtime_boundary": "guarded_runtime; shared get_fees reuses OKX V5 trade-fee when MYOKX regional credentials and explicit private REST enable flag are configured."
+}

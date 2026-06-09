@@ -191,7 +191,91 @@ endpoints:
     rate_limit_bucket: bequant_order_rest
     weight: 1
     request_spec_required: true
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bequant/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bequant.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bequant/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bequant.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bequant/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bequant.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bequant/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: bequant.batch_cancel_orders_unsupported
 unsupported:
+  - operation: contract_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: bequant_margin_futures_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/bequant/request_specs/product_line_source_boundary.json
+    runtime_isolation: "Current Bequant adapter is a Spot profile; futures/perpetual order and risk state need a separate product scope and must not share spot private runtime implicitly."
+    required_endpoints:
+      market_metadata: [margin/futures/perpetual instruments, contract specifications, settlement asset and tick/lot sizing]
+      public_market_data: [margin/futures/perpetual order book, margin/futures/perpetual ticker, margin/futures/perpetual trades]
+      private_account: [margin balances, positions, risk or leverage limits]
+      private_order_lifecycle: [place margin/futures order, cancel margin/futures order, query/open margin/futures orders, margin/futures fills]
+    unsafe_to_promote_without: [Bequant-specific endpoint specs, contract metadata and symbol mapping, position/margin/risk parser coverage, post-write reconciliation]
+    reason: "Official Bequant futures/perpetual endpoints exist, but this spot adapter has not implemented the contract product line."
+  - operation: margin_product
+    status: project_unimplemented
+    product_lines: [margin]
+    boundary: project_unimplemented_product_line
+    official_gap: bequant_margin_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/bequant/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      private_account: [margin balances, positions, risk or leverage limits]
+      private_order_lifecycle: [place margin order, cancel margin order, query/open margin orders, margin fills]
+    reason: "Official Bequant margin endpoints exist, but margin semantics are not mapped in this one-exchange spot adapter."
+  - operation: futures_product
+    status: project_unimplemented
+    product_lines: [futures, perpetual]
+    boundary: project_unimplemented_product_line
+    official_gap: bequant_futures_api_family
+    source_boundary_fixture: tests/fixtures/exchanges/bequant/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      market_metadata: [futures/perpetual instruments, contract specifications, settlement asset and tick/lot sizing]
+      public_market_data: [futures/perpetual order book, futures/perpetual ticker, futures/perpetual trades]
+      private_account: [futures/perpetual margin account, positions, risk or leverage limits]
+      private_order_lifecycle: [place futures/perpetual order, cancel futures/perpetual order, query/open futures/perpetual orders, futures/perpetual fills]
+    reason: "Official Bequant futures/perpetual endpoints require contract metadata, positions, margin, order routing and WS reconciliation before runtime promotion."
   - operation: margin_trading
     reason: "Official margin endpoints exist, but margin semantics are not mapped in this one-exchange spot adapter."
   - operation: futures_trading

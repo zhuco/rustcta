@@ -1,0 +1,16 @@
+{
+  "type": "message",
+  "topic": "obu",
+  "channel": "obu",
+  "subject": "increment",
+  "data": {
+    "symbol": "BTC-USDT",
+    "sequenceStart": "101",
+    "sequenceEnd": "102",
+    "time": 1700000000100,
+    "changes": {
+      "bids": [["65000.00", "1.2", "101"], ["64990.00", "0", "102"]],
+      "asks": [["65010.00", "0.8", "101"], ["65020.00", "1.5", "102"]]
+    }
+  }
+}

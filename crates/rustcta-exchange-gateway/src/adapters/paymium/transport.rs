@@ -6,6 +6,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::signing::paymium_private_headers;
+
 #[derive(Clone)]
 pub struct PaymiumRest {
     exchange_id: ExchangeId,
@@ -50,6 +52,28 @@ impl PaymiumRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_get(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let url = build_url(&self.rest_base_url, endpoint, params);
+        let nonce = Utc::now().timestamp_millis().to_string();
+        let mut request = self.http.get(&url).header("Accept", "application/json");
+        for (key, value) in paymium_private_headers(api_key, api_secret, &nonce, &url, "")? {
+            request = request.header(key, value);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

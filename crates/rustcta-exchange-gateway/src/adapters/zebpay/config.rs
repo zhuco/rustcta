@@ -28,7 +28,9 @@ impl Default for ZebpayGatewayConfig {
             client_id: client_id.unwrap_or_default(),
             client_secret: client_secret.unwrap_or_default(),
             access_token: access_token.unwrap_or_default(),
-            enabled_private_rest: env_bool("ZEBPAY_PRIVATE_REST_ENABLED").unwrap_or(false),
+            enabled_private_rest: env_bool("ZEBPAY_PRIVATE_REST_ENABLED")
+                .or_else(|| env_bool("RUSTCTA_ZEBPAY_PRIVATE_REST_ENABLED"))
+                .unwrap_or(false),
             request_timeout_ms: 10_000,
             enabled: true,
         }

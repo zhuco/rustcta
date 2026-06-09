@@ -7,7 +7,8 @@ use rustcta_types::{AccountId, CanonicalSymbol, MarketType};
 use serde_json::json;
 
 use super::streams::{
-    coinbase_private_subscribe_payload, coinbase_public_subscribe_payload,
+    coinbase_private_subscribe_payload, coinbase_public_order_book_ws_policy,
+    coinbase_public_subscribe_payload, coinbase_sequence_is_contiguous,
     parse_level2_snapshot_event,
 };
 use super::test_support::{context, exchange_id, symbol_scope};
@@ -76,6 +77,29 @@ fn coinbase_level2_snapshot_parser_should_build_sorted_book() {
     assert_eq!(response.order_book.sequence, Some(42));
     assert_eq!(response.order_book.bids[0].price, 100.0);
     assert_eq!(response.order_book.asks[0].price, 100.5);
+}
+
+#[test]
+fn coinbase_public_order_book_ws_policy_should_describe_level2_resync() {
+    let policy = coinbase_public_order_book_ws_policy();
+
+    assert_eq!(policy.public_channel, "level2");
+    assert_eq!(policy.heartbeat_channel, "heartbeats");
+    assert_eq!(policy.public_interval_ms, None);
+    assert_eq!(policy.sequence_field, "sequence_num");
+    assert_eq!(policy.checksum, None);
+    assert!(policy.depth.contains("full level2"));
+    assert!(policy.update_semantics.contains("quantity 0 removes"));
+    assert!(policy.rest_snapshot_endpoint.contains("product_book"));
+    assert!(policy.resync.contains("sequence_num gap"));
+}
+
+#[test]
+fn coinbase_sequence_continuity_should_detect_gaps_and_regressions() {
+    assert!(coinbase_sequence_is_contiguous(None, 42));
+    assert!(coinbase_sequence_is_contiguous(Some(42), 43));
+    assert!(!coinbase_sequence_is_contiguous(Some(42), 44));
+    assert!(!coinbase_sequence_is_contiguous(Some(42), 42));
 }
 
 #[tokio::test]

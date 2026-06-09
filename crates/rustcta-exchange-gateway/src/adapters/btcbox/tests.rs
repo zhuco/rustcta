@@ -1,12 +1,15 @@
 use std::collections::BTreeMap;
 
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeClient, OrderBookRequest, PrivateStreamKind,
-    PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription, SymbolRulesRequest,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelAllOrdersRequest,
+    CancelOrderRequest, ExchangeApiError, ExchangeClient, OpenOrdersRequest, OrderBookRequest,
+    OrderListConditionalLeg, OrderListLegType, OrderListRequest, PlaceOrderRequest,
+    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
+    QueryOrderRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
+    OrderSide, OrderType,
 };
 use serde_json::json;
 
@@ -81,7 +84,7 @@ fn btcbox_order_book_should_reject_ticker_only_depth_symbols() {
 }
 
 #[tokio::test]
-async fn btcbox_capabilities_should_be_spot_scan_only_with_explicit_private_boundary() {
+async fn btcbox_capabilities_should_be_spot_readback_only_with_explicit_private_boundary() {
     let adapter = BtcboxGatewayAdapter::new(BtcboxGatewayConfig::default()).expect("adapter");
     let capabilities = adapter.capabilities();
     assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
@@ -90,6 +93,11 @@ async fn btcbox_capabilities_should_be_spot_scan_only_with_explicit_private_boun
     assert!(capabilities.supports_order_book_snapshot);
     assert!(!capabilities.supports_private_rest);
     assert!(!capabilities.supports_place_order);
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_cancel_all_orders);
 
     let err = adapter
         .get_balances(rustcta_exchange_api::BalancesRequest {
@@ -107,9 +115,152 @@ async fn btcbox_capabilities_should_be_spot_scan_only_with_explicit_private_boun
         "../../../../../tests/fixtures/exchanges/btcbox/unsupported_boundary.json"
     ))
     .expect("boundary");
-    assert_eq!(boundary["scan_only"], true);
+    assert_eq!(boundary["scan_only"], false);
+    assert_eq!(boundary["readback_only"], true);
     assert_eq!(boundary["trade_enabled"], false);
-    assert_eq!(boundary["private_rest_runtime_enabled"], false);
+    assert_eq!(
+        boundary["private_rest_runtime_enabled"],
+        json!("readback_only")
+    );
+    assert_eq!(boundary["private_rest_readback_enabled"], true);
+    assert_eq!(
+        boundary["advanced_orders"]["unsupported_operations"],
+        json!([
+            "amend_order",
+            "place_order_list",
+            "batch_place_orders",
+            "batch_cancel_orders",
+            "cancel_all_orders"
+        ])
+    );
+}
+
+#[tokio::test]
+async fn btcbox_advanced_order_surfaces_should_remain_explicitly_unsupported() {
+    let adapter = BtcboxGatewayAdapter::new(BtcboxGatewayConfig::default()).expect("adapter");
+    let symbol = symbol_scope();
+    let order = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("batch-place-item"),
+        symbol: symbol.clone(),
+        client_order_id: Some("client-batch-1".to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: None,
+        quantity: "0.01".to_string(),
+        price: Some("5000000".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    };
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol.clone(),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("12345".to_string()),
+            new_client_order_id: None,
+            new_quantity: "0.02".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "btcbox.amend_order.unsupported"
+        }
+    ));
+
+    let list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("oco"),
+            symbol: symbol.clone(),
+            list_client_order_id: Some("oco-1".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.01".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some("5100000".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("4900000".to_string()),
+                stop_price: Some("4950000".to_string()),
+                time_in_force: None,
+                client_order_id: Some("oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        list_error,
+        ExchangeApiError::Unsupported {
+            operation: "btcbox.order_list.unsupported"
+        }
+    ));
+
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![order],
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "btcbox.batch_place_orders.unsupported"
+        }
+    ));
+
+    let cancel = CancelOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("cancel-item"),
+        symbol: symbol.clone(),
+        client_order_id: None,
+        exchange_order_id: Some("12345".to_string()),
+    };
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![cancel],
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "btcbox.batch_cancel_orders.unsupported"
+        }
+    ));
+
+    let cancel_all_error = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol),
+        })
+        .await
+        .expect_err("cancel-all unsupported");
+    assert!(matches!(
+        cancel_all_error,
+        ExchangeApiError::Unsupported {
+            operation: "btcbox.cancel_all_orders.unsupported"
+        }
+    ));
 }
 
 #[test]
@@ -165,6 +316,96 @@ async fn btcbox_public_rest_should_route_tickers_and_depth() {
     assert_eq!(seen[1].method, "GET");
     assert_eq!(seen[1].path, "/depth");
     assert_eq!(seen[1].query.get("coin").map(String::as_str), Some("btc"));
+}
+
+#[tokio::test]
+async fn btcbox_private_readback_should_route_trade_view_and_trade_list_when_enabled() {
+    let trade_view: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/btcbox/trade_view_success.json"
+    ))
+    .expect("trade view");
+    let trade_list: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/btcbox/trade_list_success.json"
+    ))
+    .expect("trade list");
+    let (base_url, seen) = spawn_rest_server(vec![trade_view, trade_list]).await;
+    let adapter = BtcboxGatewayAdapter::new(BtcboxGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("btcbox-public-key".to_string()),
+        api_secret: Some("btcbox-private-key".to_string()),
+        enabled_private_rest: true,
+        ..BtcboxGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let query = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query-order"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("12345".to_string()),
+        })
+        .await
+        .expect("query order");
+    let order = query.order.expect("order");
+    assert_eq!(order.exchange_order_id.as_deref(), Some("12345"));
+    assert_eq!(order.side, OrderSide::Buy);
+    assert_eq!(order.filled_quantity, "0.01");
+
+    let open = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("open-orders"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+            page: None,
+        })
+        .await
+        .expect("open orders");
+    assert_eq!(open.orders.len(), 2);
+    assert_eq!(open.orders[1].side, OrderSide::Sell);
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0].method, "POST");
+    assert_eq!(seen[0].path, "/trade_view");
+    assert!(seen[0].body.contains("coin=btc"));
+    assert!(seen[0].body.contains("id=12345"));
+    assert!(seen[0].body.contains("key=btcbox-public-key"));
+    assert!(seen[0].body.contains("signature="));
+    assert_eq!(seen[1].method, "POST");
+    assert_eq!(seen[1].path, "/trade_list");
+    assert!(seen[1].body.contains("since=0"));
+}
+
+#[tokio::test]
+async fn btcbox_private_readback_should_stay_guarded_without_env_flag() {
+    let adapter = BtcboxGatewayAdapter::new(BtcboxGatewayConfig {
+        api_key: Some("btcbox-public-key".to_string()),
+        api_secret: Some("btcbox-private-key".to_string()),
+        enabled_private_rest: false,
+        ..BtcboxGatewayConfig::default()
+    })
+    .expect("adapter");
+    assert!(!adapter.capabilities().supports_private_rest);
+
+    let error = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query-order-disabled"),
+            symbol: symbol_scope(),
+            client_order_id: None,
+            exchange_order_id: Some("12345".to_string()),
+        })
+        .await
+        .expect_err("guarded private rest");
+    assert!(matches!(
+        error,
+        ExchangeApiError::Unsupported {
+            operation: "btcbox.query_order"
+        }
+    ));
 }
 
 #[tokio::test]

@@ -1,0 +1,23 @@
+{
+  "exchange": "hibachi",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "status": "project_unimplemented",
+  "method": "DELETE",
+  "path": "/trade/orders",
+  "auth": "signed",
+  "body": {
+    "accountId": 42,
+    "nonce": 1714701600000003,
+    "orderIds": [
+      "<redacted-order-id-1>",
+      "<redacted-order-id-2>"
+    ],
+    "signature": "<redacted-signature>"
+  },
+  "strict_body": false,
+  "signing_vector": "tests/fixtures/exchanges/hibachi/signing_vectors/exchange_managed_hmac.json",
+  "expected_error": "hibachi.batch_cancel_requires_batch_signature_parser_and_reconciliation",
+  "trade_enabled": false
+}

@@ -1,0 +1,97 @@
+{
+  "exchange": "myokx",
+  "profile_of": "okx",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest"
+  ],
+  "official_product_lines": [
+    "margin",
+    "swap_perpetual",
+    "futures",
+    "options",
+    "event_contracts"
+  ],
+  "product_line_classification": {
+    "contract_product": {
+      "status": "project_unimplemented",
+      "reason": "Regional non-spot scope needs EEA domain, credential, eligibility, account-mode, metadata, lifecycle, and reconciliation audit."
+    },
+    "market_type_perpetual": {
+      "status": "project_unimplemented",
+      "reason": "SWAP/perpetual instruments exist in OKX v5 materials but are not wired for this regional profile."
+    },
+    "market_type_futures": {
+      "status": "project_unimplemented",
+      "reason": "Expiry futures instruments exist in OKX v5 materials but are not wired for this regional profile."
+    },
+    "market_type_options": {
+      "status": "project_unimplemented",
+      "reason": "Options instruments exist in OKX v5 materials but are not wired for this regional profile."
+    },
+    "event_contract_product": {
+      "status": "project_unimplemented",
+      "reason": "Event Contracts require separate regional eligibility, instrument, lifecycle, settlement, and reconciliation audit."
+    },
+    "margin_product": {
+      "status": "project_unimplemented",
+      "reason": "Margin account semantics require EEA eligibility, account-mode, risk policy, balance/position reconciliation, and private lifecycle audit."
+    }
+  },
+  "official_gap_fields": {
+    "contract_product": "regional_non_spot_product_scope",
+    "market_type_perpetual": "okx_v5_swap_instruments",
+    "market_type_futures": "okx_v5_futures_instruments",
+    "market_type_options": "okx_v5_options_instruments",
+    "event_contract_product": "okx_event_contract_product",
+    "margin_product": "okx_v5_margin_account_semantics"
+  },
+  "official_sources": [
+    {
+      "url": "https://my.okx.com/docs-v5/en/#public-data-rest-api-get-instruments",
+      "evidence": "MyOKX / OKX v5 regional documentation exposes instType values beyond SPOT, including MARGIN, SWAP, FUTURES, and OPTION, but this adapter enables only the EEA spot public REST profile."
+    },
+    {
+      "url": "https://my.okx.com/docs-v5/en/#trading-account-rest-api-get-positions",
+      "evidence": "Positions and account-mode semantics exist in the regional documentation and require product eligibility, account-mode, and credential-scope audit before runtime exposure."
+    },
+    {
+      "url": "https://www.okx.com/help/event-contracts-faq",
+      "evidence": "OKX event-contract materials describe a separate product surface that must not be routed through the MyOKX spot profile without a regional eligibility and lifecycle audit."
+    }
+  ],
+  "runtime_isolation": "Do not route MyOKX margin, swap/perpetual, expiry futures, options, or event-contract traffic through the spot public REST profile until each product line has an audited EEA host/domain policy, credential scope, product eligibility guard, account-mode policy, product metadata parser, private order lifecycle, and reconciliation path.",
+  "required_audit_gaps": [
+    "EEA domain and host behavior for each non-spot product",
+    "credential scope and API permission audit",
+    "regional product and account eligibility guard",
+    "account-mode and margin/risk policy mapping",
+    "product metadata and instrument parser fixtures",
+    "private order lifecycle request specs and parsers",
+    "positions, fills, settlement, and account reconciliation"
+  ],
+  "required_endpoints": {
+    "public_market_data": [
+      "margin/swap/futures/options instruments",
+      "non-spot order book and ticker market data",
+      "funding, open interest, or settlement feeds where applicable"
+    ],
+    "private_readbacks": [
+      "positions",
+      "margin and collateral balances",
+      "account-mode and leverage/risk state",
+      "open orders",
+      "order query",
+      "fills and settlement history"
+    ],
+    "private_writes": [
+      "non-spot place order",
+      "non-spot cancel order",
+      "non-spot amend or batch order lifecycle where supported"
+    ]
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": "<redacted:secret>"
+}

@@ -49,6 +49,7 @@ impl BitbnsGatewayAdapter {
         let rest = BitbnsRest::new(
             exchange_id.clone(),
             config.rest_base_url.clone(),
+            config.private_rest_base_url.clone(),
             config.request_timeout_ms,
         )?;
         Ok(Self {
@@ -111,7 +112,7 @@ impl ExchangeClient for BitbnsGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = true;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.supports_symbol_rules = true;
@@ -121,9 +122,9 @@ impl ExchangeClient for BitbnsGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = true;
+        capabilities.supports_open_orders = true;
+        capabilities.supports_recent_fills = true;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -261,7 +262,7 @@ impl ExchangeClient for BitbnsGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("bitbns.query_order_disabled")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -272,7 +273,7 @@ impl ExchangeClient for BitbnsGatewayAdapter {
         if let Some(market_type) = request.market_type {
             self.ensure_spot(market_type)?;
         }
-        self.unsupported("bitbns.open_orders_disabled")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -284,7 +285,7 @@ impl ExchangeClient for BitbnsGatewayAdapter {
             self.ensure_exchange(&symbol.exchange)?;
             self.ensure_spot(symbol.market_type)?;
         }
-        self.unsupported("bitbns.recent_fills_disabled")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

@@ -6,8 +6,8 @@ use rustcta_types::{CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType};
 use serde_json::Value;
 
 use super::streams::{
-    parse_upbit_stream_message, upbit_heartbeat_policy_ms, upbit_public_subscribe_payload,
-    UpbitStreamMessage,
+    parse_upbit_stream_message, upbit_heartbeat_policy_ms, upbit_orderbook_code_with_count,
+    upbit_public_subscribe_payload, UpbitStreamMessage, UPBIT_ORDERBOOK_UNIT_COUNTS,
 };
 
 fn fixture(name: &str) -> Value {
@@ -34,6 +34,9 @@ fn fixture(name: &str) -> Value {
         ),
         "ws/orderbook_snapshot.json" => {
             include_str!("../../../../../tests/fixtures/exchanges/upbit/ws/orderbook_snapshot.json")
+        }
+        "ws/public_orderbook.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/upbit/ws/public_orderbook.json")
         }
         _ => panic!("unknown upbit fixture {name}"),
     };
@@ -143,12 +146,42 @@ fn upbit_ws_specs_should_cover_payload_and_parser() {
     )
     .unwrap();
     assert_eq!(payload[1]["type"], "orderbook");
-    assert_eq!(payload[1]["codes"][0], "KRW-BTC");
+    assert_eq!(payload[1]["codes"][0], "KRW-BTC.30");
     assert_eq!(upbit_heartbeat_policy_ms(), (30_000, 90_000));
+    assert_eq!(
+        upbit_public_subscribe_payload(
+            &PublicStreamSubscription {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context: context("public-ws"),
+                symbol: symbol_scope(),
+                kind: PublicStreamKind::OrderBookSnapshot,
+            },
+            "public-ws",
+        )
+        .unwrap(),
+        fixture("ws/public_orderbook.json")
+    );
+    let snapshot = fixture("ws/orderbook_snapshot.json");
+    assert_eq!(snapshot["timestamp"], 1712230310689i64);
+    assert!(snapshot.get("sequential_id").is_none());
     assert!(matches!(
-        parse_upbit_stream_message(&fixture("ws/orderbook_snapshot.json")),
+        parse_upbit_stream_message(&snapshot),
         UpbitStreamMessage::Snapshot(_)
     ));
+}
+
+#[test]
+fn upbit_orderbook_count_policy_should_match_official_units() {
+    assert_eq!(UPBIT_ORDERBOOK_UNIT_COUNTS, [1, 5, 15, 30]);
+    assert_eq!(
+        upbit_orderbook_code_with_count("KRW-BTC", 1).unwrap(),
+        "KRW-BTC.1"
+    );
+    assert_eq!(
+        upbit_orderbook_code_with_count("KRW-BTC", 15).unwrap(),
+        "KRW-BTC.15"
+    );
+    assert!(upbit_orderbook_code_with_count("KRW-BTC", 10).is_err());
 }
 
 fn exchange_id() -> ExchangeId {

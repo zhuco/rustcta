@@ -1,0 +1,54 @@
+{
+  "id": 2100001,
+  "client_order_id": "cli-fmfwio-otoco",
+  "contingency_type": "oneTriggerOneCancelOther",
+  "status": "new",
+  "updated_at": "2024-04-15T17:01:05.092Z",
+  "orders": [
+    {
+      "id": 840450211,
+      "client_order_id": "cli-fmfwio-otoco-primary",
+      "symbol": "ETHBTC",
+      "side": "buy",
+      "status": "new",
+      "type": "limit",
+      "time_in_force": "GTC",
+      "quantity": "0.063",
+      "price": "0.046016",
+      "quantity_cumulative": "0.000",
+      "post_only": false,
+      "created_at": "2024-04-15T17:01:05.092Z",
+      "updated_at": "2024-04-15T17:01:05.092Z"
+    },
+    {
+      "id": 840450212,
+      "client_order_id": "cli-fmfwio-otoco-tp",
+      "symbol": "ETHBTC",
+      "side": "sell",
+      "status": "suspended",
+      "type": "limit",
+      "time_in_force": "GTC",
+      "quantity": "0.063",
+      "price": "0.050000",
+      "quantity_cumulative": "0.000",
+      "post_only": false,
+      "created_at": "2024-04-15T17:01:05.092Z",
+      "updated_at": "2024-04-15T17:01:05.092Z"
+    },
+    {
+      "id": 840450213,
+      "client_order_id": "cli-fmfwio-otoco-sl",
+      "symbol": "ETHBTC",
+      "side": "sell",
+      "status": "suspended",
+      "type": "stopMarket",
+      "time_in_force": "GTC",
+      "quantity": "0.063",
+      "price": null,
+      "quantity_cumulative": "0.000",
+      "post_only": false,
+      "created_at": "2024-04-15T17:01:05.092Z",
+      "updated_at": "2024-04-15T17:01:05.092Z"
+    }
+  ]
+}

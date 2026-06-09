@@ -60,7 +60,7 @@ pub(crate) fn ApiKeysPanel(
         .cloned()
         .collect::<Vec<_>>();
     let account_manager_select_options = account_manager_options.clone();
-    let save_token = token.clone();
+    let save_request_token = token.clone();
     let mut refresh_data = data;
     let refresh_token = token.clone();
     let mut refresh_message = message;
@@ -68,23 +68,21 @@ pub(crate) fn ApiKeysPanel(
         let token_value = refresh_token.clone();
         async move {
             loop {
-                if !token_value.is_empty() {
-                    match fetch_credential_status(&token_value).await {
-                        Ok(status) => {
-                            let mut next = refresh_data();
-                            next.credentials_status = status;
-                            refresh_data.set(next);
-                        }
-                        Err(error) => refresh_message.set(error),
+                match fetch_credential_status(&token_value).await {
+                    Ok(status) => {
+                        let mut next = refresh_data();
+                        next.credentials_status = status;
+                        refresh_data.set(next);
                     }
-                    match fetch_exchange_api_keys(&token_value).await {
-                        Ok(status) => {
-                            let mut next = refresh_data();
-                            next.api_keys = status;
-                            refresh_data.set(next);
-                        }
-                        Err(error) => refresh_message.set(error),
+                    Err(error) => refresh_message.set(error),
+                }
+                match fetch_exchange_api_keys(&token_value).await {
+                    Ok(status) => {
+                        let mut next = refresh_data();
+                        next.api_keys = status;
+                        refresh_data.set(next);
                     }
+                    Err(error) => refresh_message.set(error),
                 }
                 TimeoutFuture::new(10_000).await;
             }
@@ -211,11 +209,7 @@ pub(crate) fn ApiKeysPanel(
                         class: "button",
                         disabled: save_busy(),
                         onclick: move |_| {
-                            let token_value = save_token.clone();
-                            if token_value.trim().is_empty() {
-                                message.set(s(lang, "auth_token_required_error"));
-                                return;
-                            }
+                            let token_value = save_request_token.clone();
                             let exchange = form_exchange();
                             let account_id = normalized_account_input(&form_account());
                             if !valid_account_identifier(&account_id) {
@@ -425,10 +419,6 @@ pub(crate) fn ApiKeysPanel(
                                                                 disabled: delete_busy(),
                                                                 onclick: move |_| {
                                                                     let token_value = delete_token.clone();
-                                                                    if token_value.trim().is_empty() {
-                                                                        message.set(s(lang, "auth_token_required_error"));
-                                                                        return;
-                                                                    }
                                                                     let exchange = delete_exchange.clone();
                                                                     let account = delete_account.clone();
                                                                     let credential_namespace = delete_credential_namespace.clone();

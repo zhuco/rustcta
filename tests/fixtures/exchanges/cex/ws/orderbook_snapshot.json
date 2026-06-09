@@ -1,0 +1,18 @@
+{
+  "e": "order_book_subscribe",
+  "data": {
+    "timestamp": 1710000000,
+    "bids": [
+      ["17670.30", "0.50"],
+      ["17669.50", "0.25"]
+    ],
+    "asks": [
+      ["17689.66", "0.01"],
+      ["17690.10", "0.40"]
+    ],
+    "pair": "BTC:USD",
+    "id": 123456,
+    "seqId": 9001
+  },
+  "oid": "fixture-order-book-subscribe"
+}

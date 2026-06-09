@@ -7,12 +7,13 @@ use rustcta_exchange_api::{
     PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
     EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{ExchangeId, MarketType};
+use rustcta_types::{ExchangeId, MarketType, OrderBookLevel, OrderBookSnapshot};
 use serde_json::{json, Value};
 
 use super::parser::normalize_kucoin_symbol;
 use super::KuCoinGatewayAdapter;
 use crate::adapters::ensure_exchange_api_schema;
+use crate::orderbook_state::{OrderBookDelta, OrderBookDeltaLevel};
 use crate::streams::StreamRuntimeState;
 
 const DEFAULT_BULLET_TOKEN_TTL_MS: i64 = 24 * 60 * 60 * 1_000;
@@ -141,19 +142,39 @@ pub fn kucoin_public_subscription_spec(
         });
     }
     let symbol = normalize_kucoin_symbol(&subscription.symbol.exchange_symbol.symbol)?;
-    let topic = match &subscription.kind {
-        PublicStreamKind::Trades => format!("/market/match:{symbol}"),
-        PublicStreamKind::Ticker => format!("/market/ticker:{symbol}"),
-        PublicStreamKind::OrderBookDelta => format!("/market/level2:{symbol}"),
-        PublicStreamKind::OrderBookSnapshot => format!("/spotMarket/level2Depth50:{symbol}"),
-        PublicStreamKind::Candles { interval } => {
-            format!("/market/candles:{symbol}_{interval}")
-        }
+    let spec = match &subscription.kind {
+        PublicStreamKind::Ticker => kucoin_obu_subscription_spec(
+            ws_url(token_lease, "wss://ws-api-spot.kucoin.com/endpoint"),
+            symbol,
+            "1",
+            request_id,
+        ),
+        PublicStreamKind::OrderBookDelta => kucoin_obu_subscription_spec(
+            ws_url(token_lease, "wss://ws-api-spot.kucoin.com/endpoint"),
+            symbol,
+            "increment",
+            request_id,
+        ),
+        PublicStreamKind::OrderBookSnapshot => kucoin_obu_subscription_spec(
+            ws_url(token_lease, "wss://ws-api-spot.kucoin.com/endpoint"),
+            symbol,
+            "50",
+            request_id,
+        ),
+        PublicStreamKind::Trades => subscription_spec(
+            ws_url(token_lease, "wss://ws-api-spot.kucoin.com/endpoint"),
+            format!("/market/match:{symbol}"),
+            request_id,
+            false,
+        ),
+        PublicStreamKind::Candles { interval } => subscription_spec(
+            ws_url(token_lease, "wss://ws-api-spot.kucoin.com/endpoint"),
+            format!("/market/candles:{symbol}_{interval}"),
+            request_id,
+            false,
+        ),
     };
-    let url = token_lease
-        .map(KuCoinBulletTokenLease::websocket_url)
-        .unwrap_or_else(|| "wss://ws-api-spot.kucoin.com/endpoint".to_string());
-    Ok(subscription_spec(url, topic, request_id, false))
+    Ok(spec)
 }
 
 pub fn kucoin_private_subscription_spec(
@@ -185,6 +206,81 @@ pub fn kucoin_pong_response(value: &Value) -> Option<Value> {
         "id": value.get("id").and_then(Value::as_str).unwrap_or("pong"),
         "type": "pong"
     }))
+}
+
+pub fn parse_kucoin_obu_delta(
+    exchange: &ExchangeId,
+    symbol: &rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderBookDelta> {
+    let data = value.get("data").unwrap_or(value);
+    let changes = data.get("changes").unwrap_or(data);
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "kucoin obu delta parser requires canonical_symbol".to_string(),
+            })?;
+    let mut delta = OrderBookDelta::new(
+        exchange.clone(),
+        symbol.market_type,
+        canonical_symbol,
+        Utc::now(),
+    );
+    delta.bids = parse_delta_levels(changes.get("bids").or_else(|| changes.get("b")))?;
+    delta.asks = parse_delta_levels(changes.get("asks").or_else(|| changes.get("a")))?;
+    delta.first_sequence = first_u64(
+        data,
+        &[
+            "sequenceStart",
+            "startingSequence",
+            "startSeq",
+            "start",
+            "sequence",
+        ],
+    );
+    delta.last_sequence = first_u64(
+        data,
+        &["sequenceEnd", "endingSequence", "endSeq", "end", "sequence"],
+    );
+    delta.exchange_timestamp = first_i64(data, &["time", "timestamp", "ts"])
+        .and_then(DateTime::<Utc>::from_timestamp_millis);
+    Ok(delta)
+}
+
+pub fn parse_kucoin_obu_snapshot(
+    exchange: &ExchangeId,
+    symbol: rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<OrderBookSnapshot> {
+    let data = value.get("data").unwrap_or(value);
+    let canonical_symbol =
+        symbol
+            .canonical_symbol
+            .clone()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "kucoin obu snapshot parser requires canonical_symbol".to_string(),
+            })?;
+    let bids = parse_snapshot_levels(data.get("bids").or_else(|| data.get("b")))?;
+    let asks = parse_snapshot_levels(data.get("asks").or_else(|| data.get("a")))?;
+    let mut snapshot = OrderBookSnapshot::new(
+        exchange.clone(),
+        symbol.market_type,
+        canonical_symbol,
+        bids,
+        asks,
+        Utc::now(),
+    )
+    .map_err(validation_error)?;
+    snapshot.exchange_symbol = Some(symbol.exchange_symbol);
+    snapshot.sequence = first_u64(
+        data,
+        &["sequence", "sequenceEnd", "endingSequence", "endSeq"],
+    );
+    snapshot.exchange_timestamp = first_i64(data, &["time", "timestamp", "ts"])
+        .and_then(DateTime::<Utc>::from_timestamp_millis);
+    Ok(snapshot)
 }
 
 pub fn kucoin_bullet_token_lease(
@@ -272,6 +368,128 @@ fn subscription_spec(
             "privateChannel": private_channel,
             "response": true
         }),
+    }
+}
+
+fn kucoin_obu_subscription_spec(
+    url: String,
+    symbol: String,
+    depth: &str,
+    request_id: &str,
+) -> KuCoinWsSubscriptionSpec {
+    let topic = format!("obu:{symbol}:{depth}");
+    KuCoinWsSubscriptionSpec {
+        url,
+        topic: topic.clone(),
+        subscribe_payload: json!({
+            "id": request_id,
+            "type": "subscribe",
+            "topic": "obu",
+            "channel": "obu",
+            "symbol": symbol,
+            "depth": depth,
+            "privateChannel": false,
+            "response": true
+        }),
+        unsubscribe_payload: json!({
+            "id": request_id,
+            "type": "unsubscribe",
+            "topic": "obu",
+            "channel": "obu",
+            "symbol": symbol,
+            "depth": depth,
+            "privateChannel": false,
+            "response": true
+        }),
+    }
+}
+
+fn ws_url(token_lease: Option<&KuCoinBulletTokenLease>, fallback: &str) -> String {
+    token_lease
+        .map(KuCoinBulletTokenLease::websocket_url)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn parse_delta_levels(value: Option<&Value>) -> ExchangeApiResult<Vec<OrderBookDeltaLevel>> {
+    value
+        .and_then(Value::as_array)
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: "kucoin obu message missing levels".to_string(),
+        })?
+        .iter()
+        .map(|level| {
+            let (price, quantity) = level_price_quantity(level)?;
+            Ok(OrderBookDeltaLevel::new(price, quantity))
+        })
+        .collect()
+}
+
+fn parse_snapshot_levels(value: Option<&Value>) -> ExchangeApiResult<Vec<OrderBookLevel>> {
+    value
+        .and_then(Value::as_array)
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: "kucoin obu message missing levels".to_string(),
+        })?
+        .iter()
+        .map(|level| {
+            let (price, quantity) = level_price_quantity(level)?;
+            OrderBookLevel::new(price, quantity).map_err(validation_error)
+        })
+        .collect()
+}
+
+fn level_price_quantity(value: &Value) -> ExchangeApiResult<(f64, f64)> {
+    if let Some(array) = value.as_array() {
+        let price =
+            value_to_f64(array.first()).ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "kucoin obu level missing price".to_string(),
+            })?;
+        let quantity =
+            value_to_f64(array.get(1)).ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "kucoin obu level missing quantity".to_string(),
+            })?;
+        return Ok((price, quantity));
+    }
+    let price = required_f64(value, &["price", "p"])?;
+    let quantity = required_f64(value, &["size", "quantity", "q"])?;
+    Ok((price, quantity))
+}
+
+fn required_f64(value: &Value, keys: &[&str]) -> ExchangeApiResult<f64> {
+    value_to_f64(keys.iter().find_map(|key| value.get(*key))).ok_or_else(|| {
+        ExchangeApiError::InvalidRequest {
+            message: format!("kucoin obu message missing numeric field {keys:?}"),
+        }
+    })
+}
+
+fn value_to_f64(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::String(text) => text.parse().ok(),
+        Value::Number(number) => number.as_f64(),
+        _ => None,
+    }
+}
+
+fn first_u64(value: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+    })
+}
+
+fn first_i64(value: &Value, keys: &[&str]) -> Option<i64> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+    })
+}
+
+fn validation_error(error: impl std::fmt::Display) -> ExchangeApiError {
+    ExchangeApiError::InvalidRequest {
+        message: error.to_string(),
     }
 }
 

@@ -26,17 +26,69 @@ reconciliation:
   private_state: rest_fallback
   stream_recovery: Re-login with session key, resubscribe private channels, then reconcile balances, positions, open orders, and trade history over JSON-RPC.
 batch:
-  place_orders: { support: unsupported, reason: derive.batch_place_orders_unverified }
-  cancel_orders: { support: unsupported, reason: derive.batch_cancel_orders_unverified }
+  place_orders: { support: unsupported, reason: derive.batch_place_orders_unsupported }
+  cancel_orders: { support: unsupported, reason: derive.batch_cancel_orders_unsupported }
 websocket:
-  public: { support: native, channels: [orderbook, ticker, trades], heartbeat: json_rpc_ping }
+  public:
+    support: native
+    channels: [orderbook, ticker, trades]
+    heartbeat: json_rpc_ping
+    order_book:
+      product: derivative
+      market_types: [option, perpetual]
+      url: wss://api.derive.xyz/ws
+      protocol: json_rpc_websocket
+      channel: orderbook
+      subscribe:
+        method: public/subscribe
+        params: { channel: orderbook }
+      interval_ms: null
+      interval_boundary: "no fixed ms published; official Derive public WS docs do not publish a fixed orderbook cadence."
+      depth: unspecified
+      depth_boundary: "depth: unspecified; official Derive public WS docs do not publish a fixed depth selector."
+      sequence:
+        fields: []
+        risk: "No stable sequence field is documented for public orderbook reconstruction."
+      checksum:
+        supported: false
+        field: null
+        risk: "No checksum is documented for the public orderbook channel."
+      resync:
+        mode: json_rpc_orderbook_snapshot_then_resubscribe
+        endpoint_operation: order_book
+        method: public/get_orderbook
+        triggers: [connect, reconnect, stale_stream, parse_error, suspected_message_loss]
   private: { support: spec_only, channels: [private.orders, private.trades, private.balances, private.positions], auth_renewal: relogin }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Derive spot trading exists in the JSON-RPC API family, but this adapter scope is option/perpetual instruments, order book, and private session/account boundaries only; remaining Spot runtime work is spot instrument filtering, spot order-book/ticker/trade public parsers, spot balances private specs, spot order lifecycle create/cancel/get-orders/trades private specs, session/JWT/Stark auth, product-scope guards, and reconciliation."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/derive/request_specs/product_line_source_boundary.json
+    current_scope: "Derive options/perpetual JSON-RPC instruments, order book, and private order/account boundaries."
+    runtime_gap: "Spot instrument filter, spot order book/ticker parser, spot balances and spot order lifecycle are not wired; Derive Chain profile remains separate."
+    required_endpoints: [public_get_all_instruments_spot, public_get_orderbook_spot, public_get_tickers_spot, private_create_spot, private_cancel_spot, private_get_orders_spot, private_get_trades_spot]
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：fee 信息只是 adapter-specific metadata，未归一到 shared fee snapshot。"
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/derive/request_specs/amend_order_replace.json
+    signing_vector: tests/fixtures/exchanges/derive/signing_vectors/session_replace_hmac.json
+    source_fixture: tests/fixtures/exchanges/derive/request_specs/amend_order_replace_source_boundary.json
+    parser_fixture: tests/fixtures/exchanges/derive/parser/amend_order_replace_ack.json
+    reason: "Derive official private/replace can cancel and recreate an order in one RPC call, but shared amend_order cannot safely run until production session/JWT/Stark signing, full replace field mapping, response reconciliation and live dry-run guard are wired."
+  - operation: place_order_list
+    reason: "No lossless OCO/OTO/order-list mapping is documented for the shared gateway model."
+  - operation: batch_place_orders
+    reason: "No verified native batch place endpoint is mapped for the shared gateway model."
+  - operation: batch_cancel_orders
+    reason: "No verified native batch cancel endpoint is mapped for the shared gateway model."
 endpoints:
   - operation: symbol_rules
     product: option
     market_types: [option, perpetual]
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /
     auth: none
     rate_limit_bucket: derive_public_market
@@ -126,6 +178,75 @@ endpoints:
     testnet: false
     support: spec_only
     notes: JSON-RPC method private/cancel.
+  - operation: amend_order
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: derive_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+    reason: derive.amend_requires_session_jwt_stark_signer_full_replace_fields_reconciliation_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/derive/request_specs/amend_order_replace.json
+    notes: JSON-RPC method private/replace; offline boundary backed by session_replace_hmac signing vector, amend_order_replace_source_boundary source fixture, and amend_order_replace_ack parser fixture. Runtime waits for production session/JWT/Stark signing, shared amend full replace field mapping, replace response reconciliation and live dry-run guard.
+  - operation: place_order_list
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/derive/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: derive_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: derive.order_list_unsupported
+    notes: OCO/OTO/order-list semantics are not mapped into the shared gateway model.
+  - operation: batch_place_orders
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/derive/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: derive_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: derive.batch_place_orders_unsupported
+    notes: Native batch place is not fixture-verified for session-key live trading.
+  - operation: batch_cancel_orders
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/derive/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: derive_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: derive.batch_cancel_orders_unsupported
+    notes: Native batch cancel is not fixture-verified for session-key live trading.
   - operation: open_orders
     product: option
     market_types: [option, perpetual]

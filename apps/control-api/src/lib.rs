@@ -309,6 +309,10 @@ fn local_agent_router(state: LocalSideEffectState) -> Router {
             get(local_agent_cross_arb_exchanges).post(local_agent_save_cross_arb_exchanges),
         )
         .route(
+            "/api/local-agent/cross-arb/settings",
+            get(local_agent_cross_arb_settings).post(local_agent_save_cross_arb_settings),
+        )
+        .route(
             "/api/local-agent/cross-arb/exchanges/:exchange",
             delete(local_agent_delete_cross_arb_exchange),
         )
@@ -405,6 +409,60 @@ struct CrossArbExchangeConfigUpdateRequest {
     strategy_id: Option<String>,
     #[serde(default)]
     exchanges: Vec<Value>,
+    #[serde(default = "default_true_bool")]
+    apply: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CrossArbSettingsUpdateRequest {
+    #[serde(default)]
+    strategy_id: Option<String>,
+    #[serde(default)]
+    symbols: Option<Vec<String>>,
+    #[serde(default)]
+    target_symbol_count: Option<usize>,
+    #[serde(default)]
+    min_notional_usdt: Option<f64>,
+    #[serde(default)]
+    target_notional_usdt: Option<f64>,
+    #[serde(default)]
+    max_notional_usdt: Option<f64>,
+    #[serde(default)]
+    max_positions_per_exchange: Option<usize>,
+    #[serde(default)]
+    max_open_bundles: Option<usize>,
+    #[serde(default)]
+    max_open_positions: Option<usize>,
+    #[serde(default)]
+    max_symbol_notional_usdt: Option<f64>,
+    #[serde(default)]
+    max_notional_per_symbol_usdt: Option<f64>,
+    #[serde(default)]
+    max_notional_per_exchange_usdt: Option<f64>,
+    #[serde(default)]
+    max_total_notional_usdt: Option<f64>,
+    #[serde(default)]
+    min_open_raw_spread: Option<f64>,
+    #[serde(default)]
+    min_open_spread_pct: Option<f64>,
+    #[serde(default)]
+    min_open_maker_taker_net_edge: Option<f64>,
+    #[serde(default)]
+    min_open_net_profit_pct: Option<f64>,
+    #[serde(default)]
+    min_open_net_edge_pct: Option<f64>,
+    #[serde(default)]
+    min_open_executable_depth_ratio: Option<f64>,
+    #[serde(default)]
+    close_min_net_profit_pct: Option<f64>,
+    #[serde(default)]
+    lock_profit_dual_taker_pct: Option<f64>,
+    #[serde(default)]
+    expected_close_spread_pct: Option<f64>,
+    #[serde(default)]
+    max_close_spread_pct: Option<f64>,
+    #[serde(default)]
+    execution_profile: Option<String>,
     #[serde(default = "default_true_bool")]
     apply: bool,
 }
@@ -2049,6 +2107,77 @@ async fn local_agent_cross_arb_exchanges(
     }
 }
 
+async fn local_agent_cross_arb_settings(
+    State(state): State<LocalSideEffectState>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+        Ok(view) => local_json_response(
+            StatusCode::OK,
+            cross_arb_settings_response(&view, &operation_id, false, false),
+        ),
+        Err(response) => response,
+    }
+}
+
+async fn local_agent_save_cross_arb_settings(
+    State(state): State<LocalSideEffectState>,
+    Json(request): Json<CrossArbSettingsUpdateRequest>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    if request.apply && state.config.command_queue_path.is_none() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "command_queue_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    let mut view = match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+        Ok(view) => view,
+        Err(response) => return response,
+    };
+    let strategy_id = request
+        .strategy_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(CROSS_ARB_STRATEGY_ID)
+        .to_string();
+    apply_cross_arb_settings_update(&mut view.root, &request);
+    let (exchange_map, cleaned_invalid_count, removed_exchanges) =
+        sanitize_cross_arb_exchange_map(view.root.get("exchanges"));
+    view.exchange_map = exchange_map;
+    view.exchanges = exchange_rows_from_map(&view.exchange_map);
+    view.enabled_exchanges = enabled_exchanges_from_root_or_map(&view.root, &view.exchange_map);
+    view.cleaned_invalid_count += cleaned_invalid_count;
+    view.removed_exchanges.extend(removed_exchanges);
+    sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
+
+    match persist_cross_arb_config(
+        &state,
+        &view,
+        &operation_id,
+        &strategy_id,
+        "local_agent_cross_arb_settings_save",
+        request.apply,
+        "update_cross_arb_settings",
+        cross_arb_settings_command_payload(&view, &request, &strategy_id),
+    )
+    .await
+    {
+        Ok(realtime_queued) => local_json_response(
+            StatusCode::ACCEPTED,
+            cross_arb_settings_response(&view, &operation_id, true, realtime_queued),
+        ),
+        Err(response) => response,
+    }
+}
+
 async fn local_agent_save_cross_arb_exchanges(
     State(state): State<LocalSideEffectState>,
     Json(request): Json<CrossArbExchangeConfigUpdateRequest>,
@@ -2105,13 +2234,19 @@ async fn local_agent_save_cross_arb_exchanges(
     view.cleaned_invalid_count += invalid_rows;
     sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
 
-    match persist_cross_arb_exchange_config(
+    match persist_cross_arb_config(
         &state,
         &view,
         &operation_id,
         &strategy_id,
         "local_agent_cross_arb_exchange_config_save",
         request.apply,
+        "update_cross_arb_exchange_config",
+        json!({
+            "strategy_id": strategy_id,
+            "enabled_exchanges": view.enabled_exchanges,
+            "exchanges": view.exchanges,
+        }),
     )
     .await
     {
@@ -2165,13 +2300,19 @@ async fn local_agent_delete_cross_arb_exchange(
     view.enabled_exchanges = enabled_exchanges_from_map(&view.exchange_map);
     sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
 
-    match persist_cross_arb_exchange_config(
+    match persist_cross_arb_config(
         &state,
         &view,
         &operation_id,
         CROSS_ARB_STRATEGY_ID,
         "local_agent_cross_arb_exchange_config_delete",
         true,
+        "update_cross_arb_exchange_config",
+        json!({
+            "strategy_id": CROSS_ARB_STRATEGY_ID,
+            "enabled_exchanges": view.enabled_exchanges,
+            "exchanges": view.exchanges,
+        }),
     )
     .await
     {
@@ -2339,13 +2480,15 @@ async fn load_cross_arb_exchange_config(
     })
 }
 
-async fn persist_cross_arb_exchange_config(
+async fn persist_cross_arb_config(
     state: &LocalSideEffectState,
     view: &CrossArbExchangeConfigView,
     operation_id: &str,
     strategy_id: &str,
     action: &str,
     apply: bool,
+    command_name: &str,
+    command_payload: Value,
 ) -> Result<bool, (StatusCode, Json<Value>)> {
     let Some(path) = state.config.strategy_config_path.as_ref() else {
         return Err(local_json_response(
@@ -2422,13 +2565,9 @@ async fn persist_cross_arb_exchange_config(
     let command = json!({
         "schema_version": 1,
         "operation_id": operation_id,
-        "command": "update_cross_arb_exchange_config",
+        "command": command_name,
         "strategy_id": strategy_id,
-        "payload": {
-            "strategy_id": strategy_id,
-            "enabled_exchanges": view.enabled_exchanges,
-            "exchanges": view.exchanges,
-        },
+        "payload": command_payload,
         "source": "local_agent",
         "accepted_at": Utc::now(),
     });
@@ -2475,6 +2614,406 @@ fn cross_arb_exchange_config_response(
         },
         "local_path_exposed": false,
     })
+}
+
+fn cross_arb_settings_response(
+    view: &CrossArbExchangeConfigView,
+    operation_id: &str,
+    accepted: bool,
+    realtime_queued: bool,
+) -> Value {
+    let settings = cross_arb_settings_view(&view.root, &view.enabled_exchanges);
+    json!({
+        "schema_version": 1,
+        "configured": true,
+        "accepted": accepted,
+        "status": "ok",
+        "operation_id": operation_id,
+        "path": LOCAL_STRATEGY_CONFIG_REF,
+        "strategy_id": CROSS_ARB_STRATEGY_ID,
+        "settings": settings,
+        "realtime": {
+            "requested": accepted,
+            "queued": realtime_queued,
+        },
+        "local_path_exposed": false,
+    })
+}
+
+fn cross_arb_settings_view(root: &Value, enabled_exchanges: &[String]) -> Value {
+    let thresholds = root.get("thresholds").unwrap_or(&Value::Null);
+    let dual_taker = root.get("dual_taker").unwrap_or(&Value::Null);
+    let execution_quality = root.get("execution_quality").unwrap_or(&Value::Null);
+    let sizing = root.get("sizing").unwrap_or(&Value::Null);
+    let risk = root.get("risk").unwrap_or(&Value::Null);
+    let universe = root.get("universe").unwrap_or(&Value::Null);
+    let controls = root.get("controls").unwrap_or(&Value::Null);
+    let execution = root.get("execution").unwrap_or(&Value::Null);
+    let symbols = root
+        .get("enabled_symbols")
+        .and_then(Value::as_array)
+        .filter(|symbols| !symbols.is_empty())
+        .or_else(|| universe.get("symbols").and_then(Value::as_array))
+        .cloned()
+        .unwrap_or_default();
+    json!({
+        "enabled_exchanges": enabled_exchanges,
+        "symbols": symbols,
+        "target_symbol_count": symbols.len(),
+        "target_notional_usdt": number_from_paths(
+            &[root, sizing, dual_taker],
+            &["max_live_notional_per_trade", "target_notional_usdt"],
+        ),
+        "max_notional_usdt": number_from_paths(&[sizing], &["max_notional_usdt"]),
+        "max_open_bundles": number_from_paths(&[risk, dual_taker], &["max_open_bundles"]),
+        "max_positions_per_exchange": number_from_paths(
+            &[sizing, dual_taker],
+            &["max_positions_per_exchange"],
+        ),
+        "min_open_raw_spread": number_from_paths(
+            &[thresholds, dual_taker, execution_quality],
+            &["min_open_raw_spread", "min_open_spread_pct", "min_open_raw_spread_pct"],
+        ),
+        "min_open_spread_pct": number_from_paths(
+            &[thresholds, dual_taker, execution_quality],
+            &["min_open_raw_spread", "min_open_spread_pct", "min_open_raw_spread_pct"],
+        ),
+        "min_open_maker_taker_net_edge": number_from_paths(
+            &[thresholds, dual_taker, execution_quality],
+            &[
+                "min_open_maker_taker_net_edge",
+                "min_open_net_profit_pct",
+                "min_open_net_edge_pct",
+            ],
+        ),
+        "min_open_net_profit_pct": number_from_paths(
+            &[thresholds, dual_taker, execution_quality],
+            &[
+                "min_open_maker_taker_net_edge",
+                "min_open_net_profit_pct",
+                "min_open_net_edge_pct",
+            ],
+        ),
+        "close_min_net_profit_pct": number_from_paths(
+            &[thresholds, dual_taker, execution_quality],
+            &["close_min_net_profit_pct", "lock_profit_dual_taker_pct", "min_close_net_profit_pct"],
+        ),
+        "lock_profit_dual_taker_pct": number_from_paths(
+            &[thresholds, dual_taker, execution_quality],
+            &["close_min_net_profit_pct", "lock_profit_dual_taker_pct", "min_close_net_profit_pct"],
+        ),
+        "expected_close_spread_pct": number_from_paths(
+            &[dual_taker, thresholds],
+            &["expected_close_spread_pct", "max_close_spread_pct"],
+        ),
+        "max_close_spread_pct": number_from_paths(
+            &[thresholds, dual_taker],
+            &["max_close_spread_pct", "expected_close_spread_pct"],
+        ),
+        "min_open_executable_depth_ratio": number_from_paths(
+            &[execution_quality],
+            &["min_open_executable_depth_ratio"],
+        ),
+        "mode": string_from_paths(&[root], &["mode"]),
+        "execution_profile": string_from_paths(&[root], &["execution_profile"]),
+        "execution": {
+            "dry_run": bool_from_paths(&[root, execution], &["dry_run"]),
+            "live_orders_enabled": bool_from_paths(&[root], &["enable_live_trading"]),
+            "start_paused_new_entries": bool_from_paths(&[controls], &["start_paused_new_entries"]),
+            "start_close_only": bool_from_paths(&[controls], &["start_close_only"]),
+        }
+    })
+}
+
+fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsUpdateRequest) {
+    if !root.is_object() {
+        *root = json!({});
+    }
+    if let Some(symbols) = normalized_symbols(request.symbols.as_deref()) {
+        set_root_array(root, "enabled_symbols", symbols.clone());
+        set_nested_array(root, &["universe", "symbols"], symbols);
+    }
+    if let Some(target_symbol_count) = request.target_symbol_count {
+        set_nested_number(
+            root,
+            &["settings", "target_symbol_count"],
+            target_symbol_count as f64,
+        );
+    }
+    if let Some(value) = sanitized_nonnegative(request.target_notional_usdt) {
+        set_root_number(root, "max_live_notional_per_trade", value);
+        set_nested_number(root, &["sizing", "target_notional_usdt"], value);
+        set_nested_number(root, &["dual_taker", "target_notional_usdt"], value);
+    }
+    if let Some(value) = sanitized_nonnegative(request.min_notional_usdt) {
+        set_nested_number(root, &["sizing", "min_notional_usdt"], value);
+    }
+    if let Some(value) = sanitized_nonnegative(request.max_notional_usdt) {
+        set_nested_number(root, &["sizing", "max_notional_usdt"], value);
+    }
+    let max_symbol_notional = sanitized_nonnegative(
+        request
+            .max_symbol_notional_usdt
+            .or(request.max_notional_per_symbol_usdt),
+    );
+    if let Some(value) = max_symbol_notional {
+        set_nested_number(root, &["sizing", "max_symbol_notional_usdt"], value);
+        set_nested_number(root, &["risk", "max_notional_per_symbol_usdt"], value);
+    }
+    if let Some(value) = sanitized_nonnegative(request.max_notional_per_exchange_usdt) {
+        set_nested_number(root, &["risk", "max_notional_per_exchange_usdt"], value);
+    }
+    if let Some(value) = sanitized_nonnegative(request.max_total_notional_usdt) {
+        set_nested_number(root, &["risk", "max_total_notional_usdt"], value);
+    }
+    if let Some(value) = request
+        .max_positions_per_exchange
+        .filter(|value| *value > 0)
+    {
+        set_nested_number(
+            root,
+            &["sizing", "max_positions_per_exchange"],
+            value as f64,
+        );
+        set_nested_number(
+            root,
+            &["dual_taker", "max_positions_per_exchange"],
+            value as f64,
+        );
+    }
+    if let Some(value) = request.max_open_bundles.filter(|value| *value > 0) {
+        set_nested_number(root, &["risk", "max_open_bundles"], value as f64);
+        set_nested_number(root, &["dual_taker", "max_open_bundles"], value as f64);
+    }
+    if let Some(value) = request.max_open_positions.filter(|value| *value > 0) {
+        set_nested_number(root, &["risk", "max_open_positions"], value as f64);
+    }
+    let open_raw =
+        sanitized_nonnegative(request.min_open_raw_spread.or(request.min_open_spread_pct));
+    if let Some(value) = open_raw {
+        set_nested_number(root, &["thresholds", "min_open_raw_spread"], value);
+        set_nested_number(root, &["dual_taker", "min_open_spread_pct"], value);
+        set_nested_number(
+            root,
+            &["execution_quality", "min_open_raw_spread_pct"],
+            value,
+        );
+    }
+    let open_net = sanitized_nonnegative(
+        request
+            .min_open_maker_taker_net_edge
+            .or(request.min_open_net_profit_pct)
+            .or(request.min_open_net_edge_pct),
+    );
+    if let Some(value) = open_net {
+        set_nested_number(
+            root,
+            &["thresholds", "min_open_maker_taker_net_edge"],
+            value,
+        );
+        set_nested_number(root, &["dual_taker", "min_open_net_profit_pct"], value);
+        set_nested_number(root, &["execution_quality", "min_open_net_edge_pct"], value);
+    }
+    if let Some(value) = sanitized_nonnegative(request.min_open_executable_depth_ratio) {
+        set_nested_number(
+            root,
+            &["execution_quality", "min_open_executable_depth_ratio"],
+            value.max(1.0),
+        );
+    }
+    let close_profit = sanitized_nonnegative(
+        request
+            .close_min_net_profit_pct
+            .or(request.lock_profit_dual_taker_pct),
+    );
+    if let Some(value) = close_profit {
+        set_nested_number(root, &["thresholds", "close_min_net_profit_pct"], value);
+        set_nested_number(root, &["thresholds", "lock_profit_dual_taker_pct"], value);
+        set_nested_number(root, &["dual_taker", "close_min_net_profit_pct"], value);
+        set_nested_number(
+            root,
+            &["execution_quality", "min_close_net_profit_pct"],
+            value,
+        );
+    }
+    let close_spread = sanitized_nonnegative(
+        request
+            .expected_close_spread_pct
+            .or(request.max_close_spread_pct),
+    );
+    if let Some(value) = close_spread {
+        set_nested_number(root, &["dual_taker", "expected_close_spread_pct"], value);
+        set_nested_number(root, &["thresholds", "expected_close_spread_pct"], value);
+        set_nested_number(root, &["thresholds", "max_close_spread_pct"], value);
+    }
+    if let Some(profile) = request
+        .execution_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "-")
+    {
+        set_root_string(root, "execution_profile", profile);
+    }
+}
+
+fn cross_arb_settings_command_payload(
+    view: &CrossArbExchangeConfigView,
+    request: &CrossArbSettingsUpdateRequest,
+    strategy_id: &str,
+) -> Value {
+    let mut payload = cross_arb_settings_view(&view.root, &view.enabled_exchanges);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "strategy_id".to_string(),
+            Value::String(strategy_id.to_string()),
+        );
+        object.insert("apply".to_string(), Value::Bool(request.apply));
+    }
+    payload
+}
+
+fn number_from_paths(objects: &[&Value], keys: &[&str]) -> Value {
+    objects
+        .iter()
+        .find_map(|object| {
+            keys.iter()
+                .find_map(|key| object.get(*key).and_then(value_as_f64))
+        })
+        .filter(|value| value.is_finite())
+        .map(Value::from)
+        .unwrap_or(Value::Null)
+}
+
+fn string_from_paths(objects: &[&Value], keys: &[&str]) -> Value {
+    objects
+        .iter()
+        .find_map(|object| {
+            keys.iter().find_map(|key| {
+                object
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| Value::String(value.to_string()))
+            })
+        })
+        .unwrap_or(Value::Null)
+}
+
+fn bool_from_paths(objects: &[&Value], keys: &[&str]) -> Value {
+    objects
+        .iter()
+        .find_map(|object| {
+            keys.iter()
+                .find_map(|key| object.get(*key).and_then(value_as_bool))
+        })
+        .map(Value::Bool)
+        .unwrap_or(Value::Null)
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.trim().parse::<f64>().ok())
+}
+
+fn value_as_bool(value: &Value) -> Option<bool> {
+    value.as_bool().or_else(|| {
+        let text = value.as_str()?.trim().to_ascii_lowercase();
+        match text.as_str() {
+            "true" | "1" | "yes" | "on" => Some(true),
+            "false" | "0" | "no" | "off" => Some(false),
+            _ => None,
+        }
+    })
+}
+
+fn sanitized_nonnegative(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite() && *value >= 0.0)
+}
+
+fn normalized_symbols(symbols: Option<&[String]>) -> Option<Vec<Value>> {
+    let symbols = symbols?
+        .iter()
+        .filter_map(|symbol| normalize_cross_arb_symbol(symbol))
+        .fold(Vec::<String>::new(), |mut symbols, symbol| {
+            if !symbols.contains(&symbol) {
+                symbols.push(symbol);
+            }
+            symbols
+        });
+    Some(symbols.into_iter().map(Value::String).collect())
+}
+
+fn normalize_cross_arb_symbol(symbol: &str) -> Option<String> {
+    let symbol = symbol.trim().to_ascii_uppercase();
+    if symbol.is_empty() || symbol == "-" {
+        return None;
+    }
+    let normalized = symbol.replace('-', "/");
+    let (base, quote) = normalized.split_once('/')?;
+    let base = base.trim();
+    let quote = quote.trim();
+    (!base.is_empty() && !quote.is_empty()).then(|| format!("{base}/{quote}"))
+}
+
+fn set_root_number(root: &mut Value, key: &str, value: f64) {
+    if let Some(object) = root.as_object_mut() {
+        object.insert(key.to_string(), Value::from(value));
+    }
+}
+
+fn set_root_string(root: &mut Value, key: &str, value: &str) {
+    if let Some(object) = root.as_object_mut() {
+        object.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn set_root_array(root: &mut Value, key: &str, value: Vec<Value>) {
+    if let Some(object) = root.as_object_mut() {
+        object.insert(key.to_string(), Value::Array(value));
+    }
+}
+
+fn set_nested_number(root: &mut Value, path: &[&str], value: f64) {
+    if path.is_empty() {
+        return;
+    }
+    if path.len() == 1 {
+        set_root_number(root, path[0], value);
+        return;
+    }
+    let object = ensure_object_path(root, &path[..path.len() - 1]);
+    object.insert(path[path.len() - 1].to_string(), Value::from(value));
+}
+
+fn set_nested_array(root: &mut Value, path: &[&str], value: Vec<Value>) {
+    if path.is_empty() {
+        return;
+    }
+    if path.len() == 1 {
+        set_root_array(root, path[0], value);
+        return;
+    }
+    let object = ensure_object_path(root, &path[..path.len() - 1]);
+    object.insert(path[path.len() - 1].to_string(), Value::Array(value));
+}
+
+fn ensure_object_path<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Map<String, Value> {
+    if !root.is_object() {
+        *root = json!({});
+    }
+    let mut current = root.as_object_mut().expect("root object");
+    for segment in path {
+        let entry = current
+            .entry((*segment).to_string())
+            .or_insert_with(|| json!({}));
+        if !entry.is_object() {
+            *entry = json!({});
+        }
+        current = entry.as_object_mut().expect("nested object");
+    }
+    current
 }
 
 fn sanitize_cross_arb_exchange_map(
@@ -4009,6 +4548,160 @@ exchanges:
         assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_clean"));
         assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_save"));
         assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_delete"));
+        assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_agent_cross_arb_settings_should_persist_open_and_close_thresholds() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-cross-arb-settings-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let strategy_path = temp_dir.join("cross.yml");
+        let command_path = temp_dir.join("commands.jsonl");
+        let audit_path = temp_dir.join("audit.jsonl");
+        std::fs::write(
+            &strategy_path,
+            r#"
+mode: live_small
+enabled_exchanges:
+  - binance
+  - gate
+thresholds:
+  min_open_raw_spread: 0.005
+  min_open_maker_taker_net_edge: 0.004
+dual_taker:
+  target_notional_usdt: 5.5
+execution_quality:
+  min_open_executable_depth_ratio: 1.2
+controls:
+  start_close_only: true
+universe:
+  symbols:
+    - OLD/USDT
+exchanges:
+  binance:
+    enabled: true
+  gate:
+    enabled: true
+"#,
+        )
+        .unwrap();
+
+        let strategy_path_text = strategy_path.to_string_lossy().to_string();
+        let command_path_text = command_path.to_string_lossy().to_string();
+        let audit_path_text = audit_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH",
+                audit_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+                strategy_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_COMMAND_QUEUE_PATH",
+                command_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local-agent/cross-arb/settings")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "strategy_id": "cross_arb_live",
+                            "apply": true,
+                            "symbols": ["EDGE/USDT", "edge-usdt", "SPCX/USDT"],
+                            "target_notional_usdt": 5.5,
+                            "max_notional_usdt": 5.5,
+                            "max_positions_per_exchange": 3,
+                            "max_open_bundles": 3,
+                            "max_open_positions": 6,
+                            "min_open_raw_spread": 0.01,
+                            "min_open_maker_taker_net_edge": 0.002,
+                            "min_open_executable_depth_ratio": 1.2,
+                            "close_min_net_profit_pct": 0.002,
+                            "expected_close_spread_pct": 0.002
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["settings"]["min_open_raw_spread"], json!(0.01));
+        assert_eq!(
+            value["settings"]["min_open_maker_taker_net_edge"],
+            json!(0.002)
+        );
+        assert_eq!(value["settings"]["close_min_net_profit_pct"], json!(0.002));
+
+        let saved_yaml = std::fs::read_to_string(&strategy_path).unwrap();
+        let saved_config: Value = serde_yaml::from_str(&saved_yaml).unwrap();
+        assert_eq!(
+            saved_config["thresholds"]["min_open_raw_spread"],
+            json!(0.01)
+        );
+        assert_eq!(
+            saved_config["thresholds"]["min_open_maker_taker_net_edge"],
+            json!(0.002)
+        );
+        assert_eq!(
+            saved_config["dual_taker"]["min_open_spread_pct"],
+            json!(0.01)
+        );
+        assert_eq!(
+            saved_config["dual_taker"]["min_open_net_profit_pct"],
+            json!(0.002)
+        );
+        assert_eq!(
+            saved_config["dual_taker"]["close_min_net_profit_pct"],
+            json!(0.002)
+        );
+        assert_eq!(
+            saved_config["dual_taker"]["expected_close_spread_pct"],
+            json!(0.002)
+        );
+        assert_eq!(
+            saved_config["execution_quality"]["min_open_raw_spread_pct"],
+            json!(0.01)
+        );
+        assert_eq!(
+            saved_config["execution_quality"]["min_open_net_edge_pct"],
+            json!(0.002)
+        );
+        assert_eq!(
+            saved_config["execution_quality"]["min_close_net_profit_pct"],
+            json!(0.002)
+        );
+        assert_eq!(
+            saved_config["enabled_symbols"],
+            json!(["EDGE/USDT", "SPCX/USDT"])
+        );
+        assert_eq!(
+            saved_config["universe"]["symbols"],
+            json!(["EDGE/USDT", "SPCX/USDT"])
+        );
+        let command_log = std::fs::read_to_string(&command_path).unwrap();
+        assert!(command_log.contains("\"command\":\"update_cross_arb_settings\""));
+        let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(ledger_log.contains("local_agent_cross_arb_settings_save"));
         assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
 
         std::fs::remove_dir_all(temp_dir).ok();

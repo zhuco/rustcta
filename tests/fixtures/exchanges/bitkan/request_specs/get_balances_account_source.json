@@ -1,0 +1,52 @@
+{
+  "exchange": "bitkan",
+  "operation": "get_balances",
+  "product": "mixed",
+  "boundary": "account_balance_api_unverified_source_only",
+  "runtime_enabled": false,
+  "source": {
+    "surfaces": [
+      "BitKan-native account/balance API to be verified",
+      "read-only account balance response fixture"
+    ],
+    "requires": [
+      "official_account_balance_endpoint",
+      "verified_signing_rule",
+      "read_only_credential_scope"
+    ],
+    "account_id_shape": "exchange account id or UID fixture",
+    "does_not_use": [
+      "real_api_key",
+      "real_api_secret",
+      "undocumented_browser_cookie"
+    ]
+  },
+  "request_shape_sample": {
+    "method": "GET_OR_POST_PENDING_OFFICIAL_DOC",
+    "path": "official-account-balance-path-pending-verification",
+    "auth": "read_only_signed_request_pending_verification"
+  },
+  "decoded_sample": {
+    "account_id": "bitkan-account-id-fixture",
+    "balances": [
+      {
+        "asset": "USDT",
+        "available": "100.000000",
+        "locked": "0.000000",
+        "equity": "100.000000"
+      }
+    ]
+  },
+  "runtime_gap": [
+    "official BitKan-native account/balance API verification",
+    "signing and timestamp rule verification",
+    "balance parser",
+    "read-only credential guard"
+  ],
+  "fixture_policy": {
+    "contains_api_key": false,
+    "contains_api_secret": false,
+    "contains_real_account_id": false,
+    "live_call_allowed": false
+  }
+}

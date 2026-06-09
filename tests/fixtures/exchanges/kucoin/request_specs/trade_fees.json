@@ -1,0 +1,9 @@
+{
+  "operation": "kucoin.get_fees",
+  "method": "GET",
+  "path": "/api/v1/trade-fees",
+  "auth": "hmac",
+  "query": {
+    "symbols": "BTC-USDT"
+  }
+}

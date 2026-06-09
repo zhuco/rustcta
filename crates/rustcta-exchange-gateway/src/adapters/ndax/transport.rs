@@ -1,11 +1,14 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::Utc;
 use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
+
+use super::signing::ndax_signed_headers;
 
 pub const GATEWAY_PATH: &str = "/WSGateway/";
 
@@ -51,6 +54,53 @@ impl NdaxRest {
             .http
             .post(url)
             .json(&ndax_gateway_call(request_id, function_name, payload))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_get(
+        &self,
+        endpoint: &str,
+        params: &BTreeMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        passphrase: Option<&str>,
+    ) -> ExchangeApiResult<Value> {
+        let timestamp = Utc::now().timestamp_millis().to_string();
+        let headers = ndax_signed_headers(
+            api_key, api_secret, passphrase, &timestamp, "GET", endpoint, "",
+        )?;
+        let mut url = format!("{}{}", self.rest_base_url.trim_end_matches('/'), endpoint);
+        if !params.is_empty() {
+            let query = params
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        urlencoding::encode(key),
+                        urlencoding::encode(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            url.push('?');
+            url.push_str(&query);
+        }
+        let mut request = self
+            .http
+            .get(url)
+            .header("X-NDAX-APIKEY", headers["X-NDAX-APIKEY"].as_str())
+            .header("X-NDAX-SIGNATURE", headers["X-NDAX-SIGNATURE"].as_str())
+            .header("X-NDAX-TIMESTAMP", headers["X-NDAX-TIMESTAMP"].as_str())
+            .header("Accept", "application/json");
+        if let Some(passphrase) = headers.get("X-NDAX-PASSPHRASE") {
+            request = request.header("X-NDAX-PASSPHRASE", passphrase.as_str());
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

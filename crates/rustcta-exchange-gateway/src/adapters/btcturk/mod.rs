@@ -117,9 +117,9 @@ impl ExchangeClient for BtcTurkGatewayAdapter {
         );
         capabilities.supports_symbol_rules = self.config.enabled_public_rest;
         capabilities.supports_order_book_snapshot = self.config.enabled_public_rest;
-        capabilities.supports_balances = private_enabled;
-        capabilities.supports_place_order = private_enabled;
-        capabilities.supports_cancel_order = private_enabled;
+        capabilities.supports_balances = false;
+        capabilities.supports_place_order = false;
+        capabilities.supports_cancel_order = false;
         capabilities.supports_query_order = private_enabled;
         capabilities.supports_open_orders = private_enabled;
         capabilities.supports_recent_fills = private_enabled;
@@ -202,7 +202,7 @@ impl ExchangeClient for BtcTurkGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("btcturk.amend_order_unverified")
+        self.unsupported("btcturk.amend_order_unsupported")
     }
 
     async fn place_order_list(
@@ -219,7 +219,7 @@ impl ExchangeClient for BtcTurkGatewayAdapter {
         request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("btcturk.batch_place_orders_unverified")
+        self.unsupported("btcturk.batch_place_orders_unsupported")
     }
 
     async fn batch_cancel_orders(
@@ -227,7 +227,7 @@ impl ExchangeClient for BtcTurkGatewayAdapter {
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("btcturk.batch_cancel_orders_unverified")
+        self.unsupported("btcturk.batch_cancel_orders_unsupported")
     }
 
     async fn cancel_all_orders(
@@ -235,32 +235,28 @@ impl ExchangeClient for BtcTurkGatewayAdapter {
         request: CancelAllOrdersRequest,
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         self.ensure_exchange(&request.exchange)?;
-        self.unsupported("btcturk.cancel_all_orders_unverified")
+        self.unsupported("btcturk.cancel_all_orders_unsupported")
     }
 
     async fn query_order(
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("btcturk.query_order_offline_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("btcturk.open_orders_offline_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("btcturk.recent_fills_offline_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

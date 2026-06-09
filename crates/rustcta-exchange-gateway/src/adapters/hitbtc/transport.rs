@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::Utc;
 use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
+
+use super::private::HitbtcOfflineRequest;
 
 #[derive(Clone)]
 pub struct HitbtcRest {
@@ -44,6 +46,37 @@ impl HitbtcRest {
         let response = self
             .http
             .get(build_url(&self.rest_base_url, endpoint, params))
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_signed_request(
+        &self,
+        request: &HitbtcOfflineRequest,
+    ) -> ExchangeApiResult<Value> {
+        let params = request
+            .query
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<HashMap<_, _>>();
+        let url = build_private_url(&self.rest_base_url, &request.path, &params);
+        let method = reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|error| {
+            ExchangeApiError::InvalidRequest {
+                message: format!("invalid HitBTC private REST method: {error}"),
+            }
+        })?;
+        let mut builder = self.http.request(method, url);
+        for (key, value) in &request.headers {
+            builder = builder.header(key, value);
+        }
+        if let Some(body) = request.raw_body.as_deref() {
+            builder = builder.body(body.to_string());
+        }
+        let response = builder
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {
@@ -108,6 +141,33 @@ fn build_url(base: &str, endpoint: &str, params: &HashMap<String, String>) -> St
         url.push_str(
             &pairs
                 .into_iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        urlencoding::encode(key),
+                        urlencoding::encode(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
+    }
+    url
+}
+
+fn build_private_url(base: &str, signed_path: &str, params: &HashMap<String, String>) -> String {
+    let base = base.trim_end_matches('/');
+    let root = base.strip_suffix("/api/3").unwrap_or(base);
+    let mut url = format!("{}{}", root, signed_path);
+    if !params.is_empty() {
+        let sorted = params
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<BTreeMap<_, _>>();
+        url.push('?');
+        url.push_str(
+            &sorted
+                .iter()
                 .map(|(key, value)| {
                     format!(
                         "{}={}",

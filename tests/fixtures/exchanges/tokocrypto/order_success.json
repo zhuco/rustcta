@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "symbol": "BTC_USDT",
+    "orderId": 12345,
+    "clientOrderId": "client-1",
+    "price": "65000.00",
+    "origQty": "0.01000000",
+    "executedQty": "0.00400000",
+    "cummulativeQuoteQty": "260.00000000",
+    "status": "PARTIALLY_FILLED",
+    "timeInForce": "GTC",
+    "type": "LIMIT",
+    "side": "BUY",
+    "time": 1710000000000,
+    "updateTime": 1710000001000
+  }
+}

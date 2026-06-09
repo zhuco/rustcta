@@ -32,6 +32,14 @@ such as `BTC-AUD`. The `orderbook` event is the latest book state with up to 50
 bids and 50 asks. Official WS v2 docs do not state a fixed order book interval
 or sequence/checksum; heartbeat is available every 5 seconds.
 
+| Channel | Status | Subscription | Interval | Depth | Sequence/checksum | Rebuild |
+| --- | --- | --- | --- | --- | --- | --- |
+| `orderbook` | Spec/parser ready | JSON `messageType=subscribe`, `channels=["orderbook"]`, `marketIds=["BTC-AUD"]` | No fixed interval documented | Up to 50 bids and 50 asks | No sequence or checksum documented | Start from `GET /v3/markets/{marketId}/orderbook`; rebuild after reconnect, stale stream, parse error, or suspected message loss |
+| `trade` | Spec/parser boundary | Same subscribe envelope with `channels=["trade"]` | No fixed interval documented | N/A | N/A | N/A |
+
+The fixture `tests/fixtures/exchanges/btcmarkets/ws_orderbook.json` covers the
+latest-state orderbook event shape used by the parser.
+
 ## Fiat and accounting boundary
 
 AUD is handled as a spot quote asset and as a read-only balance asset. The adapter does not implement:

@@ -6,10 +6,13 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::Value;
 
+use super::private::BitbnsPrivateRequestSpec;
+
 #[derive(Clone)]
 pub struct BitbnsRest {
     exchange_id: ExchangeId,
     rest_base_url: String,
+    private_rest_base_url: String,
     http: reqwest::Client,
 }
 
@@ -17,6 +20,7 @@ impl BitbnsRest {
     pub fn new(
         exchange_id: ExchangeId,
         rest_base_url: String,
+        private_rest_base_url: String,
         request_timeout_ms: u64,
     ) -> ExchangeApiResult<Self> {
         let http = reqwest::Client::builder()
@@ -32,6 +36,7 @@ impl BitbnsRest {
         Ok(Self {
             exchange_id,
             rest_base_url,
+            private_rest_base_url,
             http,
         })
     }
@@ -50,6 +55,32 @@ impl BitbnsRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_private_post(
+        &self,
+        spec: &BitbnsPrivateRequestSpec,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .post(format!(
+                "{}{}",
+                self.private_rest_base_url.trim_end_matches('/'),
+                spec.path
+            ))
+            .header("X-BITBNS-APIKEY", &spec.api_key)
+            .header("X-BITBNS-PAYLOAD", &spec.payload)
+            .header("X-BITBNS-SIGNATURE", &spec.signature)
+            .header("Accept", "application/json")
+            .header("Accept-Charset", "utf-8")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(spec.body.to_string())
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

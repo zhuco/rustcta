@@ -5,9 +5,25 @@
   "fiat_transfer": "unsupported",
   "withdrawal": "unsupported",
   "deposit_address": "unsupported",
+  "advanced_order_boundary": {
+    "support": "unsupported",
+    "operations": [
+      "amend_order",
+      "place_order_list",
+      "batch_place_orders",
+      "batch_cancel_orders"
+    ],
+    "expected_runtime_errors": {
+      "amend_order": "coinone.amend_order",
+      "place_order_list": "coinone.order_list_unsupported",
+      "batch_place_orders": "coinone.batch_place_orders",
+      "batch_cancel_orders": "coinone.batch_cancel_orders"
+    },
+    "reason": "Coinone v2/v2.1 spot order runtime exposes single place/cancel and native cancel-all, but no documented shared amend, OCO/OTO/order-list, native batch place, or native batch cancel API. Gateway-composed batch cancel is not exposed as a P4 native advanced-order capability."
+  },
   "credential_scopes": [
     "read_only",
     "trade"
   ],
-  "notes": "Coinone adapter is limited to KRW spot market data, orders, balances, fees and fills. Payment, wallet withdrawal/deposit, and fiat transfer APIs are intentionally outside the gateway surface."
+  "notes": "Coinone adapter is limited to KRW spot market data, single orders, native cancel-all, balances, fees and fills. Payment, wallet withdrawal/deposit, fiat transfer APIs, and native advanced-order amend/order-list/batch APIs are intentionally outside the gateway surface."
 }

@@ -108,10 +108,11 @@ impl ExchangeClient for CexGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
+        let private_rest_available = self.config.private_rest_configured();
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
-        capabilities.supports_public_streams = false;
+        capabilities.supports_private_rest = private_rest_available;
+        capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities = Some(PrivateStreamCapabilities::unsupported(
             rustcta_exchange_api::EXCHANGE_API_SCHEMA_VERSION,
@@ -123,9 +124,9 @@ impl ExchangeClient for CexGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_rest_available;
+        capabilities.supports_open_orders = private_rest_available;
+        capabilities.supports_recent_fills = private_rest_available;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -143,21 +144,33 @@ impl ExchangeClient for CexGatewayAdapter {
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
         capabilities.refresh_v2_from_legacy_flags();
         capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
-        capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-            "CEX.IO private REST requires live permission and request-spec promotion",
-        );
-        capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
-            "CEX.IO websocket payloads are documented, but runtime is not enabled for this G1 adapter",
-        );
+        capabilities.capabilities_v2.private_rest = if private_rest_available {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "CEX.IO private REST requires CEX_PRIVATE_REST_ENABLED plus API key, secret, and user id",
+            )
+        };
+        capabilities.capabilities_v2.public_streams = if self.config.enabled_public_streams {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "CEX.IO public websocket runtime is disabled unless CEX_PUBLIC_STREAMS_ENABLED is set",
+            )
+        };
         capabilities.capabilities_v2.private_streams = CapabilitySupport::rest_fallback(
-            "CEX.IO private order/fill state should reconcile through REST when private REST is promoted",
+            "CEX.IO private order/fill state reconciles through guarded private REST when configured",
         );
         capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
-            public: CapabilitySupport::unsupported(
-                "public websocket runtime not enabled in G1",
-            ),
+            public: if self.config.enabled_public_streams {
+                CapabilitySupport::native()
+            } else {
+                CapabilitySupport::unsupported(
+                    "public websocket runtime disabled by CEX_PUBLIC_STREAMS_ENABLED",
+                )
+            },
             private: CapabilitySupport::rest_fallback(
-                "private websocket not enabled; use REST reconciliation after private REST promotion",
+                "private websocket not enabled; use guarded private REST reconciliation when configured",
             ),
             supports_subscribe: true,
             supports_unsubscribe: true,
@@ -220,10 +233,34 @@ impl ExchangeClient for CexGatewayAdapter {
         };
         capabilities.capabilities_v2.cancel_all_orders =
             CapabilitySupport::unsupported("pair-scoped cancel-all remains request-spec only");
-        capabilities.capabilities_v2.order_history =
-            HistoryCapability::unsupported("private order history is deferred");
-        capabilities.capabilities_v2.fills_history =
-            HistoryCapability::unsupported("private fill history is deferred");
+        capabilities.capabilities_v2.order_history = if private_rest_available {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: false,
+                supports_until: false,
+                supports_limit: false,
+                supports_cursor: false,
+                supports_from_id: false,
+                max_limit: None,
+                max_window_ms: None,
+            }
+        } else {
+            HistoryCapability::unsupported("private order history requires guarded private REST")
+        };
+        capabilities.capabilities_v2.fills_history = if private_rest_available {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_since: true,
+                supports_until: true,
+                supports_limit: true,
+                supports_cursor: false,
+                supports_from_id: false,
+                max_limit: Some(100),
+                max_window_ms: None,
+            }
+        } else {
+            HistoryCapability::unsupported("private fill history requires guarded private REST")
+        };
         capabilities.capabilities_v2.credential_scopes =
             vec![CredentialScope::ReadOnly, CredentialScope::Trade];
         capabilities
@@ -318,21 +355,21 @@ impl ExchangeClient for CexGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.query_order_unsupported(request)
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.get_open_orders_unsupported(request)
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.get_recent_fills_unsupported(request)
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

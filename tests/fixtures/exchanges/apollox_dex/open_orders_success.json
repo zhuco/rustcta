@@ -1,0 +1,36 @@
+[
+  {
+    "orderId": 987654321,
+    "symbol": "BTCUSDT",
+    "status": "NEW",
+    "clientOrderId": "cli-apollox-open-1",
+    "price": "65000.5",
+    "avgPrice": "0",
+    "origQty": "0.020",
+    "executedQty": "0",
+    "timeInForce": "GTC",
+    "type": "LIMIT",
+    "reduceOnly": false,
+    "side": "BUY",
+    "positionSide": "BOTH",
+    "time": 1700000000000,
+    "updateTime": 1700000005000
+  },
+  {
+    "orderId": 987654322,
+    "symbol": "ETHUSDT",
+    "status": "PARTIALLY_FILLED",
+    "clientOrderId": "cli-apollox-open-2",
+    "price": "3500.1",
+    "avgPrice": "3500.1",
+    "origQty": "0.500",
+    "executedQty": "0.100",
+    "timeInForce": "GTX",
+    "type": "LIMIT",
+    "reduceOnly": true,
+    "side": "SELL",
+    "positionSide": "SHORT",
+    "time": 1700000001000,
+    "updateTime": 1700000006000
+  }
+]

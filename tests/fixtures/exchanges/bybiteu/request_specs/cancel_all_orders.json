@@ -1,0 +1,25 @@
+{
+  "exchange": "bybiteu",
+  "profile_of": "bybit",
+  "operation": "cancel_all_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v5/order/cancel-all",
+  "auth": "signed_shape_only_private_disabled",
+  "headers": {
+    "X-BAPI-API-KEY": { "match": "non_empty" },
+    "X-BAPI-SIGN": { "match": "non_empty" },
+    "X-BAPI-SIGN-TYPE": { "match": "exact", "value": "2" },
+    "X-BAPI-TIMESTAMP": { "match": "non_empty" },
+    "X-BAPI-RECV-WINDOW": { "match": "exact", "value": "5000" },
+    "Content-Type": { "match": "exact", "value": "application/json" }
+  },
+  "body_contains": {
+    "category": "linear",
+    "symbol": "BTCUSDT"
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["test-secret"],
+  "runtime_boundary": "EU profile private cancel-all is disabled pending broker third-party application scope audit."
+}

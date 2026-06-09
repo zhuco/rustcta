@@ -87,11 +87,11 @@ pub fn public_subscribe_payload(
 ) -> ExchangeApiResult<Value> {
     let symbol = normalize_symbol(&subscription.symbol)?;
     let channel = match (&subscription.kind, subscription.symbol.market_type) {
-        (
-            PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta,
-            MarketType::Spot,
-        ) => {
-            format!("market.{symbol}.depth.step0")
+        (PublicStreamKind::OrderBookSnapshot, MarketType::Spot) => {
+            format!("market.{symbol}.mbp.refresh.20")
+        }
+        (PublicStreamKind::OrderBookDelta, MarketType::Spot) => {
+            format!("market.{symbol}.mbp.20")
         }
         (
             PublicStreamKind::OrderBookSnapshot | PublicStreamKind::OrderBookDelta,
@@ -244,7 +244,7 @@ pub fn parse_public_stream_message(
     if value
         .get("ch")
         .and_then(Value::as_str)
-        .is_some_and(|ch| ch.contains(".depth."))
+        .is_some_and(|ch| ch.contains(".depth.") || ch.contains(".mbp."))
     {
         return Ok(HtxPublicStreamMessage::OrderBook(parse_orderbook_response(
             exchange_id,

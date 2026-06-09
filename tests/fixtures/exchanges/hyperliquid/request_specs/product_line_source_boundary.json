@@ -1,0 +1,19 @@
+{
+  "exchange": "hyperliquid",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": ["perpetual"],
+  "official_product_lines": ["spot", "perpetual"],
+  "official_sources": [
+    {
+      "surface": "Hyperliquid spotMeta, spot asset contexts and HIP-1 spot books",
+      "evidence": "Spot metadata and HIP-1 spot order books are official surfaces, but the adapter currently maps USDC-settled perpetual metadata, book, account and order lifecycle."
+    }
+  ],
+  "runtime_isolation": "Do not reuse perpetual asset indexes or order actions for spot until spot asset id mapping and spot order/readback semantics are pinned.",
+  "remaining_work": [
+    "map spotMeta and spotMetaAndAssetCtxs asset ids",
+    "add HIP-1 spot l2Book/order-book parser fixtures",
+    "wire spot order/cancel action encoding plus open-order, fill and balance reconciliation"
+  ]
+}

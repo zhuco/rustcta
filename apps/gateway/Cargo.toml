@@ -7,10 +7,14 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+chrono.workspace = true
 rustcta-exchange-api.workspace = true
 rustcta-exchange-gateway.workspace = true
 rustcta-cross-arb-live-runner = { path = "../../crates/rustcta-cross-arb-live-runner" }
+rustcta-observability.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
@@ -28,3 +32,11 @@ path = "src/main.rs"
 [[bin]]
 name = "cross-exchange-arbitrage-live-runner"
 path = "src/bin/cross_exchange_arbitrage_live_runner.rs"
+
+[[bin]]
+name = "cross-arb-position-admin"
+path = "src/bin/cross_arb_position_admin.rs"
+
+[[bin]]
+name = "local-gateway-smoke"
+path = "src/bin/local_gateway_smoke.rs"

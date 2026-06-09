@@ -20,6 +20,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aho-corasick"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1139,6 +1148,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1176,6 +1191,15 @@ name = "log"
 version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
+
+[[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
 
 [[package]]
 name = "matchit"
@@ -1229,6 +1253,15 @@ checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
 dependencies = [
  "libc",
  "wasi",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nu-ansi-term"
+version = "0.50.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+dependencies = [
  "windows-sys 0.61.2",
 ]
 
@@ -1425,6 +1458,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-automata"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e1dd4122fc1595e8162618945476892eefca7b88c52820e74af6262213cae8f"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax",
+]
+
+[[package]]
+name = "regex-syntax"
+version = "0.8.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
 name = "rend"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1567,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-control-api"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "axum",
  "chrono",
@@ -1582,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-control-api-app"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "axum",
@@ -1600,22 +1650,28 @@ dependencies = [
 
 [[package]]
 name = "rustcta-cross-arb-live-runner"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "futures-util",
+ "reqwest",
+ "rustcta-event-ledger",
  "rustcta-exchange-api",
  "rustcta-exchange-gateway",
  "rustcta-execution-api",
  "rustcta-execution-router",
  "rustcta-strategy-cross-exchange-arbitrage",
  "rustcta-strategy-sdk",
+ "rustcta-tools-ops",
  "rustcta-types",
  "serde",
  "serde_json",
  "serde_yaml",
  "tokio",
+ "tokio-tungstenite",
+ "tracing",
 ]
 
 [[package]]
@@ -1634,7 +1690,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-exchange-api"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1647,7 +1703,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-exchange-gateway"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "async-trait",
  "axum",
@@ -1664,6 +1720,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "sha3",
  "thiserror",
@@ -1689,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-execution-router"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1706,7 +1763,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-gateway"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "axum",
@@ -1714,14 +1771,16 @@ dependencies = [
  "rustcta-cross-arb-live-runner",
  "rustcta-exchange-api",
  "rustcta-exchange-gateway",
+ "rustcta-observability",
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
 ]
 
 [[package]]
 name = "rustcta-industrial-cli"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "clap",
@@ -1735,8 +1794,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustcta-observability"
+version = "0.3.18"
+dependencies = [
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "rustcta-reporting"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1752,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-runtime-control"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1768,7 +1834,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-smart-money"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1785,7 +1851,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-avellaneda-stoikov"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1799,7 +1865,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-cross-exchange-arbitrage"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1813,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-funding-arbitrage"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1827,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-hedged-grid"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1840,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-mean-reversion"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1853,7 +1919,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-poisson-market-maker"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1867,7 +1933,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-range-grid"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1893,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-short-ladder-live"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1907,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-spot-spot-arbitrage"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1921,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-trend"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1935,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-supervisor"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "chrono",
  "serde",
@@ -1946,7 +2012,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-supervisor-app"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "axum",
@@ -1959,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-tools-ops"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "base64",
@@ -1968,15 +2034,19 @@ dependencies = [
  "dotenv",
  "flate2",
  "futures-util",
+ "hex",
+ "hmac",
  "log",
  "reqwest",
  "rmp-serde",
  "rustcta-reporting",
  "rustcta-smart-money",
+ "rustcta-strategy-cross-exchange-arbitrage",
  "rustcta-types",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
  "url",
@@ -2206,6 +2276,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2408,6 +2487,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "tinystr"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2589,7 +2677,19 @@ checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2599,6 +2699,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "matchers",
+ "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
+ "sharded-slab",
+ "smallvec",
+ "thread_local",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -2710,6 +2840,12 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "version_check"

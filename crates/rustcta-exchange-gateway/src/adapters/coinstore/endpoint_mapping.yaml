@@ -36,6 +36,16 @@ websocket:
   public:
     transport: websocket
     support: parser_only
+    channels: [depth, future_snapshot_depth]
+    order_book:
+      spot_channel: "<symbol>@depth"
+      spot_depth_variants: ["<symbol>@depth", "<symbol>@depth@20"]
+      futures_topic: future_snapshot_depth
+      update_interval_ms: 100
+      depth_levels: [1, 20, 100]
+      sequence: S
+      checksum: unsupported
+      resync: rest_order_book_snapshot
     heartbeat: { required: true, direction: bidirectional, interval_ms: 30000, timeout_ms: 90000 }
     resync: rest_order_book_snapshot
   private:
@@ -72,6 +82,30 @@ endpoints:
     weight: 1
     request_spec_required: false
     response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/public_tests.rs, fixture: tests/fixtures/exchanges/coinstore/spot_symbols_success.json }
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v2/public/config/spot/symbols
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/public_tests.rs, fixture: tests/fixtures/exchanges/coinstore/spot_symbols_success.json }
+  - operation: get_fees
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: GET
+    path: /api/configs/public
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/public_tests.rs, fixture: tests/fixtures/exchanges/coinstore/futures_config_success.json }
   - operation: get_order_book
     product: spot
     market_types: [spot, linear_perp]
@@ -132,8 +166,10 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 1
     request_spec_required: true
+    support: native
     native_batch: true
     atomicity: partial
+    max_items: 20
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
     notes: Futures route uses /api/trade/order/placeBatch.
   - operation: batch_cancel_orders
@@ -147,9 +183,43 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 1
     request_spec_required: true
+    support: native
     native_batch: true
     atomicity: partial
+    max_items: 20
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
+  - operation: amend_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinstore/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinstore.amend_order_unsupported
+    notes: Coinstore mapping has no lossless shared in-place amend endpoint; callers must cancel and replace explicitly.
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinstore/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinstore.order_list_unsupported
+    notes: Coinstore mapping has no standard OCO/OTO/order-list semantics exposed through the shared gateway.
   - operation: get_open_orders
     product: spot
     market_types: [spot, linear_perp]

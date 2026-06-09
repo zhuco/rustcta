@@ -1,0 +1,16 @@
+{
+  "exchange": "oxfun",
+  "operation": "batch_place_orders",
+  "source_fixture": "tests/fixtures/exchanges/oxfun/ws/private_batch_place_ack_partial.json",
+  "runtime_enabled": false,
+  "total_items": 2,
+  "expected_success_count": 1,
+  "expected_failed_count": 1,
+  "partial_failure_policy": "do_not_replay_without_private_stream_or_rest_readback",
+  "required_before_runtime": [
+    "authenticated private WebSocket session lifecycle",
+    "request tag/order-id reconciliation",
+    "dry-run guard",
+    "REST/private-stream readback after WS write"
+  ]
+}

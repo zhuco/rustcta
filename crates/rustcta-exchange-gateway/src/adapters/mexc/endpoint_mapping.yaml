@@ -3,9 +3,18 @@ exchange: mexc
 adapter: rustcta_exchange_gateway::adapters::mexc
 market_types:
   - spot
+  - perpetual
+products:
+  - spot
+  - perpetual
 rest:
   base_url: https://api.mexc.com
   testnet_base_url: ""
+base_urls:
+  spot_rest: https://api.mexc.com
+  contract_rest: https://contract.mexc.com
+  spot_public_ws: wss://wbs-api.mexc.com/ws
+  contract_public_ws: wss://contract.mexc.com/edge
 rate_limits:
   buckets:
     public_ip:
@@ -17,6 +26,18 @@ rate_limits:
       interval: 1m
       limit: null
     order_count:
+      scope: account
+      interval: 1m
+      limit: null
+    contract_public:
+      scope: ip
+      interval: 1m
+      limit: null
+    contract_private:
+      scope: uid
+      interval: 1m
+      limit: null
+    contract_orders:
       scope: account
       interval: 1m
       limit: null
@@ -59,12 +80,36 @@ batch:
     partial_failure: true
 websocket:
   public:
-    support: unsupported
+    support: native
+    url: wss://wbs-api.mexc.com/ws
+    contract_url: wss://contract.mexc.com/edge
+    channels:
+      - spot@public.aggre.bookTicker.v3.api.pb@10ms@{symbol}
+      - spot@public.aggre.depth.v3.api.pb@10ms@{symbol}
+      - spot@public.limit.depth.v3.api.pb@{symbol}@5
+      - spot@public.limit.depth.v3.api.pb@{symbol}@10
+      - spot@public.limit.depth.v3.api.pb@{symbol}@20
+      - contract_depth5
+      - contract_depth10
+      - contract_depth20
+    orderbook:
+      subscription_mode: json_subscribe
+      fastest_l1_bbo_channel: spot@public.aggre.bookTicker.v3.api.pb@10ms@{symbol}
+      fastest_depth_channel: spot@public.aggre.depth.v3.api.pb@10ms@{symbol}
+      spot_partial_depth_levels: [5, 10, 20]
+      spot_incremental_interval_ms: 10
+      spot_book_ticker_interval_ms: 10
+      sequence_fields: [fromVersion, toVersion, version]
+      checksum: none
+      resync: rest_snapshot_then_replay_delta
+      source:
+        url: https://mexcdevelop.github.io/apidocs/spot_v3_en/
+        reviewed_at: 2026-06-08
     heartbeat:
-      required: false
-      direction: none
-      interval_ms: null
-      timeout_ms: null
+      required: true
+      direction: client_ping
+      interval_ms: 30000
+      timeout_ms: 10000
     resync: rest_order_book_snapshot
   private:
     support: unsupported
@@ -72,6 +117,24 @@ websocket:
     renewal_ms: null
     relogin_on_reconnect: true
     fallback: rest_reconciliation
+unsupported:
+  - operation: delivery_contract_product
+    status: project_unimplemented
+    reason: "Official MEXC contract metadata exposes delivery-state fields, but this adapter currently normalizes contract instruments as perpetual contracts only."
+    boundary: project_unimplemented_product_line
+    official_gap: delivery_contract_product
+    current_scope: [spot, perpetual]
+    source_boundary_fixture: tests/fixtures/exchanges/mexc/request_specs/product_line_source_boundary.json
+    required_endpoints:
+      - delivery contract metadata/status filter
+      - delivery contract depth/order book snapshot and public WS stream
+      - delivery account assets and delivery positions
+      - delivery place/cancel/query/open/fills lifecycle
+      - delivery settlement schedule and delivery-state reconciliation
+    unsafe_to_promote_without: [delivery market type routing, delivery metadata/status parser fixtures, delivery account/position parser coverage, signed delivery order lifecycle request specs, settlement/delivery reconciliation]
+  - operation: option_product
+    support: unsupported
+    reason: "Current MEXC Spot/Contract official API references reviewed here expose Spot and Contract surfaces, with no standard options API surface wired to this adapter."
 endpoints:
   - operation: get_symbol_rules
     transport: rest
@@ -91,6 +154,24 @@ endpoints:
     rate_limit_bucket: public_ip
     weight: 5
     request_spec_required: false
+  - operation: get_symbol_rules
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/contract/detail
+    auth: none
+    rate_limit_bucket: contract_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/contract/depth/{symbol}
+    auth: none
+    rate_limit_bucket: contract_public
+    weight: 1
+    request_spec_required: false
   - operation: get_balances
     transport: rest
     product: spot
@@ -101,6 +182,26 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 10
     request_spec_required: true
+  - operation: get_balances
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/account/assets
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/position/open_positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
   - operation: get_fees
     transport: rest
     product: spot
@@ -109,6 +210,16 @@ endpoints:
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/account/tiered_fee_rate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
     weight: 1
     request_spec_required: true
   - operation: place_order
@@ -121,6 +232,17 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 1
     request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v1/private/order/submit
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: contract_orders
+    weight: 1
+    request_spec_required: true
+    notes: "Contract order body maps shared quantity to MEXC vol; side codes encode open/close via reduce_only."
   - operation: place_quote_market_order
     transport: rest
     product: spot
@@ -141,6 +263,16 @@ endpoints:
     rate_limit_bucket: order_count
     weight: 1
     request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v1/private/order/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: contract_orders
+    weight: 1
+    request_spec_required: true
   - operation: cancel_all_orders
     transport: rest
     product: spot
@@ -149,6 +281,16 @@ endpoints:
     auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v1/private/order/cancel_all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: contract_orders
     weight: 1
     request_spec_required: true
   - operation: query_order
@@ -161,6 +303,16 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 2
     request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/order/get/{order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
   - operation: get_open_orders
     transport: rest
     product: spot
@@ -170,6 +322,16 @@ endpoints:
     credential_scopes: [read_only]
     rate_limit_bucket: private_uid
     weight: 3
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/order/list/open_orders/{symbol}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
+    weight: 1
     request_spec_required: true
   - operation: get_recent_fills
     transport: rest
@@ -181,3 +343,43 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 10
     request_spec_required: true
+  - operation: get_recent_fills
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/order/list/order_deals/{symbol}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
+streams:
+  - operation: public_orderbook_bbo
+    product: spot
+    transport: websocket
+    channel: spot@public.aggre.bookTicker.v3.api.pb@10ms@{symbol}
+    auth: none
+    support: native
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot
+    parser_fixture: tests/fixtures/exchanges/mexc/ws/spot_book_ticker_10ms.json
+  - operation: public_orderbook_delta
+    product: spot
+    transport: websocket
+    channel: spot@public.aggre.depth.v3.api.pb@10ms@{symbol}
+    auth: none
+    support: native
+    sequence: [fromVersion, toVersion]
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_then_delta_replay
+    parser_fixture: tests/fixtures/exchanges/mexc/ws/spot_aggre_depth_10ms.json
+  - operation: public_orderbook_snapshot
+    product: spot
+    transport: websocket
+    channel: spot@public.limit.depth.v3.api.pb@{symbol}@20
+    auth: none
+    support: native
+    sequence: [version]
+    parser_fixture: tests/fixtures/exchanges/mexc/ws/spot_limit_depth_20.json

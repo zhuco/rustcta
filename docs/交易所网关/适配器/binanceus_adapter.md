@@ -8,7 +8,8 @@ Status: task A-05 spot-only Binance.US profile for `rustcta-exchange-gateway`.
 - REST base URL: `https://api.binance.us`.
 - Public REST: symbol rules and order book snapshots.
 - Private REST: balances, trading fees, place order, quote-sized market buy/sell, cancel order, cancel all open orders for a symbol, query order, open orders, and recent fills.
-- WebSocket runtime: not wired in this adapter; use REST snapshots and reconciliation.
+- Public WebSocket spec: Spot `bookTicker`, partial depth, and diff depth are documented in `endpoint_mapping.yaml`; runtime subscription is still project-unimplemented.
+- Private WebSocket runtime: not wired in this adapter; use REST snapshots and reconciliation.
 
 ## Official References
 
@@ -41,8 +42,10 @@ Status: task A-05 spot-only Binance.US profile for `rustcta-exchange-gateway`.
 | `query_order` | `GET /api/v3/order` | Native signed REST |
 | `get_open_orders` | `GET /api/v3/openOrders` | Native signed REST |
 | `get_recent_fills` | `GET /api/v3/myTrades` | Native signed REST |
-| `amend_order` | none mapped | Unsupported |
-| `place_order_list` | none mapped | Unsupported |
+| `amend_order` | `POST /api/v3/order/cancelReplace` | Unsupported shared semantics; fixture records cancel-replace boundary, not keep-priority amend |
+| `place_order_list` | `POST /api/v3/order/oco` | Unsupported shared semantics; fixture records legacy OCO boundary, not generic order-list |
+| `batch_place_orders` | none mapped | Unsupported shared semantics; no verified Binance.US native batch-place route maps losslessly to shared batch placement |
+| `batch_cancel_orders` | none mapped | Unsupported shared semantics; no verified Binance.US native batch-cancel route maps losslessly to shared batch cancellation |
 
 ## Signing And Credentials
 
@@ -55,11 +58,25 @@ Private REST uses Binance-compatible HMAC-SHA256 signing over the query string a
 
 ## Unsupported Boundaries
 
+- 交易所不支持合约：当前 Binance.US 官方 API profile 只见 Spot；后续如官方开放合约需重核。
 - Non-spot market types return `Unsupported`.
 - Futures/perpetual balances, positions, funding, leverage, margin mode, and position mode are outside this profile.
-- Binance.com advanced Spot routes such as keep-priority amend and order-list OTO/OCO are not mapped for Binance.US.
-- Public and private WebSocket subscriptions return `Unsupported` until the shared WebSocket runtime is connected and tested for Binance.US.
+- Binance.US cancel-replace and legacy OCO/order-list clues are fixture-backed in `tests/fixtures/exchanges/binanceus/request_specs/cancel_replace_not_amend_boundary.json` and `oco_not_order_list_boundary.json`, but they are not lossless equivalents for the shared keep-priority amend/order-list request shapes. `amend_order` and `place_order_list` therefore remain unsupported shared semantics.
+- Batch place/cancel are fixture-backed unsupported boundaries in `tests/fixtures/exchanges/binanceus/request_specs/batch_place_orders_unsupported.json` and `batch_cancel_orders_unsupported.json`; do not alias Binance.com batch routes into Binance.US without a Binance.US-specific official endpoint audit.
+- Public WebSocket subscriptions are recorded as Spot `spec_only` because runtime wiring is not implemented in this adapter yet; private WebSocket subscriptions remain `Unsupported`.
 - The adapter does not request or require withdrawal/transfer permissions.
+
+## Public WebSocket Order Book Spec
+
+官方核验见 [WebSocket 官方核验 P0 第二批](../WebSocket官方核验_P0_第二批.md)。Binance.US Spot public streams follow the Binance Spot-style order book surface:
+
+- `bookTicker`: `<symbol>@bookTicker`, real-time best bid/ask, depth 1.
+- Partial depth: `<symbol>@depth5@100ms`, `<symbol>@depth10@100ms`, and `<symbol>@depth20@100ms`; 1000ms variants are also valid for partial depth.
+- Diff depth: `<symbol>@depth@100ms` and `<symbol>@depth@1000ms`.
+- Sequencing: REST `/api/v3/depth` snapshot carries `lastUpdateId`; diff events carry `U/u`.
+- Rebuild rule: buffer WS deltas, fetch REST snapshot, discard events where `u <= lastUpdateId`, apply the first event covering `lastUpdateId + 1`, then require each next event to start at previous `u + 1`; otherwise reconnect and rebuild from REST snapshot.
+
+This is a public market-data boundary only. It does not enable private user-data streams or signed WebSocket behavior.
 
 ## Reconciliation
 

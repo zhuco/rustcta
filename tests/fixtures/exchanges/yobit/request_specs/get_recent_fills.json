@@ -1,6 +1,7 @@
 {
   "operation": "yobit.get_recent_fills",
-  "request_spec_only": true,
+  "request_spec_only": false,
+  "runtime": "guarded_read_only",
   "trade_enabled": false,
   "method": "POST",
   "path": "/tapi/",
@@ -18,5 +19,5 @@
     "nonce": "1700000002"
   },
   "credential_scope": "read_only",
-  "expected_error_until_promoted": "yobit.recent_fills_request_spec_only"
+  "runtime_guard": "YOBIT_PRIVATE_REST_ENABLED plus TAPI key/secret; fails closed with yobit.get_recent_fills when disabled"
 }

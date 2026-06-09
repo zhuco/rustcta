@@ -1,0 +1,22 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "get_fees",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fapi/v1/commissionRate",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "timestamp": { "match": "exact", "value": "1700000000000" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"]
+}

@@ -1,0 +1,26 @@
+{
+  "exchange": "toobit",
+  "operation": "get_fees",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/futures/commissionRate",
+  "auth": "toobit_hmac_sha256",
+  "credential_scope": "read_only",
+  "query": {
+    "symbol": "BTCUSDT",
+    "timestamp": "1710000000000",
+    "signature": "<redacted:signature>"
+  },
+  "headers": {
+    "X-BB-APIKEY": {
+      "match": "non_empty"
+    }
+  },
+  "body": null,
+  "strict_query": false,
+  "strict_headers": false,
+  "strict_body": true,
+  "official_source": "Toobit futures commissionRate returns account/product commission rates for USDT-M futures.",
+  "runtime_boundary": "request_spec_only; shared get_fees remains project-unimplemented pending futures parser and spot fallback policy."
+}

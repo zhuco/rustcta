@@ -81,6 +81,16 @@ impl LatokenGatewayAdapter {
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
+
+    fn private_credentials(&self, operation: &'static str) -> ExchangeApiResult<(String, String)> {
+        if !self.config.private_rest_enabled() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        Ok((
+            self.config.api_key.clone().unwrap_or_default(),
+            self.config.api_secret.clone().unwrap_or_default(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -111,24 +121,25 @@ impl ExchangeClient for LatokenGatewayAdapter {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
-        capabilities.supports_public_streams = false;
+        let private_rest = self.config.private_rest_enabled();
+        capabilities.supports_private_rest = private_rest;
+        capabilities.supports_public_streams = true;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities =
             Some(streams::latoken_private_stream_capabilities());
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
-        capabilities.supports_balances = false;
+        capabilities.supports_balances = private_rest;
         capabilities.supports_positions = false;
-        capabilities.supports_fees = false;
-        capabilities.supports_place_order = false;
-        capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
-        capabilities.supports_batch_place_order = false;
-        capabilities.supports_batch_cancel_order = false;
-        capabilities.supports_cancel_all_orders = false;
+        capabilities.supports_fees = private_rest;
+        capabilities.supports_place_order = private_rest;
+        capabilities.supports_cancel_order = private_rest;
+        capabilities.supports_query_order = private_rest;
+        capabilities.supports_open_orders = private_rest;
+        capabilities.supports_recent_fills = private_rest;
+        capabilities.supports_batch_place_order = private_rest;
+        capabilities.supports_batch_cancel_order = private_rest;
+        capabilities.supports_cancel_all_orders = private_rest;
         capabilities.supports_quote_market_order = false;
         capabilities.supports_amend_order = false;
         capabilities.supports_order_list = false;
@@ -140,15 +151,15 @@ impl ExchangeClient for LatokenGatewayAdapter {
         capabilities.supports_order_types = vec![OrderType::Market, OrderType::Limit];
         capabilities.max_order_book_depth = Some(1000);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(1000));
+            rustcta_exchange_api::OrderBookCapability::best_effort_delta(Some(1000));
+        capabilities.order_book.supports_sequence = true;
         capabilities.max_recent_fill_limit = None;
-        toolchain::apply_toolchain_capabilities(&mut capabilities);
+        toolchain::apply_toolchain_capabilities(&mut capabilities, private_rest);
         capabilities
     }
 
     async fn get_balances(&self, request: BalancesRequest) -> ExchangeApiResult<BalancesResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("latoken.balances_request_spec_only")
+        self.get_balances_impl(request).await
     }
 
     async fn get_positions(
@@ -174,20 +185,14 @@ impl ExchangeClient for LatokenGatewayAdapter {
     }
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
-        for symbol in &request.symbols {
-            self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
-        }
-        self.unsupported("latoken.fees_unverified")
+        self.get_fees_impl(request).await
     }
 
     async fn place_order(
         &self,
         request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("latoken.place_order_request_spec_only")
+        self.place_order_impl(request).await
     }
 
     async fn place_quote_market_order(
@@ -203,9 +208,7 @@ impl ExchangeClient for LatokenGatewayAdapter {
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("latoken.cancel_order_request_spec_only")
+        self.cancel_order_impl(request).await
     }
 
     async fn amend_order(
@@ -230,57 +233,42 @@ impl ExchangeClient for LatokenGatewayAdapter {
         &self,
         request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        for order in &request.orders {
-            self.ensure_exchange(&order.symbol.exchange)?;
-            self.ensure_spot(order.symbol.market_type)?;
-        }
-        self.unsupported("latoken.batch_place_orders_request_spec_only")
+        self.batch_place_orders_impl(request).await
     }
 
     async fn batch_cancel_orders(
         &self,
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("latoken.batch_cancel_orders_request_spec_only")
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn cancel_all_orders(
         &self,
         request: CancelAllOrdersRequest,
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        if let Some(symbol) = request.symbol.as_ref() {
-            self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
-        }
-        self.unsupported("latoken.cancel_all_orders_request_spec_only")
+        self.cancel_all_orders_impl(request).await
     }
 
     async fn query_order(
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("latoken.query_order_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("latoken.open_orders_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("latoken.recent_fills_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

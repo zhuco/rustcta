@@ -1,12 +1,12 @@
 schema_version: 1
 exchange: aark
 adapter: AarkGatewayAdapter
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: draft
   source: docs/aark_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: Task C-40 conservative Aark profile over Orderly EVM API. Public info is parsed; signed read, liquidation, vault, oracle and trading APIs stay spec-only or unsupported.
+  last_reviewed: "2026-06-09"
+  notes: Conservative Aark profile over Orderly EVM API. Public info plus query/open/fills signed readbacks are guarded runtime behind RUSTCTA_AARK_PRIVATE_REST_ENABLED and Orderly account/key/secret; writes, account/balance/fee runtime, streams and advanced writes remain spec-only or unsupported until permission guards, dry-run gating and post-write reconciliation are audited.
 market_types: [perpetual]
 products: [perpetual]
 base_urls:
@@ -16,28 +16,89 @@ base_urls:
 auth:
   public_rest: none
   signed_read_rest: Orderly account headers orderly-account-id/orderly-key/orderly-signature/orderly-timestamp
+  read_guard: RUSTCTA_AARK_PRIVATE_REST_ENABLED plus RUSTCTA_AARK_ORDERLY_ACCOUNT_ID/RUSTCTA_AARK_ORDERLY_KEY/RUSTCTA_AARK_ORDERLY_SECRET
   private_write_rest: unsupported until Aark account, permission and regional boundaries are audited
 rate_limits:
   aark_public: { scope: ip, interval_ms: 1000, limit: 10 }
   aark_orderly_signed_read: { scope: account, interval_ms: 1000, limit: 5 }
+  aark_orderly_signed_write: { scope: account, interval_ms: 1000, limit: 5 }
   aark_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   public_info: { mode: none }
   private_history: { mode: unsupported }
 reconciliation:
-  private_state: unsupported
-  notes: REST reconciliation fallback is not enabled because account-scoped signed reads are not audited.
+  private_state: query_order/get_open_orders/get_recent_fills guarded runtime
+  notes: Read-only REST reconciliation is available only when the private read guard and Orderly credentials are configured; write operations remain disabled.
 batch:
-  place: { support: unsupported, reason: aark.batch_place_orders_unverified_orderly_semantics }
+  place: { support: project_unimplemented, reason: "Orderly exposes POST /v1/batch-order; request-spec and parser fixtures are present, but Aark account onboarding, Ed25519 signing runtime, trade permission guard, partial-failure/readback reconciliation, and dry-run guard are not wired." }
   cancel: { support: unsupported, reason: aark.batch_cancel_orders_unverified_orderly_semantics }
 websocket:
   public:
     support: spec_only
     helper_only: true
     heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+    order_book:
+      product: perpetual
+      market_types: [perpetual]
+      url: wss://ws-evm.orderly.org/ws/stream/{account_id}
+      protocol: websocket_json
+      channel: "{symbol}@orderbookupdate"
+      subscribe:
+        payload:
+          id: "aark-{symbol}@orderbookupdate"
+          event: subscribe
+          topic: "{symbol}@orderbookupdate"
+        symbol_format: PERP_BASE_QUOTE
+        account_id_required_for_path: true
+      interval_ms: 200
+      update_semantics: changed_price_levels
+      zero_quantity_deletes: true
+      depth: unspecified
+      depth_boundary: "depth: unspecified; official Orderly orderbookupdate docs do not publish a fixed depth selector for this profile."
+      sequence:
+        fields: [ts, prevTs]
+        continuity: "message.prevTs must equal previous message ts"
+        gap_detection: prevTs_mismatch_or_regression
+      checksum:
+        supported: false
+        field: null
+        risk: "Orderly orderbookupdate docs do not publish checksum for this profile."
+      resync:
+        mode: request_orderbook_snapshot_then_resubscribe
+        rest_endpoint_operation: get_order_book
+        rest_endpoint: /v1/orderbook/{symbol}
+        rest_auth: orderly_account_signed_read
+        triggers: [connect, reconnect, prevTs_gap, stale_stream, parse_error, suspected_message_loss]
+      fixtures:
+        subscribe: tests/fixtures/exchanges/aark/ws/public_orderbook_subscribe.json
+        update: tests/fixtures/exchanges/aark/ws/public_orderbook_update.json
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: spot_product
+    reason: Aark Perpetual Mode is an Orderly-powered perpetual venue; spot products are outside this adapter profile.
+  - operation: get_fees
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/get_fees_user_rates.json
+    reason: "Orderly broker/user fee-rate source is mapped as an offline request-spec boundary for the Aark profile, but shared get_fees runtime remains project-unimplemented pending builder/account scope audit, Ed25519 signing, and maker/taker parser wiring."
+  - operation: get_balances
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/get_balances_signed_read.json
+    reason: "Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending Aark/Orderly account onboarding, Ed25519 signing, and balance parser wiring."
+  - operation: get_positions
+    status: project_unimplemented
+    reason: "Official/SDK position readback exists, but shared get_positions runtime is project-unimplemented pending Aark/Orderly account audit, Ed25519 signing, positions parser, margin mode/position side mapping, and read-only reconciliation."
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/amend_order_signed_write.json
+    parser_fixture: tests/fixtures/exchanges/aark/parser/amend_order_ack.json
+    reason: "Official Orderly exposes PUT /v1/order edit semantics for this profile family, and request-spec/parser fixtures are present; shared amend_order runtime remains project-unimplemented pending Aark account audit, Ed25519 signing runtime, trade permission guard, post-write query/open/fills reconciliation, and live-dry-run guard."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/batch_place_orders_signed_write.json
+    parser_fixture: tests/fixtures/exchanges/aark/parser/batch_place_orders_ack.json
+    reason: "Official Orderly exposes POST /v1/batch-order, and request-spec/parser fixtures are present; shared batch_place_orders runtime remains project-unimplemented pending Aark account audit, Ed25519 signing runtime, trade permission guard, partial-failure/readback reconciliation, and live-dry-run guard."
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -78,52 +139,129 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aark/balances
-    auth: unsupported
-    rate_limit_bucket: aark_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/client/holding
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: aark.balances_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly EVM signed balance/holding read shape is fixture-backed for the Aark profile, but runtime remains disabled pending account onboarding audit, Ed25519 signer wiring, balance parser, collateral/equity mapping, and read-only reconciliation."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-holding
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/aark/request_specs/get_balances_signed_read.json }
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/broker/user_info
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly Get User Fee Rates is fixture-backed for Aark as an account/builder-scoped fee-rate source; runtime remains disabled pending Aark builder/account eligibility audit, Ed25519 signer wiring, and FeeRateSnapshot parser."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-user-fee-rates
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/aark/request_specs/get_fees_user_rates.json }
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aark/positions
-    auth: unsupported
-    rate_limit_bucket: aark_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: aark.positions_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly EVM GET /v1/positions signed read shape is fixture-backed for the Aark profile, but runtime remains disabled pending account onboarding audit, Ed25519 signer wiring, positions parser, margin mode/position side mapping, and read-only reconciliation."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-positions
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/aark/request_specs/get_positions_signed_read.json }
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/aark/place_order
-    auth: unsupported
+    path: /v1/order
+    auth: signed
     rate_limit_bucket: aark_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: aark.place_order_requires_orderly_ed25519_account_audit
   - operation: cancel_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: DELETE
-    path: /unsupported/aark/cancel_order
+    path: /v1/order
+    auth: signed
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: spec_only
+    reason: aark.cancel_order_requires_orderly_ed25519_account_audit
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/order/{order_id}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    reason: "Aark/Orderly query-order signed readback runtime is guarded by RUSTCTA_AARK_PRIVATE_REST_ENABLED plus Orderly account/key/secret; writes remain offline."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/query_order.json
+    response_parser: { status: implemented, parser: parse_single_order, fixture: tests/fixtures/exchanges/aark/private_order.json }
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PUT
+    path: /v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: aark_orderly_signed_write
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly PUT /v1/order edit shape is fixture-backed for the Aark profile, but shared amend_order runtime remains disabled pending account onboarding, audited Ed25519 signer wiring, trade permission scope guard, post-write query/open/fills reconciliation, and live-dry-run guard."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/edit-order
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/amend_order_signed_write.json
+    response_parser: { status: fixture_only, parser: parse_amend_order_ack, fixture: tests/fixtures/exchanges/aark/parser/amend_order_ack.json }
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/aark/order_list
     auth: unsupported
     rate_limit_bucket: aark_unsupported
     weight: 0
@@ -132,27 +270,31 @@ endpoints:
     atomicity: unsupported
     testnet: false
     support: unsupported
-    reason: aark.cancel_order_requires_orderly_ed25519_account_audit
+    reason: aark.order_list_unverified_orderly_semantics
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/aark/batch_place_orders
-    auth: unsupported
-    rate_limit_bucket: aark_unsupported
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: aark.batch_place_orders_unverified_orderly_semantics
+    path: /v1/batch-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: aark_orderly_signed_write
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: "Orderly POST /v1/batch-order create shape is fixture-backed for the Aark profile, but shared batch_place_orders runtime remains disabled pending account onboarding, audited Ed25519 signer wiring, trade permission scope guard, partial-failure/readback reconciliation, and live-dry-run guard."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/batch-create-order
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/batch_place_orders_signed_write.json
+    response_parser: { status: fixture_only, parser: parse_batch_place_orders_ack, fixture: tests/fixtures/exchanges/aark/parser/batch_place_orders_ack.json }
   - operation: batch_cancel_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: DELETE
+    method: UNSUPPORTED
     path: /unsupported/aark/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: aark_unsupported
@@ -183,31 +325,39 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aark/open_orders
-    auth: unsupported
-    rate_limit_bucket: aark_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: aark.open_orders_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    reason: "Aark/Orderly open-orders signed readback runtime is guarded by RUSTCTA_AARK_PRIVATE_REST_ENABLED plus Orderly account/key/secret; writes remain offline."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/get_open_orders.json
+    response_parser: { status: implemented, parser: parse_orders, fixture: tests/fixtures/exchanges/aark/private_orders.json }
   - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/aark/recent_fills
-    auth: unsupported
-    rate_limit_bucket: aark_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: aark.recent_fills_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    reason: "Aark/Orderly recent-fills signed readback runtime is guarded by RUSTCTA_AARK_PRIVATE_REST_ENABLED plus Orderly account/key/secret; writes remain offline."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/get_recent_fills.json
+    response_parser: { status: implemented, parser: parse_recent_fills, fixture: tests/fixtures/exchanges/aark/private_trades.json }
 streams:
   - operation: public_orderbook_delta
     product: perpetual
@@ -215,9 +365,15 @@ streams:
     channel: "{symbol}@orderbookupdate"
     auth: none
     support: spec_only
+    interval_ms: 200
+    depth: unspecified
+    depth_boundary: "depth: unspecified; no fixed depth is documented for this Orderly profile."
+    sequence_fields: [ts, prevTs]
+    checksum: none_documented
     resync:
       endpoint_operation: get_order_book
       mode: signed_rest_required
+      trigger: prevTs_gap_or_reconnect
   - operation: private_user_events
     product: perpetual
     transport: websocket

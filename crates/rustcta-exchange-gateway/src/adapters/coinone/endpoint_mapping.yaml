@@ -3,7 +3,7 @@ exchange: coinone
 adapter: rustcta_exchange_gateway::adapters::coinone
 metadata:
   status: validated
-  source: https://docs.coinone.co.kr/
+  source: https://docs.coinone.co.kr/reference/public-websocket-orderbook
   notes: "Korean KRW spot adapter. Private REST uses Coinone payload HMAC-SHA512 signing; wallet, payment and fiat-transfer APIs are unsupported."
 market_types: [spot]
 products: [spot]
@@ -38,14 +38,78 @@ reconciliation:
   after_unknown_cancel: query_order
 websocket:
   public:
-    support: spec_only
-    channels: [orderbook]
+    support: native
+    url: wss://stream.coinone.co.kr
+    protocol: json_websocket
+    channels: [ORDERBOOK, TICKER, TRADE]
     resync: rest_order_book_snapshot
+    order_book:
+      channel: ORDERBOOK
+      product: spot
+      market_types: [spot]
+      url: wss://stream.coinone.co.kr
+      protocol: json_websocket
+      request:
+        request_type: SUBSCRIBE
+        channel: ORDERBOOK
+        topic:
+          quote_currency: "{quote_currency}"
+          target_currency: "{target_currency}"
+        example:
+          request_type: SUBSCRIBE
+          channel: ORDERBOOK
+          topic:
+            quote_currency: KRW
+            target_currency: BTC
+      unsubscribe:
+        request_type: UNSUBSCRIBE
+        channel: ORDERBOOK
+        topic:
+          quote_currency: "{quote_currency}"
+          target_currency: "{target_currency}"
+      first_message:
+        type: snapshot
+        semantics: "On initial subscription, Coinone sends the last order book once."
+      realtime_updates:
+        type: change_only
+        semantics: "After the first snapshot, Coinone sends ORDERBOOK data when the order book changes."
+      depth:
+        value:
+        parameter:
+        boundary: "depth: unspecified; no fixed depth selector is documented for ORDERBOOK."
+        source: "Official public ORDERBOOK WS docs do not publish a fixed depth or depth selector."
+      interval:
+        fixed_update_interval_ms:
+        source: "Official public ORDERBOOK WS docs do not publish a fixed millisecond cadence."
+      sequence:
+        field:
+        contiguous: false
+        gap_detection: unsupported_no_official_contiguous_sequence
+        order_book_id:
+          field: data.id
+          short_field: d.i
+          type: string
+          semantics: "Larger id means newer OrderBook information, but it is not documented as a contiguous replay sequence."
+        risk: "No contiguous sequence/update id is documented; use id only for freshness/regression checks."
+      checksum:
+        supported: false
+        mode: none_documented
+        risk: "No public ORDERBOOK checksum is documented by Coinone."
+      rebuild:
+        rest_snapshot: GET /public/v2/orderbook/KRW?target_currency={target_currency}
+        strategy: rest_snapshot_after_connect_reconnect_or_suspected_gap
+        notes: "Fetch a REST order book snapshot and resubscribe after reconnect, stale stream, parse error, id regression, or suspected message loss."
+      fixtures:
+        subscribe: tests/fixtures/exchanges/coinone/ws_public_orderbook.json
+        snapshot: tests/fixtures/exchanges/coinone/ws_public_orderbook_snapshot.json
+        update: tests/fixtures/exchanges/coinone/ws_public_orderbook_update.json
   private:
     support: spec_only
     channels: [orders]
     fallback: rest_reconciliation
 unsupported:
+  - operation: contract_product
+    reason: "Current official/API profile is KRW Spot-only and exposes no standard futures/perpetual/options product line."
   - non_krw_markets
   - positions
   - amend_order
@@ -167,3 +231,59 @@ endpoints:
     rate_limit_bucket: private_rest
     weight: 1
     request_spec_required: true
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinone/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinone.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinone/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinone.order_list_unsupported
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinone/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinone.batch_place_orders_unsupported
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/coinone/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinone.batch_cancel_orders_unsupported

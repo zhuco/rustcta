@@ -1,0 +1,49 @@
+{
+  "exchange": "independentreserve",
+  "boundary": "product_line_source",
+  "status": "project_unimplemented",
+  "current_adapter_scope": [
+    "spot_public_rest",
+    "spot_private_request_specs",
+    "spot_websocket"
+  ],
+  "official_product_lines": [
+    "leveraged_trading"
+  ],
+  "product_line_classification": {
+    "leveraged_product": {
+      "status": "project_unimplemented",
+      "reason": "Leveraged trading is a separate product surface and needs eligibility, collateral, position, risk, lifecycle, and reconciliation audit."
+    },
+    "contract_product": {
+      "status": "unsupported",
+      "reason": "No standard futures, perpetual, or options contract API is exposed by the current official/API profile."
+    }
+  },
+  "unsupported_standard_product_lines": [
+    "futures",
+    "perpetual",
+    "options"
+  ],
+  "official_sources": [
+    {
+      "url": "https://www.independentreserve.com/",
+      "evidence": "Independent Reserve product material includes leveraged trading as a separate product surface, not a standard futures/perpetual/options API in the current adapter profile."
+    }
+  ],
+  "runtime_isolation": "Do not route Independent Reserve leveraged trading through spot runtime until product eligibility, leverage/risk state, collateral/balance/position parsers, private lifecycle, and reconciliation are audited.",
+  "required_audit_gaps": [
+    "leveraged trading account eligibility and permissions",
+    "leverage, collateral, position, PnL, and risk parser fixtures",
+    "product-scoped order lifecycle request specs and parsers",
+    "post-write readback/reconciliation and live dry-run gate"
+  ],
+  "standard_contracts": {
+    "futures": "unsupported_no_standard_futures_api",
+    "perpetual": "unsupported_no_standard_perpetual_api",
+    "options": "unsupported_no_standard_options_api"
+  },
+  "runtime_enabled": false,
+  "private_rest_enabled": false,
+  "secret_free": true
+}

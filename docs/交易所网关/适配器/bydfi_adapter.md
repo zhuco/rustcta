@@ -60,7 +60,7 @@ runtime capability until BYDFi documents the private WS URL.
 
 ## Official WebSocket Order Book Detail
 
-官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。BYDFi Futures public WS 支持 path stream 和 JSON `SUBSCRIBE` 两种形式，例如 `wss://stream.bydfi.com/v1/public/fapi/BTC-USDT@depth@100ms` 或 `BTC-USDT@depth10@100ms`。
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。BYDFi Futures public WS 支持 path stream 和 JSON `SUBSCRIBE` 两种形式，例如 `wss://stream.bydfi.com/v1/public/fapi/BTC-USDT@depth@100ms`，或订阅主题 `BTC-USDT@depth`、`BTC-USDT@depth10@100ms`。
 
 增量 depth 支持 1000ms 或 100ms；limited depth 支持 10/50/100 档，也可加 `@100ms`。payload 是 `depthUpdate`，包含 event time、bids、asks；官方未见 update id 或 checksum。实现时必须用 REST `/v1/fapi/market/depth` 初始化/重建，断线后重新订阅。
 

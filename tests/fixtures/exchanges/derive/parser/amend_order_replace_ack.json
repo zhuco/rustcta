@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "result": {
+    "order": {
+      "order_id": "fixture-replaced-order-id",
+      "label": "fixture-client-order-id-replace",
+      "instrument_name": "BTC-PERP",
+      "direction": "buy",
+      "order_type": "limit",
+      "order_status": "open",
+      "amount": "0.01",
+      "limit_price": "65100",
+      "filled_amount": "0",
+      "reduce_only": false,
+      "post_only": false
+    }
+  }
+}

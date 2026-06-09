@@ -1,0 +1,32 @@
+{
+  "exchange": "lighter",
+  "operation": "amend_order",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/sendTx",
+  "auth": "bearer",
+  "request_spec_required": true,
+  "requires_signed_tx": true,
+  "body": {
+    "tx_type": "modify_order",
+    "account_index": 1,
+    "api_key_index": 2,
+    "nonce": "<redacted-nonce>",
+    "market_index": 0,
+    "order_index": "<redacted-order-index>",
+    "new_base_amount": "100000",
+    "new_price": "640000000",
+    "signature": "<sdk-compatible-signed-tx-required>"
+  },
+  "signing_boundary": "tests/fixtures/exchanges/lighter/signing_vectors/signed_tx_boundary.json",
+  "response_parser_fixture": "tests/fixtures/exchanges/lighter/parser/amend_order_ack.json",
+  "trade_enabled": false,
+  "remaining_runtime": [
+    "sdk_compatible_signed_tx",
+    "api_key_private_key_index_nonce",
+    "post_write_reconciliation",
+    "live_dry_run_guard"
+  ],
+  "expected_error": "lighter.amend_requires_signed_tx_builder_nonce_and_reconciliation"
+}

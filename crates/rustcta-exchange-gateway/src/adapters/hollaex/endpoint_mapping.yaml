@@ -4,17 +4,21 @@ adapter: rustcta_exchange_gateway::adapters::hollaex
 metadata:
   status: validated
   source: https://apidocs.hollaex.com/
-  last_reviewed: "2026-06-08"
-  notes: "A-24 HollaEx demo/API profile. Runtime is G1 public spot REST. HollaEx is a white-label framework, so this adapter does not generalize arbitrary operator deployments without an explicit profile."
-market_types: [spot]
-products: [spot]
+  last_reviewed: '2026-06-08'
+  notes: A-24 HollaEx demo/API profile. Runtime is G1 public spot REST. HollaEx is a white-label framework, so this adapter
+    does not generalize arbitrary operator deployments without an explicit profile.
+market_types:
+- spot
+products:
+- spot
 rest:
   base_url: https://api.hollaex.com/v2
 base_urls:
   websocket: wss://api.hollaex.com/stream
 auth:
-  rest_hmac_sha256: "Headers api-key, api-expires, api-signature; signature = hmac_sha256(method + path_with_query + api_expires + json_body)"
-  ws_hmac_sha256: "HMAC query params over CONNECT + /stream + api_expires"
+  rest_hmac_sha256: Headers api-key, api-expires, api-signature; signature = hmac_sha256(method + path_with_query + api_expires
+    + json_body)
+  ws_hmac_sha256: HMAC query params over CONNECT + /stream + api_expires
 rate_limits:
   buckets:
     hollaex_public_rest:
@@ -35,12 +39,32 @@ rate_limits:
 reconciliation:
   private_stream_fallback: rest
   public_order_book_resync: get_order_book
-  private_readbacks: [get_open_orders, get_recent_fills]
-  notes: "Readbacks are mapped as offline request-spec boundaries but are not enabled by runtime capabilities."
+  private_readbacks:
+  - get_open_orders
+  - get_recent_fills
+  notes: Readbacks are enabled only for the official api.hollaex.com profile when HOLLAEX_PRIVATE_REST_ENABLED plus HMAC
+    credentials are configured; writes remain offline.
 websocket:
   support: spec_only
   public_url: wss://api.hollaex.com/stream
   private_url: wss://api.hollaex.com/stream
+  public:
+    support: spec_only
+    channels:
+    - orderbook
+    - orderbook:{symbol}
+    order_book:
+      channel: orderbook
+      symbol_channel: orderbook:{symbol}
+      fixed_update_interval_ms: null
+      update_interval_boundary: no fixed ms documented
+      depth_boundary: no fixed depth documented
+      sequence: unsupported_no_official_sequence
+      checksum: unsupported_no_official_checksum
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
+        path: /v2/orderbook
   heartbeat:
     direction: client_ping
     interval_ms: 30000
@@ -54,153 +78,312 @@ websocket:
     auth: hmac_query_params
     fixture: tests/fixtures/exchanges/hollaex/signing_vectors/ws_connect_hmac_sha256.json
 unsupported:
-  - operation: white_label_profile_generation
-    reason: "HollaEx deployments are operator-specific; only the official api.hollaex.com demo/API profile is mapped."
-  - operation: private_rest_runtime
-    reason: "Private REST is request-spec/signing-vector only for this task."
-  - operation: public_ws_runtime
-    reason: "Public WS payloads and parser fixtures are present, but no production supervisor is wired."
-  - operation: private_ws_runtime
-    reason: "Private WS auth shape is present, but no long-running private stream is enabled."
-  - operation: admin_api
-    reason: "HollaEx operator/admin APIs are outside exchange gateway trading scope."
-  - operation: withdrawal_transfer
-    reason: "Funds movement is outside gateway trading runtime."
+- operation: contract_product
+  reason: Current official/API profile does not expose standard futures/perpetual/options products.
+- operation: white_label_profile_generation
+  reason: HollaEx deployments are operator-specific; only the official api.hollaex.com demo/API profile is mapped.
+- operation: private_rest_writes
+  reason: Private REST write endpoints remain request-spec/signing-vector only; read-only order/fill readbacks are guarded
+    runtime.
+- operation: get_balances
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/get_balances.json
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending HMAC read-only runtime, /user/balance parser, white-label profile guard, and reconciliation.
+- operation: amend_order
+  reason: No verified in-place amend endpoint is mapped for the official demo/API profile; runtime returns Unsupported.
+- operation: place_order_list
+  reason: No verified OCO/OTO/order-list endpoint is mapped for the official demo/API profile; runtime returns Unsupported.
+- operation: batch_place_orders
+  reason: No verified native batch place endpoint is mapped for the official demo/API profile; runtime returns Unsupported.
+- operation: batch_cancel_orders
+  reason: No verified native batch cancel endpoint is mapped for the official demo/API profile; runtime returns Unsupported.
+- operation: public_ws_runtime
+  reason: Public WS payloads and parser fixtures are present, but no production supervisor is wired.
+- operation: private_ws_runtime
+  reason: Private WS auth shape is present, but no long-running private stream is enabled.
+- operation: admin_api
+  reason: HollaEx operator/admin APIs are outside exchange gateway trading scope.
+- operation: withdrawal_transfer
+  reason: Funds movement is outside gateway trading runtime.
+- operation: get_fees
+  reason: 交易所不支持当前费率接口 runtime：官方 demo/API profile 未见稳定 maker/taker trading fee-rate endpoint；任意白标 venue 费率不同。
 endpoints:
-  - operation: get_symbol_rules
-    product: spot
-    transport: rest
-    method: GET
-    path: /constants
-    auth: none
-    rate_limit_bucket: hollaex_public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://apidocs.hollaex.com/
-    response_parser:
-      status: implemented
-      test: crates/rustcta-exchange-gateway/src/adapters/hollaex/public_tests.rs
-      fixture: tests/fixtures/exchanges/hollaex/parser/constants_success.json
-  - operation: get_order_book
-    product: spot
-    transport: rest
-    method: GET
-    path: /orderbook?symbol={symbol}
-    auth: none
-    rate_limit_bucket: hollaex_public_rest
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://apidocs.hollaex.com/
-    response_parser:
-      status: implemented
-      test: crates/rustcta-exchange-gateway/src/adapters/hollaex/public_tests.rs
-      fixture: tests/fixtures/exchanges/hollaex/parser/orderbook_success.json
-  - operation: get_balances
-    product: spot
-    transport: rest
-    method: GET
-    path: /user/balance
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: hollaex_private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime private read remains Unsupported."
-    official_doc: https://apidocs.hollaex.com/
-    request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/get_balances.json
-  - operation: place_order
-    product: spot
-    transport: rest
-    method: POST
-    path: /order
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: hollaex_private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: non_atomic
-    testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime write path remains Unsupported."
-    official_doc: https://apidocs.hollaex.com/
-    request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/place_order.json
-  - operation: cancel_order
-    product: spot
-    transport: rest
-    method: DELETE
-    path: /order?order_id={order_id}
-    auth: hmac
-    credential_scopes: [trade]
-    rate_limit_bucket: hollaex_private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: non_atomic
-    testnet: false
-    support: unsupported
-    reason: "Offline request-spec only; runtime cancel path remains Unsupported."
-    official_doc: https://apidocs.hollaex.com/
-    request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/cancel_order.json
-  - operation: get_open_orders
-    product: spot
-    transport: rest
-    method: GET
-    path: /orders
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: hollaex_private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: "Mapped for reconciliation boundary but not enabled at runtime."
-    official_doc: https://apidocs.hollaex.com/
-  - operation: get_recent_fills
-    product: spot
-    transport: rest
-    method: GET
-    path: /user/trades
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: hollaex_private_rest
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: "Mapped for reconciliation boundary but not enabled at runtime."
-    official_doc: https://apidocs.hollaex.com/
+- operation: get_symbol_rules
+  product: spot
+  transport: rest
+  method: GET
+  path: /constants
+  auth: none
+  rate_limit_bucket: hollaex_public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://apidocs.hollaex.com/
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/hollaex/public_tests.rs
+    fixture: tests/fixtures/exchanges/hollaex/parser/constants_success.json
+- operation: get_order_book
+  product: spot
+  transport: rest
+  method: GET
+  path: /orderbook?symbol={symbol}
+  auth: none
+  rate_limit_bucket: hollaex_public_rest
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://apidocs.hollaex.com/
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/hollaex/public_tests.rs
+    fixture: tests/fixtures/exchanges/hollaex/parser/orderbook_success.json
+- operation: get_balances
+  product: spot
+  transport: rest
+  method: GET
+  path: /v2/user/balance
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending HMAC read-only runtime, /user/balance parser, white-label profile guard, and reconciliation.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/hollaex/request_specs/get_balances.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/hollaex/request_specs/get_balances.json
+    source: response_sample
+  notes: 'P3 balance boundary: HMAC request spec and sanitized response sample are pinned offline; runtime still returns hollaex.get_balances_spec_only.'
+- operation: place_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /order
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: HollaEx write trading is fixture-backed offline for the official demo/API profile; runtime stays disabled pending
+    live dry-run controls and reconciliation.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/place_order.json
+  notes: 'P2 core write boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until reconciliation/dry-run promotion is complete.'
+- operation: cancel_order
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /order?order_id={order_id}
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: HollaEx write trading is fixture-backed offline for the official demo/API profile; runtime stays disabled pending
+    live dry-run controls and reconciliation.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/cancel_order.json
+  notes: 'P2 core write boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until reconciliation/dry-run promotion is complete.'
+- operation: cancel_all_orders
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /order/all
+  auth: hmac
+  credential_scopes:
+  - trade
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  testnet: false
+  support: spec_only
+  reason: HollaEx write trading is fixture-backed offline for the official demo/API profile; runtime stays disabled pending
+    live dry-run controls and reconciliation.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/cancel_all_orders.json
+  notes: 'P2 core write boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until reconciliation/dry-run promotion is complete.'
+- operation: query_order
+  product: spot
+  transport: rest
+  method: GET
+  path: /order?order_id={order_id}
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Credential-gated read-only runtime is implemented for the official demo/API profile; disabled unless HOLLAEX_PRIVATE_REST_ENABLED
+    and HMAC API key/secret are configured.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/query_order.json
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/hollaex/private_tests.rs
+    fixture: tests/fixtures/exchanges/hollaex/order_success.json
+  notes: 'P2 readback runtime: HMAC signed GET is enabled only for the official api.hollaex.com profile; white-label venues
+    require separate profile verification.'
+- operation: amend_order
+  product: spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/hollaex/amend_order
+  auth: unsupported
+  rate_limit_bucket: hollaex_private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: 'P4 advanced order boundary: official demo/API profile has no verified in-place amend mapping in this adapter.'
+  official_doc: https://apidocs.hollaex.com/
+- operation: place_order_list
+  product: spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/hollaex/place_order_list
+  auth: unsupported
+  rate_limit_bucket: hollaex_private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: 'P4 advanced order boundary: no verified OCO/OTO/order-list endpoint is mapped for the official demo/API profile.'
+  official_doc: https://apidocs.hollaex.com/
+- operation: batch_place_orders
+  product: spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/hollaex/batch_place_orders
+  auth: unsupported
+  rate_limit_bucket: hollaex_private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: 'P4 advanced order boundary: no verified native batch place endpoint is mapped for the official demo/API profile.'
+  official_doc: https://apidocs.hollaex.com/
+- operation: batch_cancel_orders
+  product: spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/hollaex/batch_cancel_orders
+  auth: unsupported
+  rate_limit_bucket: hollaex_private_rest
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: 'P4 advanced order boundary: no verified native batch cancel endpoint is mapped for the official demo/API profile.'
+  official_doc: https://apidocs.hollaex.com/
+- operation: get_open_orders
+  product: spot
+  transport: rest
+  method: GET
+  path: /orders
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Credential-gated read-only runtime is implemented for the official demo/API profile; disabled unless HOLLAEX_PRIVATE_REST_ENABLED
+    and HMAC API key/secret are configured.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/get_open_orders.json
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/hollaex/private_tests.rs
+    fixture: tests/fixtures/exchanges/hollaex/open_orders_success.json
+  notes: 'P2 readback runtime: HMAC signed GET is enabled only for the official api.hollaex.com profile; white-label venues
+    require separate profile verification.'
+- operation: get_recent_fills
+  product: spot
+  transport: rest
+  method: GET
+  path: /user/trades
+  auth: hmac
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: hollaex_private_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Credential-gated read-only runtime is implemented for the official demo/API profile; disabled unless HOLLAEX_PRIVATE_REST_ENABLED
+    and HMAC API key/secret are configured.
+  official_doc: https://apidocs.hollaex.com/
+  request_spec_fixture: tests/fixtures/exchanges/hollaex/request_specs/get_recent_fills.json
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/hollaex/private_tests.rs
+    fixture: tests/fixtures/exchanges/hollaex/recent_fills_success.json
+  notes: 'P2 readback runtime: HMAC signed GET is enabled only for the official api.hollaex.com profile; white-label venues
+    require separate profile verification.'
 streams:
-  - operation: public_orderbook_snapshot
-    channel: orderbook:xht-usdt
-    scope: public
-    support: spec_only
-    heartbeat: client_ping_30s
-    resync:
-      endpoint_operation: get_order_book
-    parser_fixture: tests/fixtures/exchanges/hollaex/ws/orderbook_update.json
-  - operation: private_user_stream
-    channel: user
-    scope: private
-    support: spec_only
-    auth: hmac_query_params
-    auth_renewal:
-      endpoint_operation: get_open_orders
-    reconciliation:
-      endpoint_operation: get_open_orders
+- operation: public_orderbook_snapshot
+  channel: orderbook:xht-usdt
+  scope: public
+  support: spec_only
+  heartbeat: client_ping_30s
+  resync:
+    endpoint_operation: get_order_book
+  parser_fixture: tests/fixtures/exchanges/hollaex/ws/orderbook_update.json
+- operation: private_user_stream
+  channel: user
+  scope: private
+  support: spec_only
+  auth: hmac_query_params
+  auth_renewal:
+    endpoint_operation: get_open_orders
+  reconciliation:
+    endpoint_operation: get_open_orders

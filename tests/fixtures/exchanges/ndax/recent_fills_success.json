@@ -1,0 +1,16 @@
+[
+  {
+    "TradeId": "fill-1",
+    "OrderId": "offline-order-1",
+    "ClientOrderId": "client-1",
+    "InstrumentId": 1,
+    "Side": 0,
+    "Price": "65010.00",
+    "Quantity": "0.02000000",
+    "Value": "1300.20",
+    "Fee": "1.30",
+    "FeeCurrency": "CAD",
+    "Liquidity": "Taker",
+    "TradeTime": "2026-06-09T01:02:00Z"
+  }
+]

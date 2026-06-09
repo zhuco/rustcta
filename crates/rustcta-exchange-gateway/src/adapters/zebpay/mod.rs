@@ -4,12 +4,13 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    CancelOrderResponse, CapabilitySupport, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, HistoryCapability, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -93,7 +94,7 @@ impl GatewayAdapter for ZebpayGatewayAdapter {
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
             message: Some(
-                "zebpay spot scan-only public REST gateway; private REST request-spec-only"
+                "zebpay spot public REST gateway; private readbacks are credential-gated and writes remain offline"
                     .to_string(),
             ),
         }
@@ -107,10 +108,11 @@ impl ExchangeClient for ZebpayGatewayAdapter {
     }
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
+        let private_read_enabled = self.config.private_rest_configured();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = false;
+        capabilities.supports_private_rest = private_read_enabled;
         capabilities.supports_public_streams = false;
         capabilities.supports_private_streams = false;
         capabilities.private_stream_capabilities =
@@ -122,9 +124,9 @@ impl ExchangeClient for ZebpayGatewayAdapter {
         capabilities.supports_fees = false;
         capabilities.supports_place_order = false;
         capabilities.supports_cancel_order = false;
-        capabilities.supports_query_order = false;
-        capabilities.supports_open_orders = false;
-        capabilities.supports_recent_fills = false;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
         capabilities.supports_batch_place_order = false;
         capabilities.supports_batch_cancel_order = false;
         capabilities.supports_cancel_all_orders = false;
@@ -141,6 +143,39 @@ impl ExchangeClient for ZebpayGatewayAdapter {
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
         capabilities.max_recent_fill_limit = None;
         toolchain::apply_toolchain_capabilities(&mut capabilities);
+        capabilities.supports_private_rest = private_read_enabled;
+        capabilities.supports_query_order = private_read_enabled;
+        capabilities.supports_open_orders = private_read_enabled;
+        capabilities.supports_recent_fills = private_read_enabled;
+        capabilities.capabilities_v2.private_rest = if private_read_enabled {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported(
+                "zebpay private readbacks require ZEBPAY_PRIVATE_REST_ENABLED plus client id/secret/access token; writes remain disabled",
+            )
+        };
+        capabilities.capabilities_v2.order_history = if private_read_enabled {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                supports_limit: true,
+                max_limit: Some(500),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "zebpay order readbacks require ZEBPAY_PRIVATE_REST_ENABLED plus credentials",
+            )
+        };
+        capabilities.capabilities_v2.fills_history = if private_read_enabled {
+            HistoryCapability {
+                support: CapabilitySupport::native(),
+                ..HistoryCapability::default()
+            }
+        } else {
+            HistoryCapability::unsupported(
+                "zebpay fill readbacks require ZEBPAY_PRIVATE_REST_ENABLED plus credentials",
+            )
+        };
         capabilities
     }
 
@@ -154,6 +189,13 @@ impl ExchangeClient for ZebpayGatewayAdapter {
         request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
         self.ensure_exchange(&request.exchange)?;
+        if let Some(market_type) = request.market_type {
+            self.ensure_spot(market_type)?;
+        }
+        for symbol in &request.symbols {
+            self.ensure_exchange(&symbol.exchange_id)?;
+            self.ensure_spot(symbol.market_type)?;
+        }
         self.unsupported("zebpay.positions_unsupported_spot_only")
     }
 
@@ -269,7 +311,7 @@ impl ExchangeClient for ZebpayGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.unsupported("zebpay.query_order_request_spec_only")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
@@ -284,7 +326,7 @@ impl ExchangeClient for ZebpayGatewayAdapter {
             self.ensure_exchange(&symbol.exchange)?;
             self.ensure_spot(symbol.market_type)?;
         }
-        self.unsupported("zebpay.open_orders_request_spec_only")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
@@ -299,7 +341,7 @@ impl ExchangeClient for ZebpayGatewayAdapter {
             self.ensure_exchange(&symbol.exchange)?;
             self.ensure_spot(symbol.market_type)?;
         }
-        self.unsupported("zebpay.recent_fills_request_spec_only")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(

@@ -1,0 +1,12 @@
+{
+  "pair": "BtcNis",
+  "status_type": 5,
+  "created": 1530189837,
+  "type": 0,
+  "order_type": 0,
+  "amount": 0.0,
+  "price": 12.0,
+  "stop": 0,
+  "id": 123456789,
+  "initialAmount": 2.0
+}

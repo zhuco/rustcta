@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/v1/user/spot/cancel_orders",
+  "body": {
+    "pair": "btc_jpy",
+    "order_ids": [
+      1,
+      2
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "code": "0",
+  "data": {
+    "fills": [
+      {
+        "tradeId": "offline-fill-id",
+        "orderId": "offline-order-id",
+        "clientOrderId": "offline-client-id",
+        "symbol": "BTC-USDT",
+        "side": "BUY",
+        "price": "64990",
+        "size": "0.004",
+        "quoteQuantity": "259.96",
+        "feeToken": "USDT",
+        "fee": "0.13",
+        "liquidity": "TAKER",
+        "createdAt": 1780886460000
+      }
+    ]
+  }
+}

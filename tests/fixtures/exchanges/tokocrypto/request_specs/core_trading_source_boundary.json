@@ -1,0 +1,21 @@
+{
+  "adapter": "tokocrypto",
+  "boundary": "core_trading_source_boundary",
+  "status": "spec_only",
+  "operations": [
+    "get_open_orders",
+    "get_recent_fills"
+  ],
+  "source": {
+    "auth": "signed private REST",
+    "paths": [
+      "GET /open/v1/orders",
+      "GET /open/v1/orders/trades"
+    ]
+  },
+  "runtime_gap": [
+    "private trading runtime is disabled for this profile",
+    "open-order and fill parsers are not promoted",
+    "listen-key/private stream reconciliation missing"
+  ]
+}

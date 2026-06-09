@@ -7,10 +7,10 @@ use serde_json::{json, Value};
 
 use super::streams::{
     parse_tapbit_public_stream_events, parse_tapbit_public_stream_message, tapbit_heartbeat_spec,
-    tapbit_public_subscribe_payload, tapbit_public_unsubscribe_payload,
-    tapbit_stream_reconnect_policy, tapbit_ws_pong_payload, TapbitPublicStreamMessage,
-    TAPBIT_WS_MAX_BOOK_DEPTH, TAPBIT_WS_MAX_MISSED_PINGS, TAPBIT_WS_PING_INTERVAL_SECONDS,
-    TAPBIT_WS_PONG_PAYLOAD,
+    tapbit_order_book_stream_spec, tapbit_public_subscribe_payload,
+    tapbit_public_unsubscribe_payload, tapbit_stream_reconnect_policy, tapbit_ws_pong_payload,
+    TapbitPublicStreamMessage, TAPBIT_WS_MAX_BOOK_DEPTH, TAPBIT_WS_MAX_MISSED_PINGS,
+    TAPBIT_WS_PING_INTERVAL_SECONDS, TAPBIT_WS_PONG_PAYLOAD,
 };
 use super::test_support::{context, exchange_id, perp_symbol_scope, spot_symbol_scope};
 use super::{TapbitGatewayAdapter, TapbitGatewayConfig};
@@ -57,6 +57,12 @@ async fn tapbit_adapter_should_build_public_websocket_subscription_specs() {
         json!({"op": "subscribe", "args": ["spot/orderBook.BTCUSDT.200"]})
     );
     assert_eq!(spec["heartbeat"], tapbit_heartbeat_spec());
+    assert_eq!(spec["order_book"], tapbit_order_book_stream_spec());
+    assert_eq!(
+        spec["order_book"]["supported_depths"],
+        json!([5, 10, 50, 100, 200])
+    );
+    assert_eq!(spec["order_book"]["sequence_field"], json!("version"));
 }
 
 #[tokio::test]
@@ -98,6 +104,30 @@ fn tapbit_adapter_should_document_websocket_heartbeat_contract() {
     assert_eq!(policy.ping_interval_ms, 5_000);
     assert_eq!(policy.pong_timeout_ms, 10_000);
     assert_eq!(policy.stale_message_ms, 10_000);
+    let capabilities = TapbitGatewayAdapter::default_public()
+        .expect("adapter")
+        .capabilities();
+    assert!(
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .supports_public_subscribe
+    );
+    assert_eq!(
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .interval_ms,
+        Some(5_000)
+    );
+    assert!(
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .resync
+            .order_book
+    );
 }
 
 #[tokio::test]
@@ -141,6 +171,7 @@ fn tapbit_adapter_should_parse_public_websocket_order_book_and_ticker_messages()
             "data": [{
                 "asks": [["100.5", "1.5"]],
                 "bids": [["99.5", "2.0"]],
+                "version": "123456",
                 "timestamp": 1700000000000i64
             }]
         }),
@@ -150,6 +181,7 @@ fn tapbit_adapter_should_parse_public_websocket_order_book_and_ticker_messages()
         TapbitPublicStreamMessage::OrderBook(snapshot) => {
             assert_eq!(snapshot.bids[0].price, 99.5);
             assert_eq!(snapshot.asks[0].quantity, 1.5);
+            assert_eq!(snapshot.sequence, Some(123456));
         }
         other => panic!("unexpected message: {other:?}"),
     }
@@ -223,6 +255,7 @@ fn tapbit_public_stream_events_should_emit_standard_book_and_heartbeat_events() 
             "data": [{
                 "asks": [["100.5", "1.5"]],
                 "bids": [["99.5", "2.0"]],
+                "version": 123456,
                 "timestamp": 1700000000000i64
             }]
         }),
@@ -232,6 +265,7 @@ fn tapbit_public_stream_events_should_emit_standard_book_and_heartbeat_events() 
         Some(ExchangeStreamEvent::OrderBookSnapshot(book)) => {
             assert_eq!(book.order_book.bids[0].price, 99.5);
             assert_eq!(book.order_book.asks[0].quantity, 1.5);
+            assert_eq!(book.order_book.sequence, Some(123456));
         }
         other => panic!("unexpected event: {other:?}"),
     }

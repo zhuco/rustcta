@@ -12,6 +12,9 @@ use super::parser::normalize_market_symbol;
 use super::UpbitGatewayAdapter;
 use crate::adapters::ensure_exchange_api_schema;
 
+pub const UPBIT_ORDERBOOK_UNIT_COUNTS: [u16; 4] = [1, 5, 15, 30];
+const UPBIT_DEFAULT_ORDERBOOK_UNIT_COUNT: u16 = 30;
+
 impl UpbitGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
         &self,
@@ -88,11 +91,34 @@ pub fn upbit_public_subscribe_payload(
             });
         }
     };
+    let codes = if matches!(
+        &subscription.kind,
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot
+    ) {
+        vec![upbit_orderbook_code_with_count(
+            &market,
+            UPBIT_DEFAULT_ORDERBOOK_UNIT_COUNT,
+        )?]
+    } else {
+        vec![market]
+    };
     Ok(json!([
         {"ticket": ticket},
-        {"type": stream_type, "codes": [market], "is_only_realtime": true},
+        {"type": stream_type, "codes": codes, "is_only_realtime": true},
         {"format": "DEFAULT"}
     ]))
+}
+
+pub fn upbit_orderbook_code_with_count(market: &str, count: u16) -> ExchangeApiResult<String> {
+    if !UPBIT_ORDERBOOK_UNIT_COUNTS.contains(&count) {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!(
+                "upbit orderbook unit count must be one of {:?}, got {count}",
+                UPBIT_ORDERBOOK_UNIT_COUNTS
+            ),
+        });
+    }
+    Ok(format!("{market}.{count}"))
 }
 
 pub fn upbit_private_subscribe_payload(

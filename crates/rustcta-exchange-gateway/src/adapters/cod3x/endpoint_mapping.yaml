@@ -23,6 +23,7 @@ base_urls:
   rest: unsupported_unverified
 auth:
   private_rest: unsupported
+  account_read_source: spec_only_downstream_or_wallet
   routed_signing: unsupported_unverified
   notes: "No promoted Cod3x API-key/HMAC, terminal token, downstream venue key, or wallet signing path is implemented."
 rate_limits:
@@ -31,21 +32,55 @@ rate_limits:
     notes: "No live HTTP runtime is opened by this adapter."
 reconciliation:
   positions: unsupported_unverified
-  balances: unsupported_unverified
+  balances: project_unimplemented_downstream_or_wallet_source_boundary
   open_orders: unsupported_unverified
 batch:
   place_orders: unsupported_unverified
   cancel_orders: unsupported_unverified
 websocket:
-  public: unsupported_unverified
-  private: unsupported_unverified
+  public:
+    support: unsupported
+    reason: "Cod3x-native profile has no stable public order book WebSocket contract; downstream venue WebSockets stay in their own adapters."
+    order_book:
+      support: unsupported
+      reason: no_cod3x_native_orderbook_channel
+  private:
+    support: unsupported
+    reason: "No Cod3x-native API-key/HMAC or wallet-owned private stream runtime is promoted."
+unsupported:
+  - operation: spot_product
+    reason: Cod3x is audited as an AI perpetual trading terminal/routing profile; downstream spot venues are not merged into this adapter.
+  - operation: get_fees
+    reason: "交易所不支持当前费率接口 runtime：Cod3x-native 不提供本地 fee runtime；费用属于下游 venue。"
+  - operation: get_positions
+    reason: "交易所不支持当前仓位接口 runtime：Cod3x 是 perps terminal/routing layer；下游 venue 的 positions 走各自 adapter。"
+  - operation: place_order
+    reason: "交易所不支持当前交易/私有接口 runtime：Cod3x-native profile 是 terminal/routing layer；下游 venue 的下单走各自 adapter。"
+  - operation: cancel_order
+    reason: "交易所不支持当前交易/私有接口 runtime：Cod3x-native profile 是 terminal/routing layer；下游 venue 的撤单走各自 adapter。"
+  - operation: query_order
+    reason: "交易所不支持当前交易/私有接口 runtime：Cod3x-native profile 是 terminal/routing layer；下游 venue 的订单查询走各自 adapter。"
+  - operation: get_open_orders
+    reason: "交易所不支持当前交易/私有接口 runtime：Cod3x-native profile 是 terminal/routing layer；下游 venue 的 open orders 走各自 adapter。"
+  - operation: get_recent_fills
+    reason: "交易所不支持当前交易/私有接口 runtime：Cod3x-native profile 是 terminal/routing layer；下游 venue 的成交回报走各自 adapter。"
+  - operation: amend_order
+    reason: "No verified Cod3x-native amend routing contract/API; downstream venue amend semantics remain in their own adapters."
+  - operation: place_order_list
+    reason: "No verified Cod3x-native OCO/OTO/order-list routing contract/API; downstream venue order-list semantics remain in their own adapters."
+  - operation: batch_place_orders
+    reason: "No verified Cod3x-native batch order routing contract/API; downstream venue batch semantics remain in their own adapters."
+  - operation: batch_cancel_orders
+    reason: "No verified Cod3x-native batch cancel routing contract/API; downstream venue batch semantics remain in their own adapters."
+  - operation: cancel_all_orders
+    reason: "No verified Cod3x-native cancel-all routing contract/API; downstream venue cancel-all semantics remain in their own adapters."
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
     transport: rest
     method: GET
     path: /unsupported/cod3x/markets
-    auth: unsupported
+    auth: none
     rate_limit_bucket: cod3x_unverified
     weight: 0
     request_spec_required: false
@@ -70,21 +105,6 @@ endpoints:
     support: unsupported_unverified
     reason: "No Cod3x-native order-book snapshot or quote REST contract was verified."
     market_types: [perpetual]
-  - operation: get_fees
-    product: perpetual
-    transport: rest
-    method: GET
-    path: /unsupported/cod3x/downstream-fees
-    auth: unsupported
-    rate_limit_bucket: cod3x_unverified
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported_unverified
-    reason: "Risk/funding/liquidation/fee data remain downstream venue semantics and are not a Cod3x-native runtime parser."
-    market_types: [perpetual]
   - operation: get_positions
     product: perpetual
     transport: rest
@@ -98,22 +118,23 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: unsupported_unverified
-    reason: "Position reads require a verified Cod3x-native account API, routing identity model, and downstream venue reconciliation."
+    reason: "交易所不支持当前仓位接口 runtime：Cod3x 是 perps terminal/routing layer；下游 venue 的 positions 走各自 adapter。"
     market_types: [perpetual]
   - operation: get_balances
     product: perpetual
     transport: rest
     method: GET
-    path: /unsupported/cod3x/balances
-    auth: unsupported
+    path: /source-boundary/cod3x/downstream-or-wallet-balances
+    auth: none
     rate_limit_bucket: cod3x_unverified
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: unsupported_unverified
-    reason: "Collateral/account state source is downstream venue specific and unverified as a Cod3x-native API."
+    support: spec_only
+    reason: "Cod3x account/collateral balance is downstream venue or wallet scoped rather than a Cod3x-native REST contract; keep as offline source boundary pending routed account selection, read-only credential/wallet scope, asset precision mapping, parser, and reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/cod3x/request_specs/get_balances_source_boundary.json
     market_types: [perpetual]
   - operation: get_open_orders
     product: perpetual
@@ -190,10 +211,40 @@ endpoints:
     support: unsupported_unverified
     reason: "Cancel routing/signing and downstream execution semantics are not verified."
     market_types: [perpetual]
+  - operation: amend_order
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cod3x/amend-order
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "No verified Cod3x-native amend routing contract/API; downstream venue amend semantics remain in their own adapters."
+    market_types: [perpetual]
+  - operation: place_order_list
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/cod3x/order-list
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "No verified Cod3x-native OCO/OTO/order-list routing contract/API; downstream venue order-list semantics remain in their own adapters."
+    market_types: [perpetual]
   - operation: batch_place_orders
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/cod3x/batch-place
     auth: unsupported
     rate_limit_bucket: cod3x_unverified
@@ -202,13 +253,13 @@ endpoints:
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported_unverified
-    reason: "No verified Cod3x-native batch order routing contract/API."
+    support: unsupported
+    reason: "No verified Cod3x-native batch order routing contract/API; downstream venue batch semantics remain in their own adapters."
     market_types: [perpetual]
   - operation: batch_cancel_orders
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/cod3x/batch-cancel
     auth: unsupported
     rate_limit_bucket: cod3x_unverified
@@ -217,13 +268,13 @@ endpoints:
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported_unverified
-    reason: "No verified Cod3x-native batch cancel routing contract/API."
+    support: unsupported
+    reason: "No verified Cod3x-native batch cancel routing contract/API; downstream venue batch semantics remain in their own adapters."
     market_types: [perpetual]
   - operation: cancel_all_orders
     product: perpetual
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /unsupported/cod3x/cancel-all
     auth: unsupported
     rate_limit_bucket: cod3x_unverified
@@ -232,6 +283,6 @@ endpoints:
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported_unverified
-    reason: "No verified Cod3x-native cancel-all routing contract/API."
+    support: unsupported
+    reason: "No verified Cod3x-native cancel-all routing contract/API; downstream venue cancel-all semantics remain in their own adapters."
     market_types: [perpetual]

@@ -1,7 +1,8 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, EndpointAuth, EndpointCapability, EndpointTransport,
-    ExchangeClientCapabilities, HeartbeatCapability, HeartbeatPolicy, HistoryCapability,
-    ReconnectCapability, StreamHeartbeatDirection, StreamRuntimeCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HeartbeatCapability, HeartbeatPolicy, HistoryCapability, ReconnectCapability,
+    StreamHeartbeatDirection, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
@@ -9,9 +10,7 @@ use super::private;
 
 pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapabilities) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
-    capabilities.capabilities_v2.private_rest = CapabilitySupport::unsupported(
-        "ModeTrade private REST uses Orderly Ed25519 account headers and remains spec-only",
-    );
+    capabilities.capabilities_v2.private_rest = CapabilitySupport::native();
     capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(
         "ModeTrade public WS payloads are fixture-only until runtime resync is verified",
     );
@@ -41,17 +40,31 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
         heartbeat_policy: HeartbeatPolicy::disabled(),
         ..StreamRuntimeCapability::default()
     };
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported(private::BATCH_PLACE_UNSUPPORTED);
+    capabilities.capabilities_v2.batch_place_orders = BatchCapability {
+        support: CapabilitySupport::unsupported(private::BATCH_PLACE_UNSUPPORTED),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::Partial,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: true,
+        supports_partial_failure: true,
+    };
     capabilities.capabilities_v2.batch_cancel_orders =
         BatchCapability::unsupported(private::BATCH_CANCEL_UNSUPPORTED);
     capabilities.capabilities_v2.cancel_all_orders =
         CapabilitySupport::unsupported(private::CANCEL_ALL_UNSUPPORTED);
-    capabilities.capabilities_v2.order_history =
-        HistoryCapability::unsupported(private::OPEN_ORDERS_UNSUPPORTED);
-    capabilities.capabilities_v2.fills_history =
-        HistoryCapability::unsupported(private::RECENT_FILLS_UNSUPPORTED);
-    capabilities.capabilities_v2.credential_scopes = Vec::new();
+    capabilities.capabilities_v2.order_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        max_limit: Some(500),
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.fills_history = HistoryCapability {
+        support: CapabilitySupport::native(),
+        max_limit: Some(500),
+        ..HistoryCapability::default()
+    };
+    capabilities.capabilities_v2.credential_scopes = vec![CredentialScope::ReadOnly];
     capabilities.capabilities_v2.endpoints = endpoint_capabilities();
     capabilities.apply_v2_to_legacy_flags();
 }
@@ -93,12 +106,6 @@ fn endpoint_capabilities() -> Vec<EndpointCapability> {
             ("get_fees", private::FEES_UNSUPPORTED),
             ("place_order", private::PLACE_ORDER_UNSUPPORTED),
             ("cancel_order", private::CANCEL_ORDER_UNSUPPORTED),
-            ("batch_place_orders", private::BATCH_PLACE_UNSUPPORTED),
-            ("batch_cancel_orders", private::BATCH_CANCEL_UNSUPPORTED),
-            ("cancel_all_orders", private::CANCEL_ALL_UNSUPPORTED),
-            ("query_order", private::QUERY_ORDER_UNSUPPORTED),
-            ("get_open_orders", private::OPEN_ORDERS_UNSUPPORTED),
-            ("get_recent_fills", private::RECENT_FILLS_UNSUPPORTED),
         ]
         .into_iter()
         .map(|(operation, reason)| EndpointCapability {
@@ -115,5 +122,78 @@ fn endpoint_capabilities() -> Vec<EndpointCapability> {
             supports_testnet: false,
         }),
     );
+    endpoints.extend([
+        signed_read_endpoint("query_order", "GET", "/v1/order/{order_id}"),
+        signed_read_endpoint("get_open_orders", "GET", "/v1/orders"),
+        signed_read_endpoint("get_recent_fills", "GET", "/v1/trades"),
+        signed_write_endpoint(
+            "amend_order",
+            "PUT",
+            "/v1/order",
+            private::AMEND_ORDER_UNSUPPORTED,
+        ),
+        signed_write_endpoint(
+            "batch_place_orders",
+            "POST",
+            "/v1/batch-order",
+            private::BATCH_PLACE_UNSUPPORTED,
+        ),
+        unsupported_endpoint("place_order_list", private::ORDER_LIST_UNSUPPORTED),
+        unsupported_endpoint("batch_cancel_orders", private::BATCH_CANCEL_UNSUPPORTED),
+        unsupported_endpoint("cancel_all_orders", private::CANCEL_ALL_UNSUPPORTED),
+    ]);
     endpoints
+}
+
+fn signed_read_endpoint(operation: &str, method: &str, path: &str) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::native(),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some(method.to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::ApiKey,
+        credential_scopes: vec![CredentialScope::ReadOnly],
+        rate_limit_bucket: Some("modetrade_orderly_signed_read".to_string()),
+        weight: Some(1),
+        supports_testnet: true,
+    }
+}
+
+fn signed_write_endpoint(
+    operation: &str,
+    method: &str,
+    path: &str,
+    reason: &'static str,
+) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(reason),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some(method.to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::ApiKey,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("modetrade_orderly_signed_write".to_string()),
+        weight: Some(1),
+        supports_testnet: true,
+    }
+}
+
+fn unsupported_endpoint(operation: &str, reason: &'static str) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(reason),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: None,
+        path: None,
+        auth: EndpointAuth::None,
+        credential_scopes: Vec::new(),
+        rate_limit_bucket: Some("modetrade_unsupported".to_string()),
+        weight: Some(0),
+        supports_testnet: false,
+    }
 }

@@ -216,7 +216,7 @@ impl ExchangeClient for BitvavoGatewayAdapter {
         capabilities.max_order_book_depth = Some(100);
         capabilities.max_recent_fill_limit = Some(1000);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(100));
         capabilities
     }
 
@@ -345,10 +345,7 @@ impl ExchangeClient for BitvavoGatewayAdapter {
     ) -> ExchangeApiResult<String> {
         self.ensure_exchange(&subscription.symbol.exchange)?;
         self.ensure_spot(subscription.symbol.market_type)?;
-        Ok(
-            streams::public_subscribe_payload("book", &[subscription.symbol.exchange_symbol])
-                .to_string(),
-        )
+        Ok(streams::public_subscribe_payload_for_subscription(&subscription)?.to_string())
     }
 
     async fn subscribe_private_stream(

@@ -1,15 +1,16 @@
 {
   "exchange": "bitteam",
-  "scan_only": true,
+  "scan_only": false,
   "trade_enabled": false,
   "private_rest_default_enabled": false,
-  "private_rest_boundary": "request_spec_only",
+  "private_rest_boundary": "read_only_runtime_guarded",
   "public_streams": "unsupported_unverified",
   "private_streams": "unsupported_unverified",
   "perpetual": "unsupported_no_official_product_scope_verified",
   "notes": [
     "Public REST is limited to spot pairs and order book fixtures.",
-    "Private CCXT-style endpoints use HTTP Basic auth request specs only.",
+    "Private CCXT-style readbacks use HTTP Basic auth only after BITTEAM_PRIVATE_REST_ENABLED and credentials are configured.",
+    "Private writes, balances, and fees remain offline/unsupported.",
     "No fixture contains live credentials, account ids, wallet addresses, phone numbers, emails, or real order ids."
   ]
 }

@@ -1,9 +1,12 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, EndpointAuth, EndpointCapability, EndpointTransport,
-    ExchangeClientCapabilities, HeartbeatCapability, HeartbeatPolicy, HistoryCapability,
-    ReconnectCapability, StreamHeartbeatDirection, StreamRuntimeCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HeartbeatCapability, HeartbeatPolicy, HistoryCapability, ReconnectCapability,
+    StreamHeartbeatDirection, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
+
+use super::private;
 
 pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapabilities) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::unsupported(
@@ -38,9 +41,9 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
         ..StreamRuntimeCapability::default()
     };
     capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported("grvt.bulk_orders_session_spec_only");
+        grvt_bulk_orders_capability(private::BULK_ORDERS_UNSUPPORTED);
     capabilities.capabilities_v2.batch_cancel_orders =
-        BatchCapability::unsupported("grvt.bulk_orders_session_spec_only");
+        grvt_bulk_orders_capability(private::BULK_ORDERS_UNSUPPORTED);
     capabilities.capabilities_v2.cancel_all_orders =
         CapabilitySupport::unsupported("grvt.cancel_all_orders_session_spec_only");
     capabilities.capabilities_v2.order_history =
@@ -53,7 +56,7 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
 }
 
 fn audited_endpoints() -> Vec<EndpointCapability> {
-    [
+    let mut endpoints: Vec<_> = [
         (
             "symbol_rules",
             EndpointTransport::Rest,
@@ -77,12 +80,6 @@ fn audited_endpoints() -> Vec<EndpointCapability> {
             EndpointTransport::Rest,
             Some("POST"),
             Some("/v1/cancel_order"),
-        ),
-        (
-            "batch_orders",
-            EndpointTransport::Rest,
-            Some("POST"),
-            Some("/v2/bulk_orders"),
         ),
         (
             "open_orders",
@@ -123,5 +120,63 @@ fn audited_endpoints() -> Vec<EndpointCapability> {
         weight: Some(0),
         supports_testnet: true,
     })
+    .collect();
+    endpoints.extend(advanced_order_endpoints());
+    endpoints
+}
+
+fn grvt_bulk_orders_capability(reason: &'static str) -> BatchCapability {
+    BatchCapability {
+        support: CapabilitySupport::unsupported(reason),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::Partial,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: true,
+        supports_partial_failure: true,
+    }
+}
+
+fn advanced_order_endpoints() -> Vec<EndpointCapability> {
+    [
+        ("amend_order", "/v1/amend_order"),
+        ("bulk_orders", "/v2/bulk_orders"),
+        ("batch_place_orders", "/v2/bulk_orders"),
+        ("batch_cancel_orders", "/v2/bulk_orders"),
+    ]
+    .into_iter()
+    .map(|(operation, path)| EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(match operation {
+            "batch_place_orders" | "batch_cancel_orders" | "bulk_orders" => {
+                private::BULK_ORDERS_UNSUPPORTED
+            }
+            "amend_order" => private::AMEND_ORDER_UNSUPPORTED,
+            _ => "grvt.advanced_order_session_spec_only",
+        }),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: Some("POST".to_string()),
+        path: Some(path.to_string()),
+        auth: EndpointAuth::Hmac,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("grvt_account_pair".to_string()),
+        weight: Some(0),
+        supports_testnet: true,
+    })
+    .chain(std::iter::once(EndpointCapability {
+        operation: "place_order_list".to_string(),
+        support: CapabilitySupport::unsupported(private::ORDER_LIST_UNSUPPORTED),
+        market_types: vec![MarketType::Perpetual],
+        transport: EndpointTransport::Rest,
+        method: None,
+        path: None,
+        auth: EndpointAuth::None,
+        credential_scopes: Vec::new(),
+        rate_limit_bucket: Some("grvt_account_pair".to_string()),
+        weight: Some(0),
+        supports_testnet: true,
+    }))
     .collect()
 }

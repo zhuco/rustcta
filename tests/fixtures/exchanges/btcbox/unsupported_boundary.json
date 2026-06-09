@@ -1,19 +1,44 @@
 {
   "exchange": "btcbox",
-  "scan_only": true,
+  "scan_only": false,
+  "readback_only": true,
   "trade_enabled": false,
-  "private_rest_runtime_enabled": false,
+  "private_rest_runtime_enabled": "readback_only",
+  "private_rest_readback_enabled": true,
   "public_ws_enabled": false,
   "private_ws_enabled": false,
   "default_market_type": "spot",
   "quote_asset_scope": "JPY",
   "service_suspension_code": 901,
   "unsupported": [
-    "private_rest_runtime",
     "place_order_runtime",
     "cancel_order_runtime",
+    "amend_order",
+    "place_order_list",
     "batch_orders",
+    "cancel_all_orders",
     "websocket",
     "fiat_funding"
-  ]
+  ],
+  "advanced_orders": {
+    "runtime_enabled": false,
+    "native_batch": false,
+    "order_list": false,
+    "cancel_all": false,
+    "unsupported_operations": [
+      "amend_order",
+      "place_order_list",
+      "batch_place_orders",
+      "batch_cancel_orders",
+      "cancel_all_orders"
+    ],
+    "runtime_unsupported_operations": {
+      "amend_order": "btcbox.amend_order.unsupported",
+      "place_order_list": "btcbox.order_list.unsupported",
+      "batch_place_orders": "btcbox.batch_place_orders.unsupported",
+      "batch_cancel_orders": "btcbox.batch_cancel_orders.unsupported",
+      "cancel_all_orders": "btcbox.cancel_all_orders.unsupported"
+    },
+    "reason": "BTCBOX private writes are offline request-spec-only; no native batch place/cancel, amend, or OCO/OTO/order-list endpoint is exposed in the current gateway runtime."
+  }
 }

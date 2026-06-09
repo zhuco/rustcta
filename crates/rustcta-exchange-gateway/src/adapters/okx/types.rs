@@ -5,8 +5,8 @@ use rustcta_exchange_api::{
 };
 use rustcta_types::{
     AccountId, AssetBalance, CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId,
-    ExchangeSymbol, Fill, FillStatus, LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType,
-    PositionSide, SchemaVersion, TenantId, TimeInForce,
+    ExchangePosition, ExchangeSymbol, Fill, FillStatus, LiquidityRole, MarketType, OrderSide,
+    OrderStatus, OrderType, PositionSide, SchemaVersion, TenantId, TimeInForce,
 };
 use serde_json::Value;
 
@@ -128,6 +128,89 @@ pub fn parse_fees(
             })
         })
         .collect()
+}
+
+pub fn parse_positions(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    fallback_market_type: MarketType,
+    symbols_filter: &[ExchangeSymbol],
+    value: &Value,
+) -> ExchangeApiResult<Vec<ExchangePosition>> {
+    let positions = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "OKX positions response is not an array",
+            value,
+        )
+    })?;
+    let wanted = symbols_filter
+        .iter()
+        .map(|symbol| normalize_okx_symbol_for_market(&symbol.symbol, symbol.market_type))
+        .collect::<ExchangeApiResult<std::collections::HashSet<_>>>()?;
+    let mut parsed = Vec::new();
+    for item in positions {
+        let inst_id = required_str(exchange_id, item, "instId")?;
+        let market_type = item
+            .get("instType")
+            .and_then(Value::as_str)
+            .map(okx_market_type_from_inst_type)
+            .transpose()?
+            .unwrap_or_else(|| {
+                let inferred = okx_market_type_from_inst_id(inst_id);
+                if inferred == MarketType::Spot {
+                    fallback_market_type
+                } else {
+                    inferred
+                }
+            });
+        if market_type != fallback_market_type {
+            continue;
+        }
+        let normalized = normalize_okx_symbol_for_market(inst_id, market_type)?;
+        if !wanted.is_empty() && !wanted.contains(&normalized) {
+            continue;
+        }
+        let signed_quantity = decimal_as_f64(
+            item.get("pos")
+                .or_else(|| item.get("position"))
+                .or_else(|| item.get("qty")),
+        )
+        .unwrap_or(0.0);
+        let quantity = signed_quantity.abs();
+        if quantity == 0.0 {
+            continue;
+        }
+        let (base, quote) =
+            split_okx_inst_id(&normalized).ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: format!("OKX position symbol missing base/quote: {normalized}"),
+            })?;
+        let canonical_symbol = CanonicalSymbol::new(base, quote).map_err(validation_error)?;
+        let position = ExchangePosition {
+            schema_version: SchemaVersion::current(),
+            tenant_id: tenant_id.clone(),
+            account_id: account_id.clone(),
+            exchange_id: exchange_id.clone(),
+            market_type,
+            canonical_symbol,
+            exchange_symbol: Some(
+                ExchangeSymbol::new(exchange_id.clone(), market_type, normalized)
+                    .map_err(validation_error)?,
+            ),
+            side: okx_position_side(item, signed_quantity),
+            quantity,
+            entry_price: decimal_as_f64(item.get("avgPx").or_else(|| item.get("avgCost"))),
+            mark_price: decimal_as_f64(item.get("markPx")),
+            liquidation_price: decimal_as_f64(item.get("liqPx")),
+            unrealized_pnl: decimal_as_f64(item.get("upl").or_else(|| item.get("unrealizedPnl"))),
+            leverage: decimal_as_f64(item.get("lever")),
+            observed_at: Utc::now(),
+        };
+        position.validate().map_err(validation_error)?;
+        parsed.push(position);
+    }
+    Ok(parsed)
 }
 
 pub fn parse_fills(
@@ -288,11 +371,7 @@ fn symbol_scope_from_inst_id(
     exchange_id: &ExchangeId,
     inst_id: &str,
 ) -> ExchangeApiResult<SymbolScope> {
-    let market_type = if inst_id.to_ascii_uppercase().ends_with("-SWAP") {
-        MarketType::Perpetual
-    } else {
-        MarketType::Spot
-    };
+    let market_type = okx_market_type_from_inst_id(inst_id);
     let normalized = normalize_okx_symbol_for_market(inst_id, market_type)?;
     let (base, quote) =
         split_okx_inst_id(&normalized).ok_or_else(|| ExchangeApiError::InvalidRequest {
@@ -306,6 +385,56 @@ fn symbol_scope_from_inst_id(
         exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, normalized)
             .map_err(validation_error)?,
     })
+}
+
+fn okx_market_type_from_inst_id(inst_id: &str) -> MarketType {
+    let upper = inst_id.to_ascii_uppercase();
+    if upper.ends_with("-SWAP") {
+        return MarketType::Perpetual;
+    }
+    let parts = upper.split('-').collect::<Vec<_>>();
+    if parts.len() >= 5 && parts.last().is_some_and(|kind| matches!(*kind, "C" | "P")) {
+        return MarketType::Option;
+    }
+    if parts.len() >= 3
+        && parts
+            .get(2)
+            .is_some_and(|expiry| expiry.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return MarketType::Futures;
+    }
+    MarketType::Spot
+}
+
+fn okx_market_type_from_inst_type(inst_type: &str) -> ExchangeApiResult<MarketType> {
+    match inst_type.to_ascii_uppercase().as_str() {
+        "SPOT" | "MARGIN" => Ok(MarketType::Spot),
+        "SWAP" => Ok(MarketType::Perpetual),
+        "FUTURES" => Ok(MarketType::Futures),
+        "OPTION" => Ok(MarketType::Option),
+        _ => Err(ExchangeApiError::InvalidRequest {
+            message: format!("unsupported OKX instType {inst_type}"),
+        }),
+    }
+}
+
+fn okx_position_side(value: &Value, signed_quantity: f64) -> PositionSide {
+    match value
+        .get("posSide")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "long" => PositionSide::Long,
+        "short" => PositionSide::Short,
+        "net" if signed_quantity < 0.0 => PositionSide::Short,
+        "net" if signed_quantity > 0.0 => PositionSide::Long,
+        "net" => PositionSide::Net,
+        _ if signed_quantity < 0.0 => PositionSide::Short,
+        _ if signed_quantity > 0.0 => PositionSide::Long,
+        _ => PositionSide::Net,
+    }
 }
 
 fn map_okx_order_status(state: &str) -> OrderStatus {

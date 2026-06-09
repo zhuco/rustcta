@@ -1,167 +1,408 @@
 schema_version: 1
 exchange: p2b
 adapter: P2bGatewayAdapter
-status_date: "2026-06-08"
+status_date: '2026-06-08'
 metadata:
   status: validated
   source: docs/p2b_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: A-32 scan-only spot adapter. Public REST is implemented for market rules and two-sided order book snapshots; private REST is request-spec-only and disabled by capabilities.
-market_types: [spot]
-products: [spot]
+  last_reviewed: '2026-06-08'
+  notes: A-32 spot adapter. Public REST is implemented for market rules and two-sided order book snapshots; public WebSocket
+    depth.subscribe is implemented as best-effort order book updates without sequence/checksum; read-only private REST order
+    query/open-orders/fills are guarded runtime behind P2B_PRIVATE_REST_ENABLED/P2PB2B_PRIVATE_REST_ENABLED plus API credentials.
+market_types:
+- spot
+products:
+- spot
 base_urls:
   rest: https://api.p2pb2b.com
   websocket: wss://apiws.p2pb2b.com/
 auth:
-  private_rest: JSON body with request and nonce, base64 encoded as X-TXC-PAYLOAD, HMAC-SHA512 hex X-TXC-SIGNATURE, X-TXC-APIKEY header; request-spec-only until read-only/live-dry-run validation
+  private_rest: JSON body with request and nonce, base64 encoded as X-TXC-PAYLOAD, HMAC-SHA512 hex X-TXC-SIGNATURE, X-TXC-APIKEY
+    header; private readbacks fail closed unless explicitly enabled with read-only credentials
 rate_limits:
-  p2b_public: { scope: ip, interval_ms: 60000, limit: 60 }
-  p2b_private: { scope: key, interval_ms: 60000, limit: 60 }
+  p2b_public:
+    scope: ip
+    interval_ms: 60000
+    limit: 60
+  p2b_private:
+    scope: key
+    interval_ms: 60000
+    limit: 60
+  p2b_public_ws:
+    scope: connection
+    interval_ms: 60000
+    limit: 60
+    notes: documented request limit for subscribe/unsubscribe/heartbeat messages
 pagination:
-  order_book: { mode: offset_limit_by_side, max_limit: 100 }
-  open_orders: { mode: offset_limit, max_limit: 100, request_spec_only: true }
-  fills: { mode: offset_limit, max_limit: 100, request_spec_only: true }
+  order_book:
+    mode: offset_limit_by_side
+    max_limit: 100
+  open_orders:
+    mode: offset_limit
+    max_limit: 100
+    request_spec_only: false
+  fills:
+    mode: offset_limit
+    max_limit: 100
+    request_spec_only: false
 reconciliation:
-  private_state: rest_request_spec_only
-  readbacks: [get_open_orders, get_recent_fills]
-  notes: Private REST is not enabled by capabilities; after promotion use /api/v2/orders and /api/v2/account/market_deals as REST reconciliation fallback.
+  private_state: guarded_rest_read_only
+  readbacks:
+  - get_open_orders
+  - get_recent_fills
+  notes: Private readback REST is enabled only behind P2B_PRIVATE_REST_ENABLED/P2PB2B_PRIVATE_REST_ENABLED plus API key/secret;
+    use /api/v2/orders and /api/v2/account/market_deals as REST reconciliation fallback.
 batch:
-  place: { support: unsupported, reason: p2b.batch_place_orders_unverified }
-  cancel: { support: unsupported, reason: p2b.batch_cancel_orders_unverified }
+  place:
+    support: unsupported
+    reason: p2b.batch_place_orders_unverified
+  cancel:
+    support: unsupported
+    reason: p2b.batch_cancel_orders_unverified
 websocket:
   public:
-    support: unsupported
-    reason: p2b.public_streams_unverified
+    support: native
     endpoint: wss://apiws.p2pb2b.com/
-    heartbeat: { mode: server_ping_available_unimplemented, request: '{"method":"server.ping","params":[],"id":1}' }
+    heartbeat:
+      mode: client_server_ping
+      request: '{"method":"server.ping","params":[],"id":1}'
+      inactivity_close_ms: 100000
+    order_book:
+      channel: depth.subscribe
+      update_method: depth.update
+      params:
+      - market
+      - limit
+      - interval
+      limits:
+      - 1
+      - 100
+      supported_depths:
+      - 1
+      - 100
+      supported_limits:
+      - 1
+      - 100
+      default_limit: 100
+      interval_param: '0'
+      incremental_interval_ms: 1000
+      full_refresh_interval_ms: 60000
+      full_flag: params[0]
+      update_semantics: full=true means all records/snapshot rebuild; full=false means changed records/incremental update;
+        zero amount deletes the price level when present
+      sequence:
+        field: null
+        contiguous: false
+        gap_detection: unsupported_no_official_sequence
+        risk: P2B public WS depth.update payload does not document sequence or update id, so missed messages cannot be proven
+          from the feed.
+      checksum:
+        mode: unsupported
+        risk: No official checksum is published for depth.update.
+      rebuild:
+        rest_snapshot: GET /api/v2/public/book side=buy and side=sell with offset=0 and limit=1..100
+        strategy: fetch REST snapshot on connect/reconnect, subscribe depth.subscribe, apply full=true messages as complete
+          rebuilds, apply full=false messages as best-effort changed levels, and rebuild/resubscribe after stale stream or
+          suspected loss.
   private:
     support: unsupported
     reason: p2b.private_streams_unverified
-    auth_renewal: { mode: unsupported }
+    auth_renewal:
+      mode: unsupported
+unsupported:
+- operation: contract_product
+  reason: P2B P2P surfaces are not central exchange order-book products; current official/API profile does not expose standard
+    futures/perpetual/options.
+- operation: get_balances
+  status: project_unimplemented
+  request_spec_fixture: tests/fixtures/exchanges/p2b/request_specs/get_balances.json
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending signed private read runtime, balances parser, read-only auth smoke, and REST reconciliation.
+- operation: get_fees
+  reason: 交易所不支持当前费率接口 runtime：当前 private fees unsupported，未验证 maker/taker fee readback。
+streams:
+- operation: subscribe_public_stream
+  scope: public
+  channel: depth.subscribe
+  product: spot
+  market_types:
+  - spot
+  support: native
+  request_spec_required: false
+  subscription_method: depth.subscribe
+  params:
+  - market
+  - limit
+  - '0'
+  limit_min: 1
+  limit_max: 100
+  default_limit: 100
+  interval_ms: 1000
+  full_refresh_interval_ms: 60000
+  full_flag: params[0]
+  sequence_fields: []
+  checksum: none
+  resync: get_order_book
+  fixture: tests/fixtures/exchanges/p2b/ws/depth_update_incremental.json
 endpoints:
-  - operation: get_symbol_rules
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /api/v2/public/markets
-    auth: none
-    rate_limit_bucket: p2b_public
-    weight: 1
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#markets
-  - operation: get_order_book
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: GET
-    path: /api/v2/public/book
-    auth: none
-    rate_limit_bucket: p2b_public
-    weight: 2
-    request_spec_required: false
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: native
-    notes: Adapter requests both side=buy and side=sell with market, offset=0, and limit=1..100, then merges both sides.
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#order-book
-  - operation: get_balances
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /api/v2/account/balances
-    auth: api_key
-    credential_scopes: [read_only]
-    rate_limit_bucket: p2b_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: p2b.balances_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/p2b/request_specs/get_balances.json
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#all-balances
-  - operation: place_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /api/v2/order/new
-    auth: api_key
-    credential_scopes: [trade]
-    rate_limit_bucket: p2b_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: p2b.place_order_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/p2b/request_specs/place_order_limit_buy.json
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#create-order
-  - operation: cancel_order
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /api/v2/order/cancel
-    auth: api_key
-    credential_scopes: [trade]
-    rate_limit_bucket: p2b_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: p2b.cancel_order_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/p2b/request_specs/cancel_order.json
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#cancel-order
-  - operation: get_open_orders
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /api/v2/orders
-    auth: api_key
-    credential_scopes: [read_only]
-    rate_limit_bucket: p2b_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: p2b.open_orders_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/p2b/request_specs/get_open_orders.json
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#open-orders
-  - operation: get_recent_fills
-    product: spot
-    market_types: [spot]
-    transport: rest
-    method: POST
-    path: /api/v2/account/market_deals
-    auth: api_key
-    credential_scopes: [read_only]
-    rate_limit_bucket: p2b_private
-    weight: 1
-    request_spec_required: true
-    native_batch: false
-    atomicity: not_applicable
-    testnet: false
-    support: unsupported
-    reason: p2b.recent_fills_request_spec_only
-    request_spec:
-      fixture: tests/fixtures/exchanges/p2b/request_specs/get_recent_fills.json
-    official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#deals-history-by-market
+- operation: get_symbol_rules
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /api/v2/public/markets
+  auth: none
+  rate_limit_bucket: p2b_public
+  weight: 1
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#markets
+- operation: get_order_book
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: GET
+  path: /api/v2/public/book
+  auth: none
+  rate_limit_bucket: p2b_public
+  weight: 2
+  request_spec_required: false
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  notes: Adapter requests both side=buy and side=sell with market, offset=0, and limit=1..100, then merges both sides.
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#order-book
+- operation: get_balances
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /api/v2/account/balances
+  auth: api_key
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: p2b_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented for
+    this adapter pending signed private read runtime, balances parser, read-only auth smoke, and REST reconciliation.
+  request_spec:
+    fixture: tests/fixtures/exchanges/p2b/request_specs/get_balances.json
+  response_parser:
+    status: fixture_only
+    fixture: tests/fixtures/exchanges/p2b/request_specs/get_balances.json
+    source: response_sample
+  notes: 'P3 balance boundary: request spec and sanitized response sample are pinned offline; runtime still returns p2b.balances_request_spec_only.'
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#all-balances
+- operation: place_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /api/v2/order/new
+  auth: api_key
+  credential_scopes:
+  - trade
+  rate_limit_bucket: p2b_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: P2B private write trading is fixture-backed offline; runtime stays disabled pending signed private REST auth smoke,
+    reconciliation, and live dry-run controls.
+  request_spec:
+    fixture: tests/fixtures/exchanges/p2b/request_specs/place_order_limit_buy.json
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#create-order
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: cancel_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /api/v2/order/cancel
+  auth: api_key
+  credential_scopes:
+  - trade
+  rate_limit_bucket: p2b_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: spec_only
+  reason: P2B private write trading is fixture-backed offline; runtime stays disabled pending signed private REST auth smoke,
+    reconciliation, and live dry-run controls.
+  request_spec:
+    fixture: tests/fixtures/exchanges/p2b/request_specs/cancel_order.json
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#cancel-order
+  notes: 'P2 core trading boundary: request/source fixture is pinned offline; runtime still returns guarded Unsupported and
+    must not submit live orders until parser/reconciliation/dry-run promotion is complete.'
+- operation: get_open_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /api/v2/orders
+  auth: api_key
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: p2b_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Guarded read-only private REST runtime; fails closed unless P2B_PRIVATE_REST_ENABLED or P2PB2B_PRIVATE_REST_ENABLED
+    and API key/secret are configured.
+  request_spec:
+    fixture: tests/fixtures/exchanges/p2b/request_specs/get_open_orders.json
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#open-orders
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/p2b/open_orders_success.json
+  notes: 'Read-only private REST runtime; requires symbol scope and read-only credentials. Writes remain offline and must not
+    submit live orders.'
+- operation: get_recent_fills
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /api/v2/account/market_deals
+  auth: api_key
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: p2b_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Guarded read-only private REST runtime; fails closed unless P2B_PRIVATE_REST_ENABLED or P2PB2B_PRIVATE_REST_ENABLED
+    and API key/secret are configured.
+  request_spec:
+    fixture: tests/fixtures/exchanges/p2b/request_specs/get_recent_fills.json
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#deals-history-by-market
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/p2b/recent_fills_success.json
+  notes: 'Read-only private REST runtime; requires symbol scope plus context tenant/account for normalized Fill rows. Writes
+    remain offline and must not submit live orders.'
+- operation: query_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: POST
+  path: /api/v2/account/order_history
+  auth: api_key
+  credential_scopes:
+  - read_only
+  rate_limit_bucket: p2b_private
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: not_applicable
+  testnet: false
+  support: native
+  reason: Guarded read-only private REST runtime; fails closed unless P2B_PRIVATE_REST_ENABLED or P2PB2B_PRIVATE_REST_ENABLED
+    and API key/secret are configured.
+  official_doc: https://github.com/P2B-team/p2b-api-docs/blob/master/api-doc.md#orders-history
+  request_spec:
+    fixture: tests/fixtures/exchanges/p2b/request_specs/query_order.json
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/p2b/order_history_success.json
+  notes: 'Read-only private REST runtime; requires exchange_order_id and symbol scope. Client-order-id lookup remains unsupported;
+    writes remain offline and must not submit live orders.'
+- operation: amend_order
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/p2b/amend-order
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: p2b_private
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: p2b.amend_order_unverified
+- operation: place_order_list
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/p2b/order-list
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: p2b_private
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: p2b.order_list_unverified
+- operation: batch_place_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/p2b/batch-place
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: p2b_private
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: p2b.batch_place_orders_unverified
+- operation: batch_cancel_orders
+  product: spot
+  market_types:
+  - spot
+  transport: rest
+  method: UNSUPPORTED
+  path: /unsupported/p2b/batch-cancel
+  auth: unsupported
+  credential_scopes:
+  - trade
+  rate_limit_bucket: p2b_private
+  weight: 0
+  request_spec_required: false
+  native_batch: false
+  atomicity: unsupported
+  testnet: false
+  support: unsupported
+  reason: p2b.batch_cancel_orders_unverified

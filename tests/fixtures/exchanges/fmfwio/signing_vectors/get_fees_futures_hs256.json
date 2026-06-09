@@ -1,0 +1,13 @@
+{
+  "exchange": "fmfwio",
+  "name": "get_fees_futures_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "GET",
+  "request_path": "/api/3/futures/fee",
+  "payload": "GET/api/3/futures/fee171000000000010000",
+  "expected_signature": "60cd8b24b14550ef1641297d9915a563dded5ab3b1b84a4cd2f97d574e840865",
+  "payload_format": "raw_payload",
+  "body": ""
+}

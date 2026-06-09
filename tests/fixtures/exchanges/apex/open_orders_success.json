@@ -1,0 +1,23 @@
+{
+  "code": "0",
+  "data": {
+    "orders": [
+      {
+        "id": "open-order-id",
+        "clientOrderId": "open-client-id",
+        "symbol": "BTC-USDT",
+        "side": "SELL",
+        "type": "LIMIT",
+        "timeInForce": "GOOD_TIL_CANCEL",
+        "status": "OPEN",
+        "size": "0.020",
+        "price": "66000",
+        "filledSize": "0",
+        "reduceOnly": true,
+        "postOnly": false,
+        "createdAt": 1780886500000,
+        "updatedAt": 1780886500000
+      }
+    ]
+  }
+}

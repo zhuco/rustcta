@@ -1,4 +1,4 @@
-const DEFAULT_REST_BASE_URL: &str = "https://api.bitflyer.com/v1";
+const DEFAULT_REST_BASE_URL: &str = "https://api.bitflyer.com";
 const DEFAULT_WS_URL: &str = "wss://ws.lightstream.bitflyer.com/json-rpc";
 const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 10_000;
 

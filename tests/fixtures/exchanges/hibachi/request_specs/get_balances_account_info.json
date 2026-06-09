@@ -1,0 +1,35 @@
+{
+  "exchange": "hibachi",
+  "operation": "get_balances",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/trade/account/info",
+  "auth": "api_key",
+  "query": {
+    "accountId": { "match": "exact", "value": "42" }
+  },
+  "headers": {
+    "Authorization": { "match": "non_empty" }
+  },
+  "strict_query": true,
+  "forbid_header_values_containing": ["real", "secret", "private"],
+  "account_scope": {
+    "required": ["accountId", "api_key"],
+    "credential_scopes": ["read_only"]
+  },
+  "response_sample": {
+    "accountId": 42,
+    "balance": "1000.00",
+    "availableBalance": "850.00",
+    "equity": "1025.00",
+    "risk": {
+      "marginRatio": "0.12",
+      "maintenanceMargin": "25.00"
+    }
+  },
+  "runtime_boundary": "Hibachi get_balances is request-spec only until auth smoke, balance/equity/risk parser, read-only guard, and account WS reconciliation are audited.",
+  "runtime_enabled": false,
+  "trade_enabled": false,
+  "secret_free": true
+}

@@ -260,12 +260,15 @@ fn default_strategy_args(
     match strategy_kind {
         "cross_exchange_arbitrage" => vec![
             "run".to_string(),
+            "-p".to_string(),
+            "rustcta-gateway".to_string(),
             "--bin".to_string(),
-            "cross_arb_live".to_string(),
+            "cross-exchange-arbitrage-live-runner".to_string(),
             "--".to_string(),
             "--config".to_string(),
             config_path.to_string(),
-            "--run".to_string(),
+            "--strategy-id".to_string(),
+            "cross_arb_live".to_string(),
         ],
         "spot_spot_arbitrage" | "spot_spot_taker_arbitrage" => vec![
             "run".to_string(),

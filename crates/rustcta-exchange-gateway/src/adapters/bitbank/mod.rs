@@ -1,15 +1,18 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
-    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AccountId, AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchAtomicity, BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability,
+    BatchExecutionMode, BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
+    CredentialScope, EndpointAuth, EndpointCapability, EndpointTransport, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookCapability, OrderBookChecksumMode,
+    OrderBookRequest, OrderBookResponse, OrderBookStrictness, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, RequestContext,
+    SymbolRulesRequest, SymbolRulesResponse, TenantId, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -42,6 +45,7 @@ impl BitbankGatewayAdapter {
         let rest = BitbankRest::new(
             exchange_id.clone(),
             config.public_rest_base_url.clone(),
+            config.private_rest_base_url.clone(),
             config.request_timeout_ms,
         )?;
         Ok(Self {
@@ -71,6 +75,69 @@ impl BitbankGatewayAdapter {
 
     fn unsupported<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
+    }
+
+    fn ensure_private_rest(&self, operation: &'static str) -> ExchangeApiResult<()> {
+        if !self.config.private_rest_enabled() {
+            return Err(ExchangeApiError::Unsupported { operation });
+        }
+        Ok(())
+    }
+
+    async fn send_signed_post(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        body: &str,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_signed_post(
+                self.config.api_key.as_deref().unwrap_or_default(),
+                self.config.api_secret.as_deref().unwrap_or_default(),
+                endpoint,
+                body,
+            )
+            .await
+    }
+
+    async fn send_signed_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &std::collections::HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_signed_get(
+                self.config.api_key.as_deref().unwrap_or_default(),
+                self.config.api_secret.as_deref().unwrap_or_default(),
+                endpoint,
+                params,
+            )
+            .await
+    }
+
+    fn context_account(
+        &self,
+        context: &RequestContext,
+    ) -> ExchangeApiResult<(TenantId, AccountId)> {
+        let tenant_id =
+            context
+                .tenant_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "bitbank private REST readback requires context.tenant_id".to_string(),
+                })?;
+        let account_id =
+            context
+                .account_id
+                .clone()
+                .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                    message: "bitbank private REST readback requires context.account_id"
+                        .to_string(),
+                })?;
+        Ok((tenant_id, account_id))
     }
 }
 
@@ -115,20 +182,27 @@ impl ExchangeClient for BitbankGatewayAdapter {
         capabilities.supports_query_order = self.config.private_rest_enabled();
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_client_order_id = false;
         capabilities.supports_post_only = true;
         capabilities.supports_order_types =
             vec![OrderType::Market, OrderType::Limit, OrderType::PostOnly];
         capabilities.supports_time_in_force = vec![TimeInForce::GTC];
         capabilities.max_order_book_depth = Some(200);
-        capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(200));
+        capabilities.order_book = OrderBookCapability {
+            strictness: OrderBookStrictness::BestEffortDelta,
+            supports_sequence: true,
+            supports_checksum: false,
+            checksum_mode: OrderBookChecksumMode::Disabled,
+            supports_resync_endpoint: true,
+            max_depth: Some(200),
+        };
+        apply_bitbank_capabilities_v2(&mut capabilities);
         capabilities
     }
 
     async fn get_balances(&self, request: BalancesRequest) -> ExchangeApiResult<BalancesResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitbank.get_balances.rest_parser_pending")
+        self.get_balances_impl(request).await
     }
 
     async fn get_positions(
@@ -213,8 +287,7 @@ impl ExchangeClient for BitbankGatewayAdapter {
         &self,
         request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitbank.batch_cancel_orders.native_orders_info_read_only")
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn cancel_all_orders(
@@ -229,24 +302,21 @@ impl ExchangeClient for BitbankGatewayAdapter {
         &self,
         request: QueryOrderRequest,
     ) -> ExchangeApiResult<QueryOrderResponse> {
-        self.ensure_exchange(&request.symbol.exchange)?;
-        self.unsupported("bitbank.query_order.rest_parser_pending")
+        self.query_order_impl(request).await
     }
 
     async fn get_open_orders(
         &self,
         request: OpenOrdersRequest,
     ) -> ExchangeApiResult<OpenOrdersResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitbank.get_open_orders.rest_parser_pending")
+        self.get_open_orders_impl(request).await
     }
 
     async fn get_recent_fills(
         &self,
         request: RecentFillsRequest,
     ) -> ExchangeApiResult<RecentFillsResponse> {
-        self.ensure_exchange(&request.exchange)?;
-        self.unsupported("bitbank.get_recent_fills.rest_parser_pending")
+        self.get_recent_fills_impl(request).await
     }
 
     async fn subscribe_public_stream(
@@ -267,5 +337,135 @@ impl ExchangeClient for BitbankGatewayAdapter {
 fn validation_error(error: rustcta_types::ValidationError) -> ExchangeApiError {
     ExchangeApiError::InvalidRequest {
         message: error.to_string(),
+    }
+}
+
+fn apply_bitbank_capabilities_v2(capabilities: &mut ExchangeClientCapabilities) {
+    let private_support = if capabilities.supports_private_rest {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported(
+            "bitbank private REST requires credentials and write/readback parsers remain guarded",
+        )
+    };
+    let batch_cancel_support = if capabilities.supports_private_rest {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported(
+            "bitbank native same-pair batch cancel requires explicit private REST credentials",
+        )
+    };
+    capabilities.capabilities_v2.private_rest = private_support.clone();
+    capabilities.capabilities_v2.batch_place_orders =
+        BatchCapability::unsupported("bitbank has no native Spot batch place endpoint");
+    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+        support: batch_cancel_support.clone(),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::NonAtomic,
+        max_items: None,
+        same_symbol_required: true,
+        same_market_type_required: true,
+        supports_client_order_id: false,
+        supports_partial_failure: true,
+    };
+    capabilities.capabilities_v2.cancel_all_orders =
+        CapabilitySupport::unsupported("bitbank cancel-all is not exposed as a shared runtime");
+    capabilities.capabilities_v2.endpoints = vec![
+        bitbank_endpoint(
+            "bitbank.get_symbol_rules",
+            CapabilitySupport::native(),
+            EndpointAuth::None,
+            "GET",
+            "/spot/pairs",
+            vec![],
+            "public_rest",
+        ),
+        bitbank_endpoint(
+            "bitbank.get_order_book",
+            CapabilitySupport::native(),
+            EndpointAuth::None,
+            "GET",
+            "/{pair}/depth",
+            vec![],
+            "public_rest",
+        ),
+        bitbank_endpoint(
+            "bitbank.query_order",
+            private_support.clone(),
+            EndpointAuth::Hmac,
+            "GET",
+            "/v1/user/spot/order",
+            vec![CredentialScope::ReadOnly],
+            "orders",
+        ),
+        bitbank_endpoint(
+            "bitbank.get_open_orders",
+            private_support.clone(),
+            EndpointAuth::Hmac,
+            "GET",
+            "/v1/user/spot/active_orders",
+            vec![CredentialScope::ReadOnly],
+            "orders",
+        ),
+        bitbank_endpoint(
+            "bitbank.get_recent_fills",
+            private_support.clone(),
+            EndpointAuth::Hmac,
+            "GET",
+            "/v1/user/spot/trade_history",
+            vec![CredentialScope::ReadOnly],
+            "orders",
+        ),
+        bitbank_endpoint(
+            "bitbank.batch_cancel_orders",
+            batch_cancel_support,
+            EndpointAuth::Hmac,
+            "POST",
+            "/v1/user/spot/cancel_orders",
+            vec![CredentialScope::Trade],
+            "orders",
+        ),
+        bitbank_endpoint(
+            "bitbank.amend_order",
+            CapabilitySupport::unsupported("bitbank has no in-place amend endpoint"),
+            EndpointAuth::None,
+            "UNSUPPORTED",
+            "/unsupported/bitbank/amend_order",
+            vec![CredentialScope::Trade],
+            "unsupported",
+        ),
+        bitbank_endpoint(
+            "bitbank.place_order_list",
+            CapabilitySupport::unsupported("bitbank has no OCO/OTO/order-list endpoint"),
+            EndpointAuth::None,
+            "UNSUPPORTED",
+            "/unsupported/bitbank/place_order_list",
+            vec![CredentialScope::Trade],
+            "unsupported",
+        ),
+    ];
+}
+
+fn bitbank_endpoint(
+    operation: &str,
+    support: CapabilitySupport,
+    auth: EndpointAuth,
+    method: &str,
+    path: &str,
+    credential_scopes: Vec<CredentialScope>,
+    rate_limit_bucket: &str,
+) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support,
+        market_types: vec![MarketType::Spot],
+        transport: EndpointTransport::Rest,
+        method: Some(method.to_string()),
+        path: Some(path.to_string()),
+        auth,
+        credential_scopes,
+        rate_limit_bucket: Some(rate_limit_bucket.to_string()),
+        weight: Some(1),
+        supports_testnet: false,
     }
 }

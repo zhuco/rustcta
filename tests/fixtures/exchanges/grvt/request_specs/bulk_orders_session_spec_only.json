@@ -1,0 +1,44 @@
+{
+  "exchange": "grvt",
+  "operation": "bulk_orders",
+  "status": "project_unimplemented",
+  "method": "POST",
+  "base_url": "https://trades.testnet.grvt.io/full",
+  "path": "/v2/bulk_orders",
+  "headers": {
+    "Cookie": "<redacted-session-cookie>",
+    "X-Grvt-Account-Id": "<redacted-account-id>"
+  },
+  "body": {
+    "sub_account_id": "<redacted-sub-account-id>",
+    "orders": [
+      {
+        "client_order_id": "fixture-grvt-create-1",
+        "instrument": "BTC_USDT_Perp",
+        "side": "BUY",
+        "size": "0.001",
+        "limit_price": "64000",
+        "signature": "<external-eip712-signature-required>"
+      },
+      {
+        "order_id": "<redacted-order-id>",
+        "action": "CANCEL",
+        "signature": "<external-eip712-signature-required>"
+      }
+    ]
+  },
+  "auth": "session_cookie_plus_external_signer",
+  "request_spec_required": true,
+  "native_batch": true,
+  "atomicity": "partial",
+  "trade_enabled": false,
+  "signing_boundary": "tests/fixtures/exchanges/grvt/signing_vectors/session_cookie_boundary.json",
+  "remaining_runtime": [
+    "session_cookie_auth_smoke",
+    "eip712_external_signer",
+    "bulk_create_cancel_parser",
+    "partial_failure_reconciliation",
+    "live_dry_run_guard"
+  ],
+  "expected_error": "grvt.bulk_orders_requires_session_renewal_eip712_signer_partial_parser_and_dry_run_guard"
+}

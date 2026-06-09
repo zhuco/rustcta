@@ -25,12 +25,18 @@ pub(crate) fn StrategyWorkspacePanel(
     let mut selected_strategy_id = use_signal(String::new);
     let mut selected_config_path = use_signal(String::new);
     let strategies = StrategyWorkspaceRowData::from_rows(&data().strategies, lang);
-    if selected_strategy_id().is_empty() {
-        if let Some(row) = strategies.first() {
-            selected_strategy_id.set(row.strategy_id.clone());
-            selected_config_path.set(row.config_path.clone());
-        }
-    }
+    let selected_strategy_id_value = selected_strategy_id();
+    let selected_strategy = strategies
+        .iter()
+        .find(|row| row.strategy_id == selected_strategy_id_value)
+        .or_else(|| strategies.first());
+    let selected_strategy_id_value = selected_strategy
+        .map(|row| row.strategy_id.clone())
+        .unwrap_or_default();
+    let selected_config_path_value = match selected_strategy {
+        Some(row) => row.config_path.clone(),
+        None => selected_config_path(),
+    };
     let processes = ProcessWorkspaceRowData::from_rows(&data().processes, lang);
     let workspace = WorkspaceSummaryData::from_value(&data().workspace, lang);
     let agents = AgentWorkspaceRowData::from_rows(&data().agents, lang);
@@ -102,6 +108,7 @@ pub(crate) fn StrategyWorkspacePanel(
                                         token: token.clone(),
                                         message,
                                         lang,
+                                        selected: row.strategy_id == selected_strategy_id_value,
                                         selected_strategy_id,
                                         selected_config_path
                                     }
@@ -197,12 +204,12 @@ pub(crate) fn StrategyWorkspacePanel(
                     div { class: "config-editor-panel",
                         div { class: "panel-title-row subpanel-title",
                             h3 { {s(lang, "workspace_strategy_config")} }
-                            span { class: "muted", "{selected_strategy_id()}" }
+                            span { class: "muted", "{selected_strategy_id_value}" }
                         }
                         label { class: "form-field",
                             span { {s(lang, "workspace_selected_strategy")} }
                             select {
-                                value: "{selected_strategy_id()}",
+                                value: "{selected_strategy_id_value}",
                                 onchange: move |event| {
                                     let selected = event.value();
                                     selected_strategy_id.set(selected.clone());
@@ -216,7 +223,7 @@ pub(crate) fn StrategyWorkspacePanel(
                             }
                         }
                         div { class: "config-grid",
-                            div { span { {s(lang, "workspace_config_path")} } strong { "{selected_config_path()}" } }
+                            div { span { {s(lang, "workspace_config_path")} } strong { "{selected_config_path_value}" } }
                         }
                         p { class: "muted", {s(lang, "credential_setup_hint")} }
                     }
@@ -376,6 +383,7 @@ fn StrategyWorkspaceRow(
     token: String,
     message: Signal<String>,
     lang: Language,
+    selected: bool,
     mut selected_strategy_id: Signal<String>,
     mut selected_config_path: Signal<String>,
 ) -> Element {
@@ -406,7 +414,7 @@ fn StrategyWorkspaceRow(
     );
     rsx! {
         tr {
-            class: if selected_strategy_id() == row_strategy_id { "clickable-row active" } else { "clickable-row" },
+            class: if selected { "clickable-row active" } else { "clickable-row" },
             onclick: move |_| {
                 selected_strategy_id.set(row_strategy_id.clone());
                 selected_config_path.set(row_config_path.clone());

@@ -71,7 +71,7 @@ pub use adapters::{
     GatewayAdapter, GeminiGatewayConfig, GrvtGatewayConfig, HashKeyGlobalGatewayConfig,
     HibachiGatewayConfig, HitbtcGatewayConfig, HollaexGatewayConfig, HtxGatewayConfig,
     HuobiGatewayConfig, HyperliquidGatewayConfig, IndependentReserveGatewayConfig,
-    IndodaxGatewayConfig, KrakenFuturesGatewayConfig, KrakenGatewayConfig,
+    IndodaxGatewayConfig, KcexGatewayConfig, KrakenFuturesGatewayConfig, KrakenGatewayConfig,
     KuCoinFuturesGatewayConfig, KuCoinGatewayConfig, LBankGatewayConfig, LatokenGatewayConfig,
     LighterGatewayConfig, LunoGatewayConfig, MangoMarketsGatewayConfig, MercadoGatewayConfig,
     MexcGatewayConfig, ModetradeGatewayConfig, MyOkxGatewayConfig, NdaxGatewayConfig,

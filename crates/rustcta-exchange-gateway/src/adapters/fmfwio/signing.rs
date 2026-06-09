@@ -79,6 +79,26 @@ pub fn build_hs256_authorization_header(
     ))
 }
 
+pub fn build_hs256_authorization_header_with_query(
+    api_key: &str,
+    api_secret: &str,
+    method: &str,
+    request_path: &str,
+    query: Option<&str>,
+    body: Option<&str>,
+    timestamp_ms: u64,
+    window_ms: Option<u64>,
+) -> ExchangeApiResult<String> {
+    let payload = rest_hs256_payload(method, request_path, query, body, timestamp_ms, window_ms);
+    let signature = sign_hs256_hex(api_secret, &payload)?;
+    Ok(hs256_authorization_header(
+        api_key,
+        &signature,
+        timestamp_ms,
+        window_ms,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

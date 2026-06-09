@@ -1,0 +1,29 @@
+{
+  "exchange": "bsx",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "PATCH",
+  "path": "/source/bsx/amend-order-boundary",
+  "auth": "signed",
+  "status": "spec_only",
+  "source_boundary": "batch_update_or_amend_like_order_update",
+  "source_transport": "rest_or_websocket",
+  "source_auth": "bsx_account_headers_plus_wallet_or_session_signature",
+  "trade_enabled": false,
+  "official_sources": [
+    "https://api-docs.bsx.exchange/reference/post-order",
+    "https://api-docs.bsx.exchange/reference/ws-create-order",
+    "https://api-docs.bsx.exchange/reference/ws-orders"
+  ],
+  "shared_semantics": "offline_boundary",
+  "parser_fixture": "tests/fixtures/exchanges/bsx/parser/amend_order_ack.json",
+  "runtime_guard": "bsx.amend_order_spec_only_no_eip712_session_headers_reconciliation_guard",
+  "reason": "BSX order-update/amend-like evidence is fixture-backed as an offline amend_order boundary; parser evidence exists, but account headers, EIP-712 or session signing, sequence/dry-run guard, and post-write order-state reconciliation are still missing.",
+  "remaining_runtime_work": [
+    "select exact REST/WS update surface for this adapter profile",
+    "BSX account header and EIP-712/session signature audit",
+    "sequence and live dry-run guard",
+    "post-write order-state reconciliation"
+  ]
+}

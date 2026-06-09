@@ -79,6 +79,25 @@ websocket:
   public:
     support: native
     url: wss://futures.kraken.com/ws/v1
+    channels:
+      - book.no_fixed_ms.no_fixed_depth.seq.no_checksum.rest_orderbook_resync
+    order_book:
+      snapshot_channel: book_snapshot
+      delta_channel: book
+      fixed_update_interval_ms: null
+      interval_note: official futures WS docs do not publish a fixed millisecond cadence
+      depth:
+        parameter: null
+        documented_limit: null
+        note: official futures WS book feed does not publish a fixed depth selector
+      sequence:
+        field: seq
+        contiguous_required: true
+        gap_policy: resubscribe_and_rebuild_from_rest_orderbook
+      checksum: unsupported
+      resync:
+        mode: rest_snapshot
+        endpoint_operation: get_order_book
     heartbeat:
       request: '{"event":"ping"}'
       accepts: ['{"event":"pong"}']
@@ -87,7 +106,34 @@ websocket:
     support: native
     auth: signed_challenge
     fallback: rest_reconciliation
+unsupported:
+  - operation: spot_product
+    reason: Kraken Futures adapter/profile only maps the Kraken futures API; spot remains in the kraken adapter.
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: private_fee_schedule_volumes
+    source_fixture: tests/fixtures/exchanges/krakenfutures/request_specs/get_fees_source_boundary.json
+    reason: "Kraken Futures fee schedule volumes source is recorded as an offline private/config boundary; shared get_fees runtime remains project-unimplemented pending request spec, private auth smoke, parser, and product fee-schedule mapping."
 endpoints:
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual, futures]
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/fee-schedules/volumes
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: official fee schedule volumes source is fixture-backed, but no shared runtime/parser/auth smoke is enabled."
+    official_doc: https://docs.kraken.com/api/docs/futures-api/trading/fee-schedules/
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/get_fees_source_boundary.json
   - operation: get_symbol_rules
     product: perpetual
     transport: rest

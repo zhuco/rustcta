@@ -37,6 +37,10 @@ cargo run -p rustcta-control-api-app --bin rustcta-control-api
 
 Open `http://127.0.0.1:8091`.
 
+`127.0.0.1:8091` is the fixed control-panel Web service bind. Do not run the
+control panel through `8080`, `dx serve`, or any other long-running Web service
+port.
+
 ## Exchange Configuration Contract
 
 The Web exchange configuration page uses `/api/exchange-api-keys` from

@@ -38,7 +38,7 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/coinstor
 
 ## Official WebSocket Order Book Detail
 
-官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。Coinstore Spot public WS 为 `wss://ws.coinstore.com/s/ws`，depth 订阅使用 `{"op":"SUB","channel":["btcusdt@depth"],"id":1}`；项目已有 `<symbol>@depth@20` fixture 可以作为 20 档变体继续核验。Futures Socket.IO public topic 包括 `future_snapshot_depth`。
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。Coinstore Spot public WS 为 `wss://ws.coinstore.com/s/ws`，depth 订阅使用 `{"op":"SUB","channel":["btcusdt@depth"],"id":1}`；项目已有 `<symbol>@depth@20` fixture 可以作为 20 档变体继续核验。Futures Socket.IO public topic 包括 `future_snapshot_depth`，重建使用 REST snapshot。
 
 Spot 官方写有变化才推，最小推送间隔 100ms。server message 有 session 级序号 `S`，可用于发现漏消息；官方未见 checksum。Spot/Futures 断线或序号异常时用 REST depth/snapshot 重建。
 
@@ -79,6 +79,10 @@ legacy booleans:
   for orders, fills, balances and positions.
 - `batch_place_orders` / `batch_cancel_orders`: native, partial atomicity,
   same market type required, client order ids supported, `max_items=20`.
+- `amend_order` / `place_order_list`: explicit unsupported boundaries; the
+  mapping has no lossless shared in-place amend or OCO/OTO/order-list semantics,
+  so callers must cancel/replace or use venue-specific logic outside the shared
+  gateway.
 - `order_history`: private REST open-order/query-order reconciliation, no
   cursor; order id and client order id filters are supported.
 - `fills_history`: private REST recent fills with `limit` up to 100 and

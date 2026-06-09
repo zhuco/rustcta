@@ -61,7 +61,78 @@ websocket:
   public:
     support: native
     url: wss://ws-feed.exchange.coinbase.com
-    channels: [heartbeat, ticker, level2, matches]
+    subscribe:
+      type: subscribe
+      payload:
+        type: subscribe
+        product_ids: ["{product_id}"]
+        channels: ["{channel}"]
+    channels:
+      heartbeat:
+        channel: heartbeat
+        interval_ms: 1000
+        sequence: sequence
+      ticker:
+        channel: ticker
+        sequence: sequence
+      trades:
+        channel: matches
+        sequence: sequence
+      orderbook_level2_batch:
+        channel: level2_batch
+        products: [spot]
+        interval_ms: 50
+        depth: full_l2_delta
+        message_types: [snapshot, l2update]
+        auth: none
+        sequence: none_in_level2_schema
+        update_semantics: absolute_quantity_level_delta
+        checksum: none
+      orderbook_level2:
+        channel: level2
+        products: [spot]
+        interval_ms: realtime
+        depth: full_l2_delta
+        message_types: [snapshot, l2update]
+        auth: hmac
+        sequence: none_in_level2_schema
+        update_semantics: absolute_quantity_level_delta
+        checksum: none
+      orderbook_full:
+        channel: full
+        products: [spot]
+        interval_ms: realtime
+        depth: full_l3_events
+        message_types: [received, open, done, match, change, activate]
+        auth: hmac
+        sequence: sequence
+        checksum: none
+      orderbook_level3:
+        channel: level3
+        products: [spot]
+        interval_ms: realtime
+        depth: full_l3_events_compact
+        message_types: [schema, open, change, done, match, noop]
+        auth: hmac
+        sequence: sequence
+        checksum: none
+    orderbook:
+      public_runtime_channel: level2_batch
+      public_runtime_interval_ms: 50
+      rest_snapshot:
+        endpoint_operation: get_order_book
+        path: /products/{product_id}/book
+        levels: [2, 3]
+        sequence_field: sequence
+      replay:
+        level2_batch: refetch REST snapshot after reconnect or suspected loss; level2 schema does not expose sequence
+        full: buffer messages, fetch REST level=3 snapshot, discard sequence <= snapshot sequence, then apply contiguous sequence messages
+        level3: same sequence boundary as full after processing initial compact schema
+      risk: no checksum; level2_batch is public unauthenticated but sequence-less, full/level3 are sequence-bearing authenticated feeds
+    fixtures:
+      subscribe_payload: crates/rustcta-exchange-gateway/src/adapters/coinbaseexchange/stream_tests.rs
+      parser_snapshot: tests/fixtures/exchanges/coinbaseexchange/ws/public_level2_snapshot.json
+      parser_update: tests/fixtures/exchanges/coinbaseexchange/ws/public_level2_batch_update.json
     heartbeat:
       direction: application_message
       channel: heartbeat
@@ -73,6 +144,77 @@ websocket:
     auth: hmac
     signing_payload: timestamp + "GET" + "/users/self/verify"
     fallback: rest_reconciliation
+streams:
+  - operation: public_orderbook_delta_batch
+    transport: websocket
+    product: spot
+    channel: level2_batch
+    auth: none
+    support: native
+    interval_ms: 50
+    depth: full_l2_delta
+    message_types: [snapshot, l2update]
+    sequence: none_in_level2_schema
+    checksum: none
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/coinbaseexchange/stream_tests.rs
+    response_parser:
+      status: implemented
+      fixtures:
+        - tests/fixtures/exchanges/coinbaseexchange/ws/public_level2_snapshot.json
+        - tests/fixtures/exchanges/coinbaseexchange/ws/public_level2_batch_update.json
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_after_reconnect_or_suspected_loss
+      replay: level2_batch messages have no documented sequence field; rebuild from REST /products/{product_id}/book snapshot
+  - operation: public_orderbook_delta_level2
+    transport: websocket
+    product: spot
+    channel: level2
+    auth: hmac
+    support: native_when_authenticated
+    interval_ms: realtime
+    depth: full_l2_delta
+    message_types: [snapshot, l2update]
+    sequence: none_in_level2_schema
+    checksum: none
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/coinbaseexchange/stream_tests.rs
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_snapshot_after_reconnect_or_suspected_loss
+  - operation: public_orderbook_l3_full
+    transport: websocket
+    product: spot
+    channel: full
+    auth: hmac
+    support: metadata_only
+    interval_ms: realtime
+    depth: full_l3_events
+    message_types: [received, open, done, match, change, activate]
+    sequence: sequence
+    checksum: none
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_level3_snapshot_then_sequence_replay
+      replay: discard queued messages with sequence <= snapshot sequence, then require contiguous per-product sequence
+  - operation: public_orderbook_l3_compact
+    transport: websocket
+    product: spot
+    channel: level3
+    auth: hmac
+    support: metadata_only
+    interval_ms: realtime
+    depth: full_l3_events_compact
+    message_types: [schema, open, change, done, match, noop]
+    sequence: sequence
+    checksum: none
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_level3_snapshot_then_sequence_replay
+      replay: parse initial level3 schema, discard queued compact messages with sequence <= snapshot sequence, then require contiguous per-product sequence
 endpoints:
   - operation: get_symbol_rules
     product: spot
@@ -139,6 +281,62 @@ endpoints:
     weight: 1
     request_spec_required: true
     notes: "Requires product_id in this adapter to keep symbol scope explicit."
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /composed/coinbaseexchange/batch_place_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order placement.
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /composed/coinbaseexchange/batch_cancel_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    support: composed
+    notes: Gateway-composed sequential single-order cancel.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: PATCH
+    path: /unsupported/coinbaseexchange/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinbaseexchange.amend_order_unsupported
+  - operation: place_order_list
+    product: spot
+    transport: rest
+    method: POST
+    path: /unsupported/coinbaseexchange/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    support: unsupported
+    reason: coinbaseexchange.order_list_unsupported
   - operation: query_order
     product: spot
     transport: rest
@@ -180,6 +378,8 @@ endpoints:
     weight: 1
     request_spec_required: true
 unsupported:
+  - operation: contract_product
+    reason: Coinbase Exchange API is a spot exchange API; standard futures/perpetual/options products are not exposed by this profile.
   - operation: advanced_trade_brokerage
     reason: "Handled by existing coinbase adapter; not Coinbase Exchange."
   - operation: intx_perpetual

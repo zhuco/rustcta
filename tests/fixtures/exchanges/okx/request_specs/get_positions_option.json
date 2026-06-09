@@ -1,0 +1,46 @@
+{
+  "exchange": "okx",
+  "operation": "get_positions",
+  "product": "options",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v5/account/positions",
+  "auth": "signed",
+  "query": {
+    "instType": {
+      "match": "exact",
+      "value": "OPTION"
+    },
+    "instId": {
+      "match": "exact",
+      "value": "BTC-USD-240329-65000-C"
+    }
+  },
+  "headers": {
+    "OK-ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "OK-ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "passphrase"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/json"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "okx/query_order",
+  "body": null
+}

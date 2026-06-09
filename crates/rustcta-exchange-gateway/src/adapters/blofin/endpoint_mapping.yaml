@@ -39,6 +39,23 @@ websocket:
     support: native
     channels: [books, books5, trades, tickers, candle, funding-rate]
     heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 30000 }
+    order_book:
+      books:
+        channel: books
+        depths: [200]
+        interval_ms: 100
+        update_mode: initial_snapshot_then_incremental
+        continuity: prevSeqId must equal previous seqId
+        checksum: unsupported
+        resync: sequence_gap_rest_snapshot
+      books5:
+        channel: books5
+        depths: [5]
+        interval_ms: 100
+        update_mode: changed_snapshot
+        continuity: seqId
+        checksum: unsupported
+        resync: reconnect_or_sequence_gap_rest_snapshot
     resync: { mode: rest_snapshot, endpoint_operation: order_book }
   private:
     support: native_when_credentials_configured
@@ -48,6 +65,15 @@ websocket:
 streams:
   public: { support: native, heartbeat: client_ping, resync: rest_snapshot }
   private: { support: native_when_credentials_configured, auth_renewal: relogin, resync: rest_reconciliation }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official BloFin spot trading exists as a separate product line, but this adapter scope is BloFin USDT linear perpetual OpenAPI only; remaining Spot runtime work is stable spot instruments/books/tickers/trades public specs, spot balance/account private specs, spot order/open-order/fill lifecycle, product-scope parser coverage, and reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/blofin/request_specs/product_line_source_boundary.json
+    current_scope: "BloFin USDT linear perpetual public/private OpenAPI."
+    runtime_gap: "Stable spot instruments/books/tickers, spot account/order lifecycle, and spot parser fixtures have not been verified or wired."
+    required_endpoints: [spot_instruments, spot_books, spot_tickers, spot_trades, spot_balances, spot_order, spot_open_orders, spot_fills]
 endpoints:
   - operation: symbol_rules
     product: perpetual
@@ -197,6 +223,38 @@ endpoints:
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
     notes: max_items=20; partial failure supported.
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/blofin/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: blofin.amend_order_unsupported
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/blofin/order_list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: blofin.order_list_unsupported
   - operation: cancel_all_orders
     product: perpetual
     market_types: [perpetual]

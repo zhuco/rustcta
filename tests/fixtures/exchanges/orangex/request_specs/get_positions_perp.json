@@ -1,0 +1,20 @@
+{
+  "exchange": "orangex",
+  "operation": "get_positions",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "headers": {
+    "authorization": {"match": "exact", "value": "bearer token"}
+  },
+  "body_contains": {
+    "method": "/private/get_positions",
+    "params": {
+      "currency": "PERPETUAL",
+      "kind": "perpetual"
+    }
+  },
+  "forbid_header_values_containing": ["secret"]
+}

@@ -1,7 +1,8 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, EndpointAuth, EndpointCapability, EndpointTransport,
-    ExchangeClientCapabilities, HeartbeatCapability, HeartbeatPolicy, HistoryCapability,
-    ReconnectCapability, StreamHeartbeatDirection, StreamRuntimeCapability,
+    BatchAtomicity, BatchCapability, BatchExecutionMode, CapabilitySupport, CredentialScope,
+    EndpointAuth, EndpointCapability, EndpointTransport, ExchangeClientCapabilities,
+    HeartbeatCapability, HeartbeatPolicy, HistoryCapability, ReconnectCapability,
+    StreamHeartbeatDirection, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
@@ -40,8 +41,18 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
         heartbeat_policy: HeartbeatPolicy::disabled(),
         ..StreamRuntimeCapability::default()
     };
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported("oxfun.batch_place_orders_ws_request_spec_only");
+    capabilities.capabilities_v2.batch_place_orders = BatchCapability {
+        support: CapabilitySupport::unsupported(
+            "oxfun.batch_place_orders_ws_private_write_runtime_blocked",
+        ),
+        mode: BatchExecutionMode::Native,
+        atomicity: BatchAtomicity::Partial,
+        max_items: None,
+        same_symbol_required: false,
+        same_market_type_required: true,
+        supports_client_order_id: true,
+        supports_partial_failure: true,
+    };
     capabilities.capabilities_v2.batch_cancel_orders =
         BatchCapability::unsupported("oxfun.batch_cancel_orders_ws_request_spec_only");
     capabilities.capabilities_v2.cancel_all_orders =
@@ -56,7 +67,7 @@ pub(super) fn apply_toolchain_capabilities(capabilities: &mut ExchangeClientCapa
 }
 
 fn endpoint_capabilities() -> Vec<EndpointCapability> {
-    [
+    let mut endpoints: Vec<_> = [
         (
             "symbol_rules",
             "oxfun.symbol_rules_rest_unverified",
@@ -116,5 +127,52 @@ fn endpoint_capabilities() -> Vec<EndpointCapability> {
             supports_testnet,
         },
     )
-    .collect()
+    .collect();
+    endpoints.extend([
+        ws_trade_endpoint(
+            "batch_place_orders",
+            "placeorders",
+            "oxfun.batch_place_orders_ws_private_write_runtime_blocked",
+        ),
+        ws_trade_endpoint(
+            "batch_cancel_orders",
+            "cancelorders",
+            "oxfun.batch_cancel_orders_ws_request_spec_only",
+        ),
+        unsupported_endpoint("amend_order", "oxfun.amend_order_unsupported"),
+        unsupported_endpoint("place_order_list", "oxfun.order_list_unsupported"),
+    ]);
+    endpoints
+}
+
+fn ws_trade_endpoint(operation: &str, method: &str, reason: &'static str) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(reason),
+        market_types: vec![MarketType::Perpetual, MarketType::Option],
+        transport: EndpointTransport::WebSocket,
+        method: Some(method.to_string()),
+        path: Some("/v2/websocket".to_string()),
+        auth: EndpointAuth::Hmac,
+        credential_scopes: vec![CredentialScope::Trade],
+        rate_limit_bucket: Some("oxfun_ws_orders".to_string()),
+        weight: Some(1),
+        supports_testnet: true,
+    }
+}
+
+fn unsupported_endpoint(operation: &str, reason: &'static str) -> EndpointCapability {
+    EndpointCapability {
+        operation: operation.to_string(),
+        support: CapabilitySupport::unsupported(reason),
+        market_types: vec![MarketType::Perpetual, MarketType::Option],
+        transport: EndpointTransport::WebSocket,
+        method: None,
+        path: None,
+        auth: EndpointAuth::None,
+        credential_scopes: Vec::new(),
+        rate_limit_bucket: Some("oxfun_unsupported".to_string()),
+        weight: Some(0),
+        supports_testnet: false,
+    }
 }

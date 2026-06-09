@@ -1,0 +1,21 @@
+{
+  "adapter": "bittrade",
+  "boundary": "core_trading_source_boundary",
+  "status": "spec_only",
+  "operations": [
+    "get_open_orders",
+    "get_recent_fills"
+  ],
+  "source": {
+    "auth": "signed private REST",
+    "paths": [
+      "GET /v1/order/openOrders",
+      "GET /v1/order/matchresults"
+    ]
+  },
+  "runtime_gap": [
+    "private REST runtime remains disabled for this profile",
+    "parser and readback reconciliation are not implemented",
+    "live dry-run guard missing"
+  ]
+}

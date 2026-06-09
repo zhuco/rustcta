@@ -1,0 +1,25 @@
+{
+  "adapter": "luno",
+  "boundary": "core_trading_source_boundary",
+  "status": "write_spec_only_readbacks_runtime",
+  "operations": [
+    "place_order",
+    "cancel_order"
+  ],
+  "source": {
+    "auth": "basic private REST",
+    "paths": [
+      "POST /api/1/postorder",
+      "POST /api/1/stoporder"
+    ]
+  },
+  "runtime_gap": [
+    "private write runtime remains offline request-spec only",
+    "post-write readback reconciliation missing"
+  ],
+  "runtime_promoted": [
+    "query_order",
+    "get_open_orders",
+    "get_recent_fills"
+  ]
+}

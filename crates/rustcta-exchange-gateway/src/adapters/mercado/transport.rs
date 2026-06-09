@@ -8,6 +8,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::mercado_bearer_authorization;
+
 #[derive(Clone)]
 pub struct MercadoRest {
     exchange_id: ExchangeId,
@@ -64,6 +66,41 @@ impl MercadoRest {
                 .map_err(|error| ExchangeApiError::Transport {
                     message: error.to_string(),
                 })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_bearer_get(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        bearer_token: &str,
+    ) -> ExchangeApiResult<Value> {
+        let mut url = format!("{}{}", self.rest_base_url.trim_end_matches('/'), endpoint);
+        if !params.is_empty() {
+            let query = params
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        urlencoding::encode(key),
+                        urlencoding::encode(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            url.push('?');
+            url.push_str(&query);
+        }
+        let response = self
+            .http
+            .get(url)
+            .header("Authorization", mercado_bearer_authorization(bearer_token))
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(self.exchange_id.clone(), response).await
     }
 }

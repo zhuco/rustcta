@@ -31,6 +31,18 @@ fn woo_stream_payloads_should_match_v3_topics() {
     assert_eq!(trade["cmd"], "SUBSCRIBE");
     assert_eq!(trade["params"][0], "trade@SPOT_BTC_USDT");
 
+    let bbo = woo_public_subscribe_payload(
+        &PublicStreamSubscription {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("bbo"),
+            symbol: symbol_scope(),
+            kind: PublicStreamKind::Ticker,
+        },
+        8,
+    )
+    .expect("bbo payload");
+    assert_eq!(bbo["params"][0], "bbo@SPOT_BTC_USDT");
+
     let book = woo_public_subscribe_payload(
         &PublicStreamSubscription {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -38,10 +50,22 @@ fn woo_stream_payloads_should_match_v3_topics() {
             symbol: symbol_scope(),
             kind: PublicStreamKind::OrderBookDelta,
         },
-        8,
+        9,
     )
     .expect("book payload");
-    assert_eq!(book["params"][0], "orderbookupdate@SPOT_BTC_USDT@50");
+    assert_eq!(book["params"][0], "orderbookupdate@SPOT_BTC_USDT@100");
+
+    let snapshot = woo_public_subscribe_payload(
+        &PublicStreamSubscription {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("snapshot"),
+            symbol: symbol_scope(),
+            kind: PublicStreamKind::OrderBookSnapshot,
+        },
+        10,
+    )
+    .expect("snapshot payload");
+    assert_eq!(snapshot["params"][0], "orderbook@SPOT_BTC_USDT@100");
 
     let private = woo_private_subscribe_payload(
         &PrivateStreamSubscription {
@@ -52,7 +76,7 @@ fn woo_stream_payloads_should_match_v3_topics() {
             account_id: AccountId::new("account").expect("account"),
             kind: PrivateStreamKind::Orders,
         },
-        9,
+        11,
     )
     .expect("private payload");
     assert_eq!(private["params"][0], "executionreport");
@@ -132,6 +156,58 @@ fn woo_stream_parser_should_decode_public_messages() {
     )
     .expect("candle");
     assert!(matches!(candle, WooPublicStreamMessage::Candle(_)));
+}
+
+#[test]
+fn woo_stream_parser_should_decode_public_orderbook_fixtures() {
+    let exchange = exchange_id();
+    let symbol = symbol_scope();
+
+    let bbo = parse_woo_public_stream_message(
+        &exchange,
+        symbol.clone(),
+        &load_ws_fixture("public_bbo.json"),
+    )
+    .expect("bbo");
+    match bbo {
+        WooPublicStreamMessage::OrderBook(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(1001));
+            assert_eq!(snapshot.best_bid().expect("bid").price, 65000.1);
+            assert_eq!(snapshot.best_ask().expect("ask").quantity, 0.75);
+        }
+        other => panic!("unexpected bbo message: {other:?}"),
+    }
+
+    let update = parse_woo_public_stream_message(
+        &exchange,
+        symbol.clone(),
+        &load_ws_fixture("public_orderbookupdate.json"),
+    )
+    .expect("orderbook update");
+    match update {
+        WooPublicStreamMessage::OrderBook(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(1002));
+            assert_eq!(snapshot.bids.len(), 1);
+            assert_eq!(snapshot.bids[0].price, 64999.9);
+            assert_eq!(snapshot.asks[0].price, 65000.3);
+        }
+        other => panic!("unexpected orderbook update message: {other:?}"),
+    }
+
+    let snapshot = parse_woo_public_stream_message(
+        &exchange,
+        symbol,
+        &load_ws_fixture("public_orderbook_100.json"),
+    )
+    .expect("orderbook snapshot");
+    match snapshot {
+        WooPublicStreamMessage::OrderBook(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(1003));
+            assert_eq!(snapshot.bids.len(), 2);
+            assert_eq!(snapshot.asks.len(), 2);
+        }
+        other => panic!("unexpected orderbook snapshot message: {other:?}"),
+    }
 }
 
 #[test]
@@ -283,7 +359,7 @@ async fn woo_adapter_should_subscribe_public_and_private_streams() {
         })
         .await
         .expect("public subscribe");
-    assert_eq!(public, "woo:wss://public.example/ws:ticker@SPOT_BTC_USDT");
+    assert_eq!(public, "woo:wss://public.example/ws:bbo@SPOT_BTC_USDT");
 
     let private = adapter
         .subscribe_private_stream(PrivateStreamSubscription {
@@ -322,6 +398,15 @@ fn load_request_spec(path: &str) -> RequestSpec {
     serde_json::from_str(&text).expect("request spec fixture")
 }
 
+fn load_ws_fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/woo/ws/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("ws fixture");
+    serde_json::from_str(&text).expect("ws fixture")
+}
+
 #[tokio::test]
 async fn woo_ws_sessions_should_emit_initial_heartbeat_and_standard_events() {
     let adapter = WooGatewayAdapter::new(WooGatewayConfig {
@@ -340,7 +425,7 @@ async fn woo_ws_sessions_should_emit_initial_heartbeat_and_standard_events() {
     assert_eq!(public_session.url, "wss://public.example/ws");
     assert_eq!(
         public_session.initial_requests()[0]["params"][0],
-        "orderbook10@SPOT_BTC_USDT"
+        "orderbook@SPOT_BTC_USDT@100"
     );
 
     let heartbeat = public_session.heartbeat_request(chrono::Utc::now());

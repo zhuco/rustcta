@@ -12,11 +12,40 @@ use rustcta_exchange_api::{
 use rustcta_types::{ExchangeId, MarketType};
 use serde_json::{json, Value};
 
-use super::parser::{normalize_spot_depth, normalize_spot_symbol, parse_spot_orderbook_snapshot};
+use super::parser::{normalize_spot_symbol, parse_spot_orderbook_snapshot};
 use super::private_parser::{parse_balances, parse_order_state};
 use super::LBankGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 use crate::streams::{StreamReconnectPolicy, StreamRuntimeState, StreamSupervisorAction};
+
+pub const LBANK_SPOT_ORDER_BOOK_WS_DEPTHS: [u32; 3] = [10, 50, 100];
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LBankPublicOrderBookWsPolicy {
+    pub channel: &'static str,
+    pub supported_depths: [u32; 3],
+    pub default_depth: u32,
+    pub fixed_update_interval_ms: Option<u64>,
+    pub sequence_field: Option<&'static str>,
+    pub checksum: Option<&'static str>,
+    pub resync_endpoint: &'static str,
+    pub resync_strategy: &'static str,
+    pub risk_note: &'static str,
+}
+
+pub fn lbank_public_order_book_ws_policy() -> LBankPublicOrderBookWsPolicy {
+    LBankPublicOrderBookWsPolicy {
+        channel: "depth",
+        supported_depths: LBANK_SPOT_ORDER_BOOK_WS_DEPTHS,
+        default_depth: 100,
+        fixed_update_interval_ms: None,
+        sequence_field: None,
+        checksum: None,
+        resync_endpoint: "/v2/depth.do",
+        resync_strategy: "fetch REST depth snapshot and resubscribe after reconnect, stale stream, or suspected gap",
+        risk_note: "LBank Spot depth WS docs do not publish fixed millisecond cadence or sequence/checksum fields",
+    }
+}
 
 impl LBankGatewayAdapter {
     pub(super) async fn subscribe_public_stream_impl(
@@ -391,12 +420,10 @@ pub fn lbank_public_subscribe_payload(
 ) -> ExchangeApiResult<Value> {
     let pair = normalize_spot_symbol(&subscription.symbol.exchange_symbol.symbol)?;
     match &subscription.kind {
-        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => Ok(json!({
-            "action": "subscribe",
-            "subscribe": "depth",
-            "depth": normalize_spot_depth(100).to_string(),
-            "pair": pair,
-        })),
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot => {
+            let policy = lbank_public_order_book_ws_policy();
+            lbank_public_order_book_subscribe_payload(subscription, policy.default_depth)
+        }
         PublicStreamKind::Trades => Ok(json!({
             "action": "subscribe",
             "subscribe": "trade",
@@ -413,6 +440,39 @@ pub fn lbank_public_subscribe_payload(
             "kbar": normalize_kbar_interval(interval)?,
             "pair": pair,
         })),
+    }
+}
+
+pub fn lbank_public_order_book_subscribe_payload(
+    subscription: &PublicStreamSubscription,
+    depth: u32,
+) -> ExchangeApiResult<Value> {
+    ensure_exchange_api_schema(subscription.schema_version)?;
+    if !matches!(
+        subscription.kind,
+        PublicStreamKind::OrderBookDelta | PublicStreamKind::OrderBookSnapshot
+    ) {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "lbank.public_order_book_ws.kind",
+        });
+    }
+    Ok(json!({
+        "action": "subscribe",
+        "subscribe": "depth",
+        "depth": normalize_spot_ws_depth(depth)?.to_string(),
+        "pair": normalize_spot_symbol(&subscription.symbol.exchange_symbol.symbol)?,
+    }))
+}
+
+pub fn normalize_spot_ws_depth(depth: u32) -> ExchangeApiResult<u32> {
+    if LBANK_SPOT_ORDER_BOOK_WS_DEPTHS.contains(&depth) {
+        Ok(depth)
+    } else {
+        Err(ExchangeApiError::InvalidRequest {
+            message: format!(
+                "LBank Spot depth WS supports only 10, 50, or 100 levels; got {depth}"
+            ),
+        })
     }
 }
 

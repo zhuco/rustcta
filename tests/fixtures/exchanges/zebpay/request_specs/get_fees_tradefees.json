@@ -1,0 +1,31 @@
+{
+  "exchange": "zebpay",
+  "operation": "get_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/tradefees/BTC-INR",
+  "auth": "zebpay_private_signature",
+  "credential_scope": "read_only",
+  "query": {
+    "timestamp": "1710000000000"
+  },
+  "headers": {
+    "X-AUTH-APIKEY": {
+      "match": "non_empty"
+    },
+    "X-AUTH-SIGNATURE": {
+      "match": "non_empty"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/json"
+    }
+  },
+  "body": null,
+  "strict_query": false,
+  "strict_headers": false,
+  "strict_body": true,
+  "official_source": "ZebPay private Trade API documents /tradefees/{trade_pair} as the spot trade-fee source.",
+  "runtime_boundary": "request_spec_only; shared get_fees remains project-unimplemented pending onboarding/region guard and maker/taker parser."
+}

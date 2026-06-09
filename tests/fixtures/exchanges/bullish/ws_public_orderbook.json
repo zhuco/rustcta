@@ -15,5 +15,27 @@
     "method": "keepalivePing",
     "params": {},
     "id": "2"
+  },
+  "l1_update": {
+    "type": "update",
+    "dataType": "V1TABookLevel1",
+    "data": {
+      "sequenceNumber": "42",
+      "symbol": "BTCUSDC",
+      "timestamp": "1700000000000",
+      "bid": [["64999.50", "1.250000"]],
+      "ask": [["65000.00", "0.750000"]]
+    }
+  },
+  "l2_update": {
+    "type": "update",
+    "dataType": "V1TALevel2",
+    "data": {
+      "symbol": "BTCUSDC",
+      "bids": ["64999.50", "1.250000"],
+      "asks": ["65000.00", "0.750000"],
+      "sequenceNumberRange": [43, 45],
+      "datetime": "2026-06-08T00:00:00.000Z"
+    }
   }
 }

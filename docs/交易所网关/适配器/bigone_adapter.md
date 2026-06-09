@@ -121,3 +121,12 @@ interval or fixed depth parameter. JSON is supported and protobuf is documented
 as the lower-latency option. Mapping should add MarketDepth, snapshot/update,
 `changeId/prevId`, no fixed ms/depth, and REST snapshot fallback. Source batch:
 [WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
+Structured boundary: MarketDepth / `subscribeMarketDepthRequest` is recorded as
+snapshot-then-update, `changeId`/`prevId` continuity is mandatory, protobuf is
+an official option, interval is no fixed ms, depth is unspecified, and gaps
+rebuild from the REST order-book snapshot.
+
+## Fee Boundary
+
+BigONE `/viewer/trading_fees` 可作为账户 maker/taker 费率来源；当前已补 `request_specs/get_fees_trading_fees.json` 离线 request-spec 边界。shared `get_fees` runtime 仍属项目未实现/未启用；补齐前需完成 balance permission guard、asset-pair filter policy 和 maker/taker parser。

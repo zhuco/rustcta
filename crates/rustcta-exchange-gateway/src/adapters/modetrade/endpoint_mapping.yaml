@@ -1,12 +1,12 @@
 schema_version: 1
 exchange: modetrade
 adapter: ModetradeGatewayAdapter
-status_date: "2026-06-08"
+status_date: "2026-06-09"
 metadata:
   status: draft
   source: docs/modetrade_adapter.md
-  last_reviewed: "2026-06-08"
-  notes: Task A-26 conservative Mode Trade profile over Orderly EVM API. Public info is parsed; signed read and all trading stay spec-only or unsupported.
+  last_reviewed: "2026-06-09"
+  notes: Task A-26 conservative Mode Trade profile over Orderly EVM API. Public info is parsed; signed read and advanced write shapes stay spec-only or unsupported until account onboarding, Ed25519 signing, permission guards, dry-run gating and post-write reconciliation are audited.
 market_types: [perpetual]
 products: [perpetual]
 base_urls:
@@ -20,24 +20,81 @@ auth:
 rate_limits:
   modetrade_public: { scope: ip, interval_ms: 1000, limit: 10 }
   modetrade_orderly_signed_read: { scope: account, interval_ms: 1000, limit: 5 }
+  modetrade_orderly_signed_write: { scope: account, interval_ms: 1000, limit: 5 }
   modetrade_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
 pagination:
   public_info: { mode: none }
   private_history: { mode: unsupported }
 reconciliation:
-  private_state: unsupported
-  notes: REST reconciliation fallback is not enabled because account-scoped signed reads are not audited.
+  private_state: guarded_readback
+  notes: Order query, open orders and fills use guarded signed read-only REST when `RUSTCTA_MODETRADE_PRIVATE_REST_ENABLED` plus Orderly account credentials are configured. Writes/account/fee runtime remain offline or unsupported.
 batch:
-  place: { support: unsupported, reason: modetrade.batch_place_orders_unverified_orderly_semantics }
+  place: { support: project_unimplemented, mode: native, atomicity: partial, request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/batch_place_orders_signed_write.json, response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_ack.json, partial_failure_fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_partial_ack.json, missing_item_fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_missing_item_ack.json }, reason: "Orderly exposes POST /v1/batch-order, but ModeTrade account onboarding, Ed25519 signing runtime, trade permission guard, partial-failure/missing-item/post-write reconciliation, and dry-run guard are not wired." }
   cancel: { support: unsupported, reason: modetrade.batch_cancel_orders_unverified_orderly_semantics }
 websocket:
   public:
     support: spec_only
     helper_only: true
     heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+    order_book:
+      product: perpetual
+      market_types: [perpetual]
+      url: wss://ws-evm.orderly.org/ws/stream/{account_id}
+      protocol: websocket_json
+      channel: "{symbol}@orderbookupdate"
+      subscribe:
+        payload:
+          id: "modetrade-{symbol}@orderbookupdate"
+          event: subscribe
+          topic: "{symbol}@orderbookupdate"
+        symbol_format: PERP_BASE_QUOTE
+        account_id_required_for_path: true
+      interval_ms: 200
+      update_semantics: changed_price_levels
+      zero_quantity_deletes: true
+      depth: unspecified
+      depth_boundary: "depth: unspecified; official Orderly orderbookupdate docs do not publish a fixed depth selector for this profile."
+      sequence:
+        fields: [ts, prevTs]
+        continuity: "message.prevTs must equal previous message ts"
+        gap_detection: prevTs_mismatch_or_regression
+      checksum:
+        supported: false
+        field: null
+        risk: "Orderly orderbookupdate docs do not publish checksum for this profile."
+      resync:
+        mode: request_orderbook_snapshot_then_resubscribe
+        rest_endpoint_operation: get_order_book
+        rest_endpoint: /v1/orderbook/{symbol}
+        rest_auth: orderly_account_signed_read
+        triggers: [connect, reconnect, prevTs_gap, stale_stream, parse_error, suspected_message_loss]
   private:
     support: unsupported
     auth_renewal: { mode: unsupported }
+unsupported:
+  - operation: spot_product
+    reason: Mode Trade is a Mode Perpetuals DEX / Orderly EVM profile; spot products are outside this adapter.
+  - operation: get_fees
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/get_fees_user_rates.json
+    reason: "Orderly broker/user fee-rate source is mapped as an offline request-spec boundary for the ModeTrade profile, but shared get_fees runtime remains project-unimplemented pending builder/account scope audit, Ed25519 signing, and maker/taker parser wiring."
+  - operation: get_balances
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/get_balances_signed_read.json
+    reason: "Official/private account or balance readback exists, but shared get_balances runtime is project-unimplemented pending ModeTrade/Orderly account onboarding, Ed25519 signing, and balance parser wiring."
+  - operation: get_positions
+    status: project_unimplemented
+    reason: "Official/SDK position readback exists, but shared get_positions runtime is project-unimplemented pending ModeTrade/Orderly account audit, Ed25519 signing, positions parser, margin mode/position side mapping, and read-only reconciliation."
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/amend_order_signed_write.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/parser/amend_order_ack.json }
+    reason: "Official Orderly exposes PUT /v1/order edit semantics for this profile family, but shared amend_order runtime is project-unimplemented pending ModeTrade account audit, Ed25519 signing runtime, trade permission guard, post-write query/open/fills reconciliation, and live-dry-run guard."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/batch_place_orders_signed_write.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_ack.json }
+    reason: "Official Orderly exposes POST /v1/batch-order, but shared batch_place_orders runtime is project-unimplemented pending ModeTrade account audit, Ed25519 signing runtime, trade permission guard, partial-failure/missing-item/post-write reconciliation, and live-dry-run guard."
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -78,52 +135,128 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/modetrade/balances
-    auth: unsupported
-    rate_limit_bucket: modetrade_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/client/holding
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: modetrade_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: modetrade.balances_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly EVM signed balance/holding read shape is fixture-backed for the ModeTrade profile, but runtime remains disabled pending account onboarding audit, Ed25519 signer wiring, balance parser, collateral/equity mapping, and read-only reconciliation."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-holding
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/request_specs/get_balances_signed_read.json }
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/broker/user_info
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: modetrade_orderly_signed_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly Get User Fee Rates is fixture-backed for ModeTrade as an account/builder-scoped fee-rate source; runtime remains disabled pending ModeTrade builder/account eligibility audit, Ed25519 signer wiring, and FeeRateSnapshot parser."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-user-fee-rates
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/request_specs/get_fees_user_rates.json }
   - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/modetrade/positions
-    auth: unsupported
-    rate_limit_bucket: modetrade_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: modetrade_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: modetrade.positions_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly EVM GET /v1/positions signed read shape is fixture-backed for the ModeTrade profile, but runtime remains disabled pending account onboarding audit, Ed25519 signer wiring, positions parser, margin mode/position side mapping, and read-only reconciliation."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-positions
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/request_specs/get_positions_signed_read.json }
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/modetrade/place_order
-    auth: unsupported
+    path: /v1/order
+    auth: signed
     rate_limit_bucket: modetrade_unsupported
     weight: 0
-    request_spec_required: false
+    request_spec_required: true
     native_batch: false
     atomicity: unsupported
     testnet: false
-    support: unsupported
+    support: spec_only
     reason: modetrade.place_order_requires_orderly_ed25519_account_audit
   - operation: cancel_order
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: DELETE
-    path: /unsupported/modetrade/cancel_order
+    path: /v1/order
+    auth: signed
+    rate_limit_bucket: modetrade_unsupported
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: spec_only
+    reason: modetrade.cancel_order_requires_orderly_ed25519_account_audit
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/order/{order_id}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: modetrade_orderly_signed_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-order
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/query_order_signed_read.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/modetrade/order_success.json }
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PUT
+    path: /v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: modetrade_orderly_signed_write
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Orderly PUT /v1/order edit shape is fixture-backed for the ModeTrade profile, but shared amend_order runtime remains disabled pending account onboarding, audited Ed25519 signer wiring, trade permission scope guard, post-write query/open/fills reconciliation, and live-dry-run guard."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/edit-order
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/amend_order_signed_write.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/parser/amend_order_ack.json }
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/modetrade/order_list
     auth: unsupported
     rate_limit_bucket: modetrade_unsupported
     weight: 0
@@ -132,27 +265,31 @@ endpoints:
     atomicity: unsupported
     testnet: false
     support: unsupported
-    reason: modetrade.cancel_order_requires_orderly_ed25519_account_audit
+    reason: modetrade.order_list_unverified_orderly_semantics
   - operation: batch_place_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: POST
-    path: /unsupported/modetrade/batch_place_orders
-    auth: unsupported
-    rate_limit_bucket: modetrade_unsupported
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: modetrade.batch_place_orders_unverified_orderly_semantics
+    path: /v1/batch-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: modetrade_orderly_signed_write
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: "Orderly POST /v1/batch-order create shape is fixture-backed for the ModeTrade profile, but shared batch_place_orders runtime remains disabled pending account onboarding, audited Ed25519 signer wiring, trade permission scope guard, partial-failure/readback reconciliation, and live-dry-run guard."
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/batch-create-order
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/batch_place_orders_signed_write.json
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_ack.json, partial_failure_fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_partial_ack.json, missing_item_fixture: tests/fixtures/exchanges/modetrade/parser/batch_place_orders_missing_item_ack.json }
   - operation: batch_cancel_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: DELETE
+    method: UNSUPPORTED
     path: /unsupported/modetrade/batch_cancel_orders
     auth: unsupported
     rate_limit_bucket: modetrade_unsupported
@@ -183,31 +320,37 @@ endpoints:
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/modetrade/open_orders
-    auth: unsupported
-    rate_limit_bucket: modetrade_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: modetrade_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: modetrade.open_orders_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-orders
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/get_open_orders_signed_read.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/modetrade/open_orders_success.json }
   - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
     method: GET
-    path: /unsupported/modetrade/recent_fills
-    auth: unsupported
-    rate_limit_bucket: modetrade_unsupported
-    weight: 0
-    request_spec_required: false
+    path: /v1/trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: modetrade_orderly_signed_read
+    weight: 1
+    request_spec_required: true
     native_batch: false
-    atomicity: unsupported
-    testnet: false
-    support: unsupported
-    reason: modetrade.recent_fills_require_orderly_account_audit
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/get-trades
+    request_spec_fixture: tests/fixtures/exchanges/modetrade/request_specs/get_recent_fills_signed_read.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/modetrade/recent_fills_success.json }
 streams:
   - operation: public_orderbook_delta
     product: perpetual
@@ -215,9 +358,15 @@ streams:
     channel: "{symbol}@orderbookupdate"
     auth: none
     support: spec_only
+    interval_ms: 200
+    depth: unspecified
+    depth_boundary: "depth: unspecified; no fixed depth is documented for this Orderly profile."
+    sequence_fields: [ts, prevTs]
+    checksum: none_documented
     resync:
       endpoint_operation: get_order_book
       mode: signed_rest_required
+      trigger: prevTs_gap_or_reconnect
   - operation: private_user_events
     product: perpetual
     transport: websocket

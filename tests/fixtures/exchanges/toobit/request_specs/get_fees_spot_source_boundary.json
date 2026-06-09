@@ -1,0 +1,20 @@
+{
+  "exchange": "toobit",
+  "boundary": "fee_source",
+  "operation": "get_fees",
+  "product": "spot",
+  "status": "source_boundary",
+  "source_type": "configured_or_official_schedule_fallback",
+  "official_sources": [
+    {
+      "url": "https://api-docs.toobit.com/",
+      "evidence": "Current mapped private fee endpoint is the futures commissionRate source; a stable Spot account-effective fee-rate endpoint is not promoted in this adapter."
+    }
+  ],
+  "runtime_boundary": "Spot fee rates must come from an explicit config/VIP schedule source until a stable Toobit Spot account fee endpoint is verified and parser-tested.",
+  "remaining_work": [
+    "verify whether Spot exposes account-effective maker/taker fee readback",
+    "define config refresh and symbol applicability policy",
+    "promote shared FeeRateSnapshot only after source and parser are tested"
+  ]
+}

@@ -5,7 +5,7 @@ metadata:
   status: draft
   source: docs/arkham_adapter.md
   last_reviewed: "2026-06-08"
-  notes: "A-03 Arkham Exchange adapter. Public spot/perpetual market data is parser/transport ready; private trading remains offline request-spec only."
+  notes: "A-03 Arkham Exchange adapter. Public spot/perpetual market data is parser/transport ready; private order readbacks are guarded runtime; writes remain offline request-spec only."
 market_types: [spot, perpetual]
 products: [spot, perpetual]
 rest:
@@ -48,6 +48,15 @@ websocket:
     url: wss://arkm.com/api/ws
     heartbeat: { direction: client_ping, interval_ms: 30000, timeout_ms: 45000 }
     resync: rest_order_book_snapshot
+    runtime: project_unimplemented
+    order_book:
+      orderbook_channel: unverified
+      interval: "no fixed interval published"
+      depth: unspecified
+      sequence: unverified
+      checksum: unverified
+      runtime: disabled_until_full_official_exchange_ws_reference
+      reason: "Arkham Exchange public pages confirm Websocket API, but orderbook channel unverified; do not enable runtime before the complete official Exchange WS reference is captured."
     fixtures:
       subscribe: tests/fixtures/exchanges/arkham/ws_public_orderbook.json
       parser: tests/fixtures/exchanges/arkham/ws_orderbook_update.json
@@ -155,6 +164,12 @@ endpoints:
     testnet: false
     support: spec_only
     official_doc: https://arkm.com/docs#get/account/fees
+    reason: "Arkham private fee readback is fixture-backed as signed HMAC request-spec only; shared get_fees runtime remains disabled pending HMAC auth smoke, spot/perp account scope guard, maker/taker parser, and REST/private-stream reconciliation."
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/get_fees.json
+    response_parser:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/arkham/request_specs/get_fees_response_fixture.json
   - operation: place_order
     product: spot
     market_types: [spot, perpetual]
@@ -224,8 +239,12 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
     official_doc: https://arkm.com/docs#get/orders/{id}
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/query_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/arkham/order_success.json
   - operation: get_open_orders
     product: spot
     market_types: [spot, perpetual]
@@ -240,8 +259,12 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
     official_doc: https://arkm.com/docs#get/orders
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/get_open_orders.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/arkham/open_orders_success.json
   - operation: get_recent_fills
     product: spot
     market_types: [spot, perpetual]
@@ -256,5 +279,73 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: false
-    support: spec_only
+    support: native
     official_doc: https://arkm.com/docs#get/trades
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/get_recent_fills.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/arkham/recent_fills_success.json
+  - operation: amend_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/arkham/amend-order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: arkham.amend_order_unverified
+  - operation: place_order_list
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/arkham/order-list
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: arkham.order_list_unverified
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/arkham/batch-place
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: arkham.batch_place_orders_unverified
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/arkham/batch-cancel
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: arkham.batch_cancel_orders_unverified

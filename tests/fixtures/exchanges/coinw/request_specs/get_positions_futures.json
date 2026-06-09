@@ -1,0 +1,30 @@
+{
+  "exchange": "coinw",
+  "operation": "get_positions",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/perpum/positions",
+  "auth": "hmac",
+  "query": {
+    "instrument": "BTC"
+  },
+  "headers": {
+    "api_key": {
+      "match": "non_empty"
+    },
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "sign": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "coinw/futures_hmac_headers",
+  "body": null
+}

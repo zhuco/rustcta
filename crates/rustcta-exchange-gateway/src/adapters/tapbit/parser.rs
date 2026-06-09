@@ -213,6 +213,11 @@ fn parse_orderbook_snapshot(
     )
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
+    snapshot.sequence = data
+        .get("version")
+        .or_else(|| data.get("sequence"))
+        .and_then(value_as_i64)
+        .and_then(|value| u64::try_from(value).ok());
     snapshot.exchange_timestamp = data
         .get("timestamp")
         .or_else(|| data.get("ts"))

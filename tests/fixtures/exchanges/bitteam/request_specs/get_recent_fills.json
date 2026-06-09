@@ -1,6 +1,7 @@
 {
   "operation": "bitteam.get_recent_fills",
-  "request_spec_only": true,
+  "request_spec_only": false,
+  "runtime_enabled": true,
   "trade_enabled": false,
   "method": "GET",
   "path": "/trade/api/ccxt/tradesOfUser",
@@ -13,5 +14,5 @@
     "authorization": "<redacted:basic-auth>"
   },
   "credential_scope": "read_only",
-  "expected_error_until_promoted": "bitteam.recent_fills_request_spec_only"
+  "runtime_guard": "BITTEAM_PRIVATE_REST_ENABLED plus Basic auth credentials"
 }

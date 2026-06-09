@@ -1,10 +1,16 @@
+use rustcta_exchange_api::OrderBookStrictness;
 use rustcta_exchange_api::{
-    CapabilitySupport, ExchangeClient, OrderBookRequest, SymbolRulesRequest,
-    EXCHANGE_API_SCHEMA_VERSION,
+    CapabilitySupport, ExchangeClient, OrderBookRequest, PublicStreamKind,
+    PublicStreamSubscription, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
+use super::streams::{
+    coinsph_depth_replay_decision, coinsph_diff_depth_stream, coinsph_partial_depth_stream,
+    coinsph_public_order_book_ws_policy, coinsph_public_subscription_spec,
+    parse_coinsph_public_stream_message, CoinsPhDepthReplayDecision, CoinsPhPublicStreamMessage,
+};
 use super::test_support::{context, spawn_rest_server, symbol_scope, usdt_symbol_scope};
 use super::{CoinsPhGatewayAdapter, CoinsPhGatewayConfig};
 
@@ -38,8 +44,12 @@ async fn coinsph_adapter_should_declare_php_spot_boundaries() {
     ));
     assert!(matches!(
         capabilities.capabilities_v2.public_streams,
-        CapabilitySupport::Unsupported { .. }
+        CapabilitySupport::Native
     ));
+    assert_eq!(
+        capabilities.order_book.strictness,
+        OrderBookStrictness::StrictDelta
+    );
     assert!(!capabilities.supports_quote_market_order);
     assert!(!capabilities.supports_cancel_all_orders);
     assert!(!capabilities.supports_amend_order);
@@ -53,8 +63,150 @@ async fn coinsph_adapter_should_declare_php_spot_boundaries() {
         .capabilities_v2
         .endpoints
         .iter()
+        .any(
+            |endpoint| endpoint.operation == "public_orderbook_diff_depth"
+                && endpoint.path.as_deref() == Some("{symbol}@depth@100ms|1000ms")
+        ));
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
         .any(|endpoint| endpoint.operation == "fiat_transfer"
             && matches!(endpoint.support, CapabilitySupport::Unsupported { .. })));
+}
+
+#[tokio::test]
+async fn coinsph_public_ws_subscription_helpers_should_cover_orderbook_streams() {
+    let symbol = symbol_scope("BTCPHP");
+    let ticker = coinsph_public_subscription_spec(&PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("ticker"),
+        symbol: symbol.clone(),
+        kind: PublicStreamKind::Ticker,
+    })
+    .expect("ticker stream");
+    assert_eq!(ticker.url, super::streams::COINSPH_PUBLIC_WS_URL);
+    assert_eq!(ticker.stream, "btcphp@bookTicker");
+    assert_eq!(ticker.subscribe_payload["method"], "SUBSCRIBE");
+    assert_eq!(ticker.subscribe_payload["params"][0], "btcphp@bookTicker");
+    assert_eq!(ticker.unsubscribe_payload["method"], "UNSUBSCRIBE");
+
+    let partial = coinsph_public_subscription_spec(&PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("partial-depth"),
+        symbol: symbol.clone(),
+        kind: PublicStreamKind::OrderBookSnapshot,
+    })
+    .expect("partial stream");
+    assert_eq!(partial.stream, "btcphp@depth20@100ms");
+    assert_eq!(
+        coinsph_partial_depth_stream(&symbol, 200, 100).expect("200 stream"),
+        "btcphp@depth200@1000ms"
+    );
+
+    let delta = coinsph_public_subscription_spec(&PublicStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("diff-depth"),
+        symbol: symbol.clone(),
+        kind: PublicStreamKind::OrderBookDelta,
+    })
+    .expect("delta stream");
+    assert_eq!(delta.stream, "btcphp@depth@100ms");
+    assert_eq!(
+        coinsph_diff_depth_stream(&symbol, 1000).expect("1000 stream"),
+        "btcphp@depth@1000ms"
+    );
+
+    let adapter = CoinsPhGatewayAdapter::default_public().expect("adapter");
+    let handle = adapter
+        .subscribe_public_stream(PublicStreamSubscription {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("subscribe"),
+            symbol,
+            kind: PublicStreamKind::OrderBookDelta,
+        })
+        .await
+        .expect("public stream handle");
+    assert!(handle.ends_with(":btcphp@depth@100ms"));
+}
+
+#[test]
+fn coinsph_public_ws_policy_should_describe_snapshot_replay() {
+    let policy = coinsph_public_order_book_ws_policy();
+    assert_eq!(policy.book_ticker_stream_template, "{symbol}@bookTicker");
+    assert_eq!(policy.partial_depth_levels, &[5, 10, 20, 200]);
+    assert_eq!(policy.diff_depth_intervals_ms, &[100, 1000]);
+    assert_eq!(policy.snapshot_sequence_field, "lastUpdateId");
+    assert_eq!(policy.first_update_field, "U");
+    assert_eq!(policy.final_update_field, "u");
+    assert_eq!(policy.checksum, None);
+    assert_eq!(
+        coinsph_depth_replay_decision(100, None, 80, 100),
+        CoinsPhDepthReplayDecision::Stale
+    );
+    assert_eq!(
+        coinsph_depth_replay_decision(100, None, 99, 101),
+        CoinsPhDepthReplayDecision::FirstApplicable
+    );
+    assert_eq!(
+        coinsph_depth_replay_decision(100, Some(101), 102, 104),
+        CoinsPhDepthReplayDecision::Contiguous
+    );
+    assert_eq!(
+        coinsph_depth_replay_decision(100, Some(101), 103, 104),
+        CoinsPhDepthReplayDecision::Gap
+    );
+}
+
+#[test]
+fn coinsph_public_ws_fixtures_should_parse_book_ticker_partial_and_diff_depth() {
+    let exchange = super::test_support::exchange_id();
+    let symbol = symbol_scope("BTCPHP");
+
+    let ticker = parse_coinsph_public_stream_message(
+        &exchange,
+        symbol.clone(),
+        &fixture("ws/book_ticker.json"),
+    )
+    .expect("book ticker");
+    match ticker {
+        CoinsPhPublicStreamMessage::BookTicker(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(400900217));
+            assert_eq!(snapshot.best_bid().expect("bid").price, 3_500_000.0);
+            assert_eq!(snapshot.best_ask().expect("ask").quantity, 0.04);
+            assert!(snapshot.exchange_timestamp.is_some());
+        }
+        other => panic!("unexpected ticker message: {other:?}"),
+    }
+
+    let partial = parse_coinsph_public_stream_message(
+        &exchange,
+        symbol.clone(),
+        &fixture("ws/partial_depth.json"),
+    )
+    .expect("partial depth");
+    match partial {
+        CoinsPhPublicStreamMessage::PartialDepth(snapshot) => {
+            assert_eq!(snapshot.sequence, Some(400900220));
+            assert_eq!(snapshot.bids.len(), 2);
+            assert_eq!(snapshot.asks[0].price, 3_500_500.0);
+        }
+        other => panic!("unexpected partial message: {other:?}"),
+    }
+
+    let diff =
+        parse_coinsph_public_stream_message(&exchange, symbol, &fixture("ws/diff_depth.json"))
+            .expect("diff depth");
+    match diff {
+        CoinsPhPublicStreamMessage::DiffDepth(delta) => {
+            assert_eq!(delta.first_sequence, Some(400900221));
+            assert_eq!(delta.last_sequence, Some(400900223));
+            assert_eq!(delta.bids[0].quantity, 0.15);
+            assert_eq!(delta.asks[0].quantity, 0.0);
+            assert!(delta.exchange_timestamp.is_some());
+        }
+        other => panic!("unexpected diff message: {other:?}"),
+    }
 }
 
 #[test]

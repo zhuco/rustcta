@@ -1,6 +1,14 @@
 {
   "url": "https://paymium.com/public",
   "path": "/ws/socket.io",
+  "protocol": "socket.io_v1.3",
+  "connect_packet": "1::",
   "event": "stream",
-  "runtime": "unsupported_socketio_v1_3"
+  "streams": [
+    "bids_asks",
+    "trades",
+    "ticker"
+  ],
+  "subscription": "connect_only_public_stream",
+  "runtime": "env_gated_PAYMIUM_PUBLIC_STREAMS_ENABLED"
 }

@@ -41,6 +41,14 @@ websocket:
     support: spec_only
     url: wss://ws-api.exmo.com/v1/public
     channels: [spot/trades, spot/ticker, spot/order_book_snapshots, spot/order_book_updates]
+    order_book:
+      snapshot_channel: spot/order_book_snapshots
+      update_channel: spot/order_book_updates
+      snapshot_depth_levels: [25]
+      change_depth_levels: [400]
+      interval: "no fixed ms"
+      sequence: none_documented
+      checksum: none_documented
     heartbeat: server_ping_client_pong
     resync: rest_order_book_snapshot
   private:
@@ -52,9 +60,15 @@ websocket:
 streams:
   - operation: subscribe_public_order_book_delta
     channel: spot/order_book_updates:{pair}
+    snapshot_channel: spot/order_book_snapshots:{pair}
     transport: websocket
     auth: none
     support: spec_only
+    snapshot_depth_levels: [25]
+    change_depth_levels: [400]
+    interval: "no fixed ms"
+    sequence: none_documented
+    checksum: none_documented
     resync: { mode: rest_snapshot, endpoint_operation: get_order_book }
     request_spec:
       fixture: tests/fixtures/exchanges/exmo/ws/public_orderbook_subscribe.json
@@ -70,9 +84,29 @@ streams:
       fixture: tests/fixtures/exchanges/exmo/ws/private_login.json
     official_doc: https://support.exmo.com/hc/en-us/articles/14338305227676-Websocket-API
 unsupported:
-  - margin
-  - perpetual
-  - futures
+  - operation: contract_product
+    status: unsupported
+    official_gap: no_live_standard_futures_perpetual_options_api
+    scope: standard_contracts_only
+    reason: "EXMO Margin is a separate project-unimplemented surface; current official/API profile does not expose stable live standard futures/perpetual/options runtime."
+  - operation: margin_product
+    status: project_unimplemented
+    official_gap: exmo_margin_api
+    boundary: project_unimplemented_product_line
+    scope: exmo_margin
+    source_boundary_fixture: tests/fixtures/exchanges/exmo/request_specs/product_line_source_boundary.json
+    required_audit_gaps: [live_margin_api_stability, account_eligibility, leverage_collateral_risk_policy, margin_balance_position_parsers, product_scoped_order_lifecycle]
+    reason: "Official EXMO Margin / margin-like API surfaces are not connected by the current spot adapter and remain isolated from Spot REST v1.1 runtime."
+  - operation: perpetual_product
+    status: unsupported
+    official_gap: perpetual_futures_material_not_live_api
+    scope: standard_contracts_only
+    reason: "Official perpetual-futures materials are treated as active-development/not a stable live standard-contract API for this spot adapter; re-audit before promotion."
+  - operation: futures_product
+    status: unsupported
+    official_gap: no_live_standard_futures_api
+    scope: standard_contracts_only
+    reason: "No stable standard futures API is wired for this adapter; EXMO Margin remains the separate project-unimplemented product line."
   - positions
   - native_batch_place
   - native_batch_cancel
@@ -86,7 +120,7 @@ endpoints:
   - operation: get_symbol_rules
     product: spot
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /v1.1/pair_settings
     auth: none
     rate_limit_bucket: rest
@@ -96,7 +130,7 @@ endpoints:
   - operation: get_order_book
     product: spot
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /v1.1/order_book
     auth: none
     rate_limit_bucket: rest
@@ -106,7 +140,7 @@ endpoints:
   - operation: get_fees
     product: spot
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /v1.1/pair_settings
     auth: none
     rate_limit_bucket: rest
@@ -116,7 +150,7 @@ endpoints:
   - operation: get_balances
     product: spot
     transport: rest
-    method: POST
+    method: UNSUPPORTED
     path: /v1.1/user_info
     auth: hmac
     credential_scopes: [read_only]
@@ -206,3 +240,63 @@ endpoints:
       fixture: tests/fixtures/exchanges/exmo/request_specs/get_recent_fills.json
     official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
     notes: "EXMO user_trades supports limit up to 100 and offset cursor pagination."
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/exmo/amend_order
+    auth: unsupported
+    rate_limit_bucket: rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "EXMO Spot REST v1.1 has no shared in-place amend endpoint mapped by the adapter."
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/exmo/place_order_list
+    auth: unsupported
+    rate_limit_bucket: rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "EXMO Spot REST v1.1 exposes no lossless OCO/OTO/order-list mapping for the shared gateway contract."
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/exmo/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "EXMO Spot REST v1.1 has no documented native batch place endpoint."
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/exmo/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: rest
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: "EXMO Spot REST v1.1 has no documented native batch cancel endpoint."

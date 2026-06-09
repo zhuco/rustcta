@@ -1,0 +1,13 @@
+{
+  "stream": "bookTicker.SOL_USDC",
+  "data": {
+    "e": "bookTicker",
+    "E": 1704000000100,
+    "s": "SOL_USDC",
+    "u": "78",
+    "b": "9.9",
+    "B": "3",
+    "a": "10.1",
+    "A": "4"
+  }
+}

@@ -32,15 +32,23 @@ reconciliation:
     notes: Offset is API-server local and not guaranteed continuous; do not use it for gap detection.
   private_state: unsupported
 batch:
-  place: { support: unsupported, reason: lighter.send_tx_batch_signing_unverified }
-  cancel: { support: unsupported, reason: lighter.send_tx_batch_signing_unverified }
+  place: { support: spec_only, status: project_unimplemented, reason: lighter.batch_place_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard }
+  cancel: { support: spec_only, status: project_unimplemented, reason: lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard }
 websocket:
   public:
     support: parser_only
     heartbeat: { mode: client_keepalive, interval_ms: 60000, timeout_ms: 120000, stale_message_ms: 180000 }
-    order_book: { channel: "order_book/{MARKET_INDEX}", checksum: unsupported, continuity: nonce }
+    order_book:
+      channel: "order_book/{MARKET_INDEX}"
+      interval_ms: 50
+      depth: no fixed depth; 官方未给固定档位
+      update_mode: initial_snapshot_then_delta_changes
+      continuity: nonce; begin_nonce must equal previous nonce
+      checksum: unsupported
+      resync: nonce_gap_resubscribe_snapshot
+      priority: high_frequency_order_book
     channels:
-      order_book: { path: "order_book/{MARKET_INDEX}", support: parser_only, resync: resubscribe_snapshot, checksum: unsupported }
+      order_book: { path: "order_book/{MARKET_INDEX}", support: parser_only, interval_ms: 50, continuity: nonce, resync: resubscribe_snapshot, checksum: unsupported }
       ticker: { path: "ticker/{MARKET_INDEX}", support: parser_only }
       trade: { path: "trade/{MARKET_INDEX}", support: parser_only }
       market_stats: { path: "market_stats/{MARKET_INDEX}", support: parser_only }
@@ -55,7 +63,81 @@ websocket:
       account_orders: { support: unsupported_unverified, auth: bearer, reason: lighter.private_stream_session_spec_only }
       account_all_trades: { support: unsupported_unverified, auth: bearer, reason: lighter.private_stream_session_spec_only }
       account_all_positions: { support: unsupported_unverified, auth: bearer, reason: lighter.private_stream_session_spec_only }
+unsupported:
+  - operation: spot_product
+    status: project_unimplemented
+    reason: "Official Lighter spot market stats/structures and trading docs exist, but this adapter scope is perpetual market indexes, order-book specs, and signed-tx boundaries only; remaining Spot runtime work is spot market metadata/index mapping, spot order-book/trade public parsers, spot account/sub-account private readback, spot sendTx action encoding, nonce handling, order lifecycle, and reconciliation guards."
+    official_gap: spot_product
+    source_boundary_fixture: tests/fixtures/exchanges/lighter/request_specs/product_line_source_boundary.json
+    current_scope: "Perpetual market metadata/order book and signed transaction request-spec boundaries."
+    runtime_gap: "No spot market index mapping, spot order book parser, spot account model, or spot tx builder is wired."
+    required_endpoints: [spot_market_stats, spot_market_metadata, spot_order_book, spot_trades, spot_send_tx, spot_account]
+  - operation: get_fees
+    status: project_unimplemented
+    source_type: standard_zero_fee_config_source
+    reason: "Lighter standard account zero-fee/default source is recorded as an offline config boundary; shared get_fees runtime remains project-unimplemented pending premium override config, account tier guard, and account/sub-account scope guard."
+    boundary_fixture: tests/fixtures/exchanges/lighter/request_specs/get_fees_config_source.json
+  - operation: get_balances
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/account_balances_readonly.json
+    reason: "Official private account/balance readback exists via AccountApi.account, but shared get_balances runtime is project-unimplemented pending auth token smoke, account parser, and sub-account mapping."
+  - operation: get_positions
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/account_positions_readonly.json
+    reason: "Official/API/SDK position readback exists via AccountApi.account and account update streams, and the read-only account request-spec fixture is pinned; shared get_positions runtime remains project-unimplemented pending auth token smoke, positions parser, sub-account index mapping, WS/REST reconciliation, and read-only runtime gating."
+  - operation: amend_order
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_modify_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_amend_order_ack, fixture: tests/fixtures/exchanges/lighter/parser/amend_order_ack.json }
+    reason: "Official Lighter sendTx amend lifecycle exists, and request-spec plus ack-parser fixtures are pinned; shared amend_order runtime remains project-unimplemented pending SDK-compatible signed tx, API-key private key/index/nonce handling, post-write reconciliation, and live-dry-run guard."
+  - operation: batch_place_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_batch_place_orders_ack, fixture: tests/fixtures/exchanges/lighter/parser/batch_place_orders_ack.json }
+    source_boundary: { official_surfaces: [/sendTxBatch, /batchOrders], runtime_status: disabled }
+    reason: "Official Lighter /batchOrders and sendTxBatch path exists, and request-spec plus partial ack-parser fixtures are pinned; shared batch_place_orders runtime remains project-unimplemented pending SDK-compatible signed tx, API-key private key/index/nonce handling, post-write reconciliation, and live-dry-run guard."
+  - operation: batch_cancel_orders
+    status: project_unimplemented
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_cancel_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_batch_cancel_orders_ack, fixture: tests/fixtures/exchanges/lighter/parser/batch_cancel_orders_ack.json }
+    source_boundary: { official_surfaces: [/sendTxBatch, /batchOrders], runtime_status: disabled }
+    reason: "Official Lighter /batchOrders and batch_cancel path exists, and request-spec plus partial ack-parser fixtures are pinned; shared batch_cancel_orders runtime remains project-unimplemented pending SDK-compatible signed tx, API-key private key/index/nonce handling, post-write reconciliation, and live-dry-run guard."
 endpoints:
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual, spot]
+    transport: rest
+    method: GET
+    path: /account
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: "Lighter AccountApi.account balance/equity readback is fixture-backed, but shared get_balances runtime remains disabled pending bearer token smoke, account/sub-account parser, precision mapping, and WS/REST reconciliation."
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/account_balances_readonly.json
+  - operation: get_fees
+    product: mixed
+    market_types: [perpetual, spot]
+    transport: rest
+    method: GET
+    path: /trading/trading-fees
+    auth: none
+    rate_limit_bucket: lighter_public
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    reason: "P3 fee boundary: standard-account zero-fee source is fixture-backed; premium/API/HFT overrides require explicit account-type guard before runtime promotion."
+    official_doc: https://docs.lighter.xyz/trading/trading-fees
+    request_spec:
+      fixture: tests/fixtures/exchanges/lighter/request_specs/get_fees_config_source.json
   - operation: symbol_rules
     product: perpetual
     market_types: [perpetual]
@@ -101,7 +183,7 @@ endpoints:
     testnet: true
     support: spec_only
     reason: lighter.order_book_session_spec_only
-  - operation: open_orders
+  - operation: get_open_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -114,9 +196,12 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: lighter.open_orders_auth_token_unverified
-  - operation: positions
+    support: native
+    reason: lighter.get_open_orders_guarded_private_rest
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/account_active_orders_readonly.json
+    response_parser: { status: implemented, parser: parse_lighter_open_orders, fixture: tests/fixtures/exchanges/lighter/parser/account_active_orders_success.json }
+    notes: "Runtime guard: LIGHTER_PRIVATE_REST_ENABLED or RUSTCTA_LIGHTER_PRIVATE_REST_ENABLED plus bearer auth token and account_index."
+  - operation: get_positions
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -129,9 +214,11 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: lighter.positions_auth_token_unverified
-  - operation: recent_fills
+    support: spec_only
+    reason: lighter.positions_requires_auth_token_session_renewal_subaccount_parser_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/account_positions_readonly.json
+    notes: "Offline boundary only: AccountApi.account/account_all_positions source shape is documented, but bearer token renewal and parser wiring are disabled."
+  - operation: get_recent_fills
     product: perpetual
     market_types: [perpetual]
     transport: rest
@@ -144,8 +231,29 @@ endpoints:
     native_batch: false
     atomicity: not_applicable
     testnet: true
-    support: unsupported_unverified
-    reason: lighter.trades_auth_token_unverified
+    support: native
+    reason: lighter.get_recent_fills_guarded_private_rest
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/trades_readonly.json
+    response_parser: { status: implemented, parser: parse_lighter_recent_fills, fixture: tests/fixtures/exchanges/lighter/parser/trades_success.json }
+    notes: "Runtime guard: LIGHTER_PRIVATE_REST_ENABLED or RUSTCTA_LIGHTER_PRIVATE_REST_ENABLED plus bearer auth token and account_index."
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /accountActiveOrders
+    auth: bearer
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    reason: lighter.query_order_guarded_private_rest_filters_account_active_orders
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/account_active_orders_readonly.json
+    response_parser: { status: implemented, parser: parse_lighter_query_order, fixture: tests/fixtures/exchanges/lighter/parser/account_active_orders_success.json }
+    notes: "Runtime guard: LIGHTER_PRIVATE_REST_ENABLED or RUSTCTA_LIGHTER_PRIVATE_REST_ENABLED plus bearer auth token and account_index."
   - operation: place_order
     product: perpetual
     market_types: [perpetual]
@@ -159,7 +267,7 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: true
-    support: unsupported_unverified
+    support: spec_only
     reason: lighter.send_tx_signing_unverified
   - operation: cancel_order
     product: perpetual
@@ -174,7 +282,7 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: true
-    support: unsupported_unverified
+    support: spec_only
     reason: lighter.send_tx_cancel_signing_unverified
   - operation: amend_order
     product: perpetual
@@ -189,8 +297,11 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: true
-    support: unsupported_unverified
-    reason: lighter.send_tx_modify_signing_unverified
+    support: spec_only
+    reason: lighter.amend_requires_signed_tx_builder_nonce_and_reconciliation
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_modify_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_amend_order_ack, fixture: tests/fixtures/exchanges/lighter/parser/amend_order_ack.json }
+    notes: "Offline boundary only: modify_order tx fields and ack fixture are pinned; SDK-compatible signed tx builder, API-key private key/index, nonce handling, reconciliation and live guard are disabled."
   - operation: batch_tx
     product: perpetual
     market_types: [perpetual]
@@ -204,8 +315,11 @@ endpoints:
     native_batch: true
     atomicity: partial
     testnet: true
-    support: unsupported_unverified
-    reason: lighter.send_tx_batch_signing_unverified
+    support: spec_only
+    reason: lighter.batch_place_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_batch_place_orders_ack, fixture: tests/fixtures/exchanges/lighter/parser/batch_place_orders_ack.json }
+    notes: "Offline boundary only: sendTxBatch request shape and partial ack fixture are pinned; SDK-compatible signed tx batch builder, API-key private key/index, nonce handling, partial parser/report, reconciliation and broadcast dry-run guard are disabled."
   - operation: batch_cancel
     product: perpetual
     market_types: [perpetual]
@@ -219,8 +333,62 @@ endpoints:
     native_batch: true
     atomicity: partial
     testnet: true
-    support: unsupported_unverified
-    reason: lighter.send_tx_batch_signing_unverified
+    support: spec_only
+    reason: lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_cancel_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_batch_cancel_orders_ack, fixture: tests/fixtures/exchanges/lighter/parser/batch_cancel_orders_ack.json }
+    notes: "Offline boundary only: batch cancel request shape and partial ack fixture are pinned; SDK-compatible signed tx batch builder, API-key private key/index, nonce handling, partial parser/report, reconciliation and broadcast dry-run guard are disabled."
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTxBatch
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: lighter.batch_place_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_batch_place_orders_ack, fixture: tests/fixtures/exchanges/lighter/parser/batch_place_orders_ack.json }
+    notes: "Offline boundary only: batch place request shape and partial ack fixture are pinned; SDK-compatible signed tx batch builder, API-key private key/index, nonce handling, partial parser/report, reconciliation and broadcast dry-run guard are disabled."
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTxBatch
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    reason: lighter.batch_cancel_requires_signed_tx_batch_builder_nonce_partial_parser_and_dry_run_guard
+    request_spec_fixture: tests/fixtures/exchanges/lighter/request_specs/send_tx_batch_cancel_request_spec_only.json
+    response_parser: { status: fixture_only, parser: parse_lighter_batch_cancel_orders_ack, fixture: tests/fixtures/exchanges/lighter/parser/batch_cancel_orders_ack.json }
+    notes: "Offline boundary only: batch cancel request shape and partial ack fixture are pinned; SDK-compatible signed tx batch builder, API-key private key/index, nonce handling, partial parser/report, reconciliation and broadcast dry-run guard are disabled."
+  - operation: place_order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/lighter/order_list
+    auth: unsupported
+    rate_limit_bucket: lighter_send_tx
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: true
+    support: unsupported
+    reason: lighter.order_list_unsupported
   - operation: cancel_all_orders
     product: perpetual
     market_types: [perpetual]
@@ -234,5 +402,5 @@ endpoints:
     native_batch: false
     atomicity: non_atomic
     testnet: true
-    support: unsupported_unverified
+    support: spec_only
     reason: lighter.cancel_all_orders_signing_unverified

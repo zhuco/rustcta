@@ -5,5 +5,27 @@
   "deposits_withdrawals": "unsupported",
   "private_write_mode": "offline_request_spec_only",
   "private_stream_runtime": "unsupported_until_read_only_live_validation",
-  "rest_reconciliation_fallback": true
+  "rest_reconciliation_fallback": true,
+  "advanced_order_boundaries": {
+    "amend_order": {
+      "status": "unsupported",
+      "runtime_error": "foxbit.amend_order_unsupported",
+      "source_boundary": "current Foxbit Exchange API mapping has single create/cancel request specs but no verified in-place amend or cancel-replace endpoint"
+    },
+    "place_order_list": {
+      "status": "unsupported",
+      "runtime_error": "foxbit.order_list_unsupported",
+      "source_boundary": "no audited OCO/OTO/order-list endpoint can be mapped losslessly into the shared order-list trait"
+    },
+    "batch_place_orders": {
+      "status": "unsupported",
+      "runtime_error": "foxbit.batch_place_orders_unsupported",
+      "source_boundary": "no native batch place endpoint is verified for the current Foxbit spot profile"
+    },
+    "batch_cancel_orders": {
+      "status": "unsupported",
+      "runtime_error": "foxbit.batch_cancel_orders_unsupported",
+      "source_boundary": "no native cancel-by-list endpoint is verified for the current Foxbit spot profile"
+    }
+  }
 }

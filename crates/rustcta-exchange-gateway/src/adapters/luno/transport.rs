@@ -8,6 +8,8 @@ use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
 use rustcta_types::{ExchangeError, ExchangeErrorClass, ExchangeId};
 use serde_json::{json, Value};
 
+use super::signing::luno_basic_auth_header;
+
 #[derive(Clone)]
 pub struct LunoPublicRest {
     exchange_id: ExchangeId,
@@ -52,6 +54,29 @@ impl LunoPublicRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_private_get(
+        &self,
+        api_key_id: &str,
+        api_key_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let response = self
+            .http
+            .get(build_url(&self.rest_base_url, endpoint, params))
+            .header(
+                reqwest::header::AUTHORIZATION,
+                luno_basic_auth_header(api_key_id, api_key_secret)?,
+            )
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 pub fn public_get_request_spec(path: &str, query: Value) -> Value {
@@ -74,6 +99,19 @@ pub fn basic_auth_form_request_spec(method: &str, path: &str, form: Value) -> Va
             "Content-Type": "application/x-www-form-urlencoded"
         },
         "form": form
+    })
+}
+
+pub fn basic_auth_get_request_spec(path: &str, query: Value) -> Value {
+    json!({
+        "method": "GET",
+        "path": path,
+        "auth": "http_basic_api_key",
+        "headers": {
+            "Authorization": "Basic <redacted>",
+            "Accept": "application/json"
+        },
+        "query": query
     })
 }
 

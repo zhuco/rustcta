@@ -1,0 +1,30 @@
+{
+  "exchange": "paymium",
+  "operation": "get_recent_fills",
+  "request_spec_only": false,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/user/orders",
+  "auth": "hmac",
+  "credential_scope": "read_only",
+  "runtime": "env_gated_PAYMIUM_PRIVATE_REST_ENABLED",
+  "requires": [
+    "PAYMIUM_PRIVATE_REST_ENABLED",
+    "PAYMIUM_API_KEY",
+    "PAYMIUM_API_SECRET",
+    "symbol",
+    "context.tenant_id",
+    "context.account_id"
+  ],
+  "headers_shape": [
+    "Api-Key",
+    "Api-Nonce",
+    "Api-Signature"
+  ],
+  "body_or_query_shape": {
+    "scope": "user_order_history",
+    "currency": "EUR"
+  },
+  "source_boundary": "Paymium BTC/EUR recent fills are derived from read-only user order trade rows when private REST is env-gated on; trading mutations remain offline.",
+  "response_fixture": "tests/fixtures/exchanges/paymium/recent_fills_success.json"
+}

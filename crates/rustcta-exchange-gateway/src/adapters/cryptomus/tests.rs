@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, OrderBookRequest, PlaceOrderRequest,
-    PublicStreamKind, PublicStreamSubscription, RequestContext, SymbolRulesRequest, SymbolScope,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, CapabilitySupport, ExchangeApiError,
+    ExchangeClient, OpenOrdersRequest, OrderBookRequest, OrderListConditionalLeg, OrderListLegType,
+    OrderListRequest, PlaceOrderRequest, PublicStreamKind, PublicStreamSubscription,
+    QueryOrderRequest, RecentFillsRequest, RequestContext, SymbolRulesRequest, SymbolScope,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderStatus,
@@ -30,6 +33,8 @@ struct SeenRequest {
     method: String,
     path: String,
     query: HashMap<String, String>,
+    headers: HashMap<String, String>,
+    body: String,
 }
 
 fn cryptomus_fixture(name: &str) -> Value {
@@ -113,10 +118,19 @@ fn capabilities_should_keep_payment_and_private_rails_disabled_by_default() {
     assert!(!capabilities.supports_place_order);
     assert!(!capabilities.supports_private_streams);
     assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_cancel_all_orders);
 
     let boundary = cryptomus_fixture("unsupported_boundary.json");
     assert_eq!(boundary["payment_api_in_exchange_adapter"], false);
     assert_eq!(boundary["payout_api_in_exchange_adapter"], false);
+    assert_eq!(boundary["advanced_order_runtime"], false);
+    assert_eq!(
+        boundary["unsupported_operations"]["batch_place_orders"],
+        "cryptomus.batch_place_orders_unsupported"
+    );
 }
 
 #[test]
@@ -234,6 +248,131 @@ async fn private_methods_should_stay_unsupported_without_explicit_enablement() {
 }
 
 #[tokio::test]
+async fn advanced_orders_should_remain_explicitly_unsupported() {
+    let adapter = CryptomusGatewayAdapter::new(CryptomusGatewayConfig {
+        api_key: Some("fixture-api-key".to_string()),
+        user_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+        enabled_private_rest: true,
+        ..CryptomusGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert!(!capabilities.supports_cancel_all_orders);
+    assert!(matches!(
+        capabilities.capabilities_v2.batch_place_orders.support,
+        CapabilitySupport::Unsupported { .. }
+    ));
+    assert!(matches!(
+        capabilities.capabilities_v2.batch_cancel_orders.support,
+        CapabilitySupport::Unsupported { .. }
+    ));
+
+    let amend_error = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend"),
+            symbol: symbol(),
+            client_order_id: None,
+            exchange_order_id: Some("ORDER-1".to_string()),
+            new_client_order_id: Some("cryptomus-amend-new".to_string()),
+            new_quantity: "0.02".to_string(),
+        })
+        .await
+        .expect_err("amend unsupported");
+    assert!(matches!(
+        amend_error,
+        ExchangeApiError::Unsupported {
+            operation: "cryptomus.amend_order_unsupported"
+        }
+    ));
+
+    let order_list_error = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("oco"),
+            symbol: symbol(),
+            list_client_order_id: Some("cryptomus-oco".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.01".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::Limit,
+                price: Some("67000".to_string()),
+                stop_price: None,
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("cryptomus-oco-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("63000".to_string()),
+                stop_price: Some("64000".to_string()),
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("cryptomus-oco-below".to_string()),
+            },
+        })
+        .await
+        .expect_err("order-list unsupported");
+    assert!(matches!(
+        order_list_error,
+        ExchangeApiError::Unsupported {
+            operation: "cryptomus.order_list_unsupported"
+        }
+    ));
+
+    let batch_place_error = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: Vec::new(),
+        })
+        .await
+        .expect_err("batch place unsupported");
+    assert!(matches!(
+        batch_place_error,
+        ExchangeApiError::Unsupported {
+            operation: "cryptomus.batch_place_orders_unsupported"
+        }
+    ));
+
+    let batch_cancel_error = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: Vec::new(),
+        })
+        .await
+        .expect_err("batch cancel unsupported");
+    assert!(matches!(
+        batch_cancel_error,
+        ExchangeApiError::Unsupported {
+            operation: "cryptomus.batch_cancel_orders_unsupported"
+        }
+    ));
+
+    let cancel_all_error = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol()),
+        })
+        .await
+        .expect_err("cancel-all unsupported");
+    assert!(matches!(
+        cancel_all_error,
+        ExchangeApiError::Unsupported {
+            operation: "cryptomus.cancel_all_orders_unsupported"
+        }
+    ));
+}
+
+#[tokio::test]
 async fn place_order_should_route_signed_limit_request_when_explicitly_enabled() {
     let (base_url, seen) = spawn_rest_server(vec![json!({
         "order_id": "ORDER-1"
@@ -270,6 +409,118 @@ async fn place_order_should_route_signed_limit_request_when_explicitly_enabled()
     let request = seen.lock().unwrap()[0].clone();
     assert_eq!(request.method, "POST");
     assert_eq!(request.path, "/v2/user-api/exchange/orders");
+    assert_eq!(
+        request.headers.get("userid").map(String::as_str),
+        Some("00000000-0000-0000-0000-000000000000")
+    );
+    assert!(request.headers.contains_key("sign"));
+    assert!(request
+        .body
+        .contains("\"client_order_id\":\"CLIENT-LIMIT-1\""));
+}
+
+#[tokio::test]
+async fn cancel_and_readbacks_should_route_signed_rest_when_explicitly_enabled() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({ "order_id": "ORDER-1" }),
+        cryptomus_fixture("orders_active.json"),
+        cryptomus_fixture("orders_active.json"),
+        cryptomus_fixture("orders_history.json"),
+    ])
+    .await;
+    let adapter = CryptomusGatewayAdapter::new(CryptomusGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("fixture-api-key".to_string()),
+        user_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+        enabled_private_rest: true,
+        ..CryptomusGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel"),
+            symbol: symbol(),
+            client_order_id: Some("CLIENT-LIMIT-1".to_string()),
+            exchange_order_id: Some("ORDER-1".to_string()),
+        })
+        .await
+        .expect("cancel");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+
+    let query = adapter
+        .query_order(QueryOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("query"),
+            symbol: symbol(),
+            client_order_id: None,
+            exchange_order_id: Some("ORDER-1".to_string()),
+        })
+        .await
+        .expect("query");
+    assert_eq!(
+        query.order.unwrap().exchange_order_id.as_deref(),
+        Some("ORDER-1")
+    );
+
+    let open = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("open"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol()),
+            page: Some(rustcta_exchange_api::PageRequest::first_page(250)),
+        })
+        .await
+        .expect("open");
+    assert_eq!(open.orders.len(), 1);
+
+    let fills = adapter
+        .get_recent_fills(RecentFillsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fills"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol()),
+            client_order_id: None,
+            exchange_order_id: Some("ORDER-2".to_string()),
+            from_trade_id: None,
+            start_time: None,
+            end_time: None,
+            limit: Some(250),
+            page: None,
+        })
+        .await
+        .expect("fills");
+    assert_eq!(fills.fills[0].fill_id.as_deref(), Some("TXN-1"));
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0].method, "DELETE");
+    assert_eq!(seen[0].path, "/v2/user-api/exchange/orders/ORDER-1");
+    assert_eq!(seen[1].method, "GET");
+    assert_eq!(seen[1].path, "/v2/user-api/exchange/orders");
+    assert_eq!(
+        seen[1].query.get("market").map(String::as_str),
+        Some("BTC_USDT")
+    );
+    assert_eq!(
+        seen[1].query.get("order_id").map(String::as_str),
+        Some("ORDER-1")
+    );
+    assert_eq!(seen[2].path, "/v2/user-api/exchange/orders");
+    assert_eq!(seen[2].query.get("limit").map(String::as_str), Some("100"));
+    assert_eq!(seen[3].path, "/v2/user-api/exchange/orders/history");
+    assert_eq!(seen[3].query.get("limit").map(String::as_str), Some("100"));
+    for request in seen.iter() {
+        assert_eq!(
+            request.headers.get("userid").map(String::as_str),
+            Some("00000000-0000-0000-0000-000000000000")
+        );
+        assert!(request.headers.contains_key("sign"));
+    }
 }
 
 #[test]
@@ -375,6 +626,17 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
     let method = request_parts.next().unwrap_or_default().to_string();
     let target = request_parts.next().unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+    let (header_text, body) = request_text
+        .split_once("\r\n\r\n")
+        .unwrap_or((request_text, ""));
+    let headers = header_text
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
     let query = query_text
         .split('&')
         .filter(|pair| !pair.is_empty())
@@ -387,5 +649,7 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         method,
         path: path.to_string(),
         query,
+        headers,
+        body: body.to_string(),
     }
 }
