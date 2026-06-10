@@ -1,5 +1,6 @@
 pub mod account;
 pub mod account_control;
+pub mod adapter;
 pub mod capabilities;
 pub mod client;
 pub mod context;
@@ -16,6 +17,7 @@ pub const EXCHANGE_API_SCHEMA_VERSION: u16 = 1;
 
 pub use account::*;
 pub use account_control::*;
+pub use adapter::*;
 pub use capabilities::*;
 pub use client::*;
 pub use context::*;

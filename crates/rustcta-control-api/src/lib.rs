@@ -747,7 +747,9 @@ mod tests {
             [
                 "2026-06-07T12:00:00Z INFO strategy booted",
                 "2026-06-07T12:00:01Z DEBUG heartbeat ok",
-                "2026-06-07T12:00:02Z WARN stale book",
+                "\u{1b}[2m2026-06-07T12:00:02.000000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::cross_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m cross-arb live runner status strategy_id=cross_arb_live",
+                "\u{1b}[2m2026-06-07T12:00:02.500000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::cross_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m cross-arb trade event action=cross_arb_open lifecycle=open symbol=ESPORTS/USDT",
+                "2026-06-07 12:00:02.123 WARN stale book",
                 "2026-06-07T12:00:03Z ERROR token appeared in source log",
             ]
             .join("\n"),
@@ -756,7 +758,7 @@ mod tests {
         let app = router(
             ControlApiState::empty_local()
                 .with_strategy_log_path(&path)
-                .with_strategy_log_tail_limits(2, 4096),
+                .with_strategy_log_tail_limits(3, 4096),
         );
 
         let response = app
@@ -776,14 +778,27 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["configured"], true);
         assert_eq!(value["readable"], true);
-        assert_eq!(value["event_count"], 2);
-        assert_eq!(value["events"][0]["level"], "warn");
+        assert_eq!(value["event_count"], 3);
+        assert_eq!(value["events"][0]["level"], "info");
         assert_eq!(
             value["events"][0]["message"],
-            "2026-06-07T12:00:02Z WARN stale book"
+            "2026-06-07T12:00:02.500000Z  INFO rustcta::cross_arb_live_runner: cross-arb trade event action=cross_arb_open lifecycle=open symbol=ESPORTS/USDT"
         );
-        assert_eq!(value["events"][1]["level"], "error");
-        assert_eq!(value["events"][1]["message"], "[redacted log line]");
+        assert_eq!(
+            value["events"][0]["occurred_at"],
+            "2026-06-07T12:00:02.500Z"
+        );
+        assert_eq!(value["events"][1]["level"], "warn");
+        assert_eq!(
+            value["events"][1]["message"],
+            "2026-06-07 12:00:02.123 WARN stale book"
+        );
+        assert_eq!(
+            value["events"][1]["occurred_at"],
+            "2026-06-07T12:00:02.123Z"
+        );
+        assert_eq!(value["events"][2]["level"], "error");
+        assert_eq!(value["events"][2]["message"], "[redacted log line]");
         let text = value.to_string();
         assert!(!text.contains("token appeared"));
         assert!(!text.contains(path.to_string_lossy().as_ref()));

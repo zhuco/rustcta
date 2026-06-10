@@ -925,6 +925,34 @@ select {
   white-space: nowrap;
 }
 
+.latency-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.compact-field {
+  display: grid;
+  gap: 3px;
+  color: #617083;
+  font-size: 11px;
+}
+
+.compact-field select,
+.compact-field input {
+  min-width: 120px;
+  min-height: 30px;
+  border: 1px solid #cbd5df;
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: #fff;
+  color: #18212f;
+}
+
+.numeric-compact-field input {
+  width: 86px;
+  min-width: 86px;
+}
+
 .pager span {
   color: #617083;
   font-size: 12px;
@@ -1006,6 +1034,7 @@ select {
   height: 560px;
   max-height: 560px;
   align-content: start;
+  overflow: auto;
 }
 
 .log-line {
@@ -1016,7 +1045,10 @@ select {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 8px;
-  font-size: 12px;
+  font-size: 15px;
+  line-height: 1.45;
+  min-width: max-content;
+  white-space: nowrap;
 }
 
 .log-line span,
@@ -1026,26 +1058,38 @@ select {
 
 .log-line p {
   margin: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 .log-info {
-  color: #2f3b4a;
+  color: #ffffff;
 }
 
 .log-success {
-  color: #176b4d;
-  background: #f0fbf6;
+  color: #00b050;
+  background: transparent;
+}
+
+.log-profit {
+  color: #00b050;
+  background: transparent;
+}
+
+.log-loss {
+  color: #d32f2f;
+  background: transparent;
 }
 
 .log-warn {
-  color: #8a5a12;
-  background: #fffaf0;
+  color: #f2c94c;
+  background: transparent;
 }
 
 .log-error {
-  color: #a11d33;
-  background: #fff1f2;
+  color: #ff1744;
+  background: transparent;
+  font-weight: 700;
 }
 
 .compact-table table {
@@ -1058,9 +1102,9 @@ select {
 }
 
 .fixed-opportunity-table {
-  height: 650px;
-  max-height: 650px;
-  min-height: 650px;
+  height: 212px;
+  max-height: 212px;
+  min-height: 212px;
   overflow: auto;
 }
 
@@ -1083,14 +1127,20 @@ select {
 }
 
 .fixed-result-table {
-  height: 300px;
-  max-height: 300px;
-  min-height: 300px;
+  height: 220px;
+  max-height: 220px;
+  min-height: 220px;
   overflow: auto;
 }
 
 .fixed-result-table table {
-  min-width: 1120px;
+  min-width: 1480px;
+  table-layout: auto;
+}
+
+.no-wrap-table th,
+.no-wrap-table td {
+  white-space: nowrap;
 }
 
 .fixed-tab-panel {
@@ -1929,15 +1979,15 @@ body {
 }
 
 .table-wrap.fixed-opportunity-table {
-  height: 650px;
-  min-height: 650px;
-  max-height: 650px;
+  height: 212px;
+  min-height: 212px;
+  max-height: 212px;
 }
 
 .table-wrap.fixed-result-table {
-  height: 300px;
-  min-height: 300px;
-  max-height: 300px;
+  height: 220px;
+  min-height: 220px;
+  max-height: 220px;
 }
 
 .table-wrap.fixed-tab-table {
@@ -1953,6 +2003,39 @@ table {
 
 .compact-table table {
   min-width: 1080px;
+}
+
+.compact-table.fixed-result-table table {
+  min-width: 1480px;
+}
+
+.latency-table {
+  max-height: 360px;
+}
+
+.latency-table table {
+  min-width: 1220px;
+}
+
+.latency-detail-cell {
+  max-width: 520px;
+}
+
+.latency-detail-cell div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-arb .compact-field {
+  color: #9fb2c0;
+}
+
+.cross-arb .compact-field select,
+.cross-arb .compact-field input {
+  border-color: #33485a;
+  background: #101a23;
+  color: #d7e4ec;
 }
 
 .compact-table.detail-table table {
@@ -2274,22 +2357,33 @@ tbody tr:hover td,
 }
 
 .log-info {
-  color: #d7e4ec;
+  color: #ffffff;
 }
 
 .log-success {
-  color: #9af0bf;
-  background: #10241d;
+  color: #00d26a;
+  background: transparent;
+}
+
+.log-profit {
+  color: #00d26a;
+  background: transparent;
+}
+
+.log-loss {
+  color: #ff4d5e;
+  background: transparent;
 }
 
 .log-warn {
-  color: #f1cb76;
-  background: #241f13;
+  color: #ffd54f;
+  background: transparent;
 }
 
 .log-error {
-  color: #ff9ea9;
-  background: #2b1720;
+  color: #ff1744;
+  background: transparent;
+  font-weight: 700;
 }
 
 .profit.positive {

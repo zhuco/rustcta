@@ -14,6 +14,9 @@ Supported:
   recent fills.
 - Contract private REST: balances, open positions, tiered fee rate, place order,
   cancel order, cancel all by symbol, query order, open orders, and recent fills.
+- Contract public REST funding rate through the shared `get_funding_rates` API.
+- Contract account control supports shared `set_leverage`; the adapter applies
+  the configured leverage to both long and short MEXC position types.
 - Public WebSocket subscription specs and parsers for Spot `bookTicker` 10ms,
   aggregated depth 10ms, limit depth 5/10/20, and Contract depth topics.
 - Binance-like HMAC-SHA256 query signing with `X-MEXC-APIKEY`.
@@ -29,6 +32,9 @@ Explicitly unsupported:
 
 - Private WebSocket runtime. Private state reconciliation uses REST readbacks.
 - Shared amend order and order-list/OCO methods.
+- Shared position-mode mutation. No reliable unified MEXC contract position-mode
+  endpoint is exposed until official docs and fixtures are verified, so
+  `supports_position_mode_change` remains false.
 - Standard options are `交易所不支持合约` under the current Spot/Contract API
   references reviewed for this adapter.
 - Transfers, deposits, withdrawals, and account-management endpoints.
@@ -63,6 +69,8 @@ Machine-readable mapping:
 | query order | `GET /api/v3/order` | `GET /api/v1/private/order/get/{order_id}` |
 | open orders | `GET /api/v3/openOrders` | `GET /api/v1/private/order/list/open_orders/{symbol}` |
 | recent fills | `GET /api/v3/myTrades` | `GET /api/v1/private/order/list/order_deals` |
+| funding rate | n/a | `GET /api/v1/contract/funding_rate/{symbol}` |
+| set leverage | n/a | `POST /api/v1/private/position/change_leverage` |
 
 ## WebSocket 行情
 
@@ -86,6 +94,8 @@ Machine-readable mapping:
 - Recent fills pagination: `fromId`, `startTime`, `endTime`, `limit <= 1000`.
 - Batch place: composed sequential planner, non-atomic, max 20, partial failure
   possible. Batch cancel/cancel-all are native same-symbol partial operations.
+- Account control: `supports_leverage=true` when private REST is enabled;
+  `supports_position_mode_change=false`.
 
 ## Runtime Policies
 
@@ -115,6 +125,8 @@ Machine-readable mapping:
 
 ```bash
 cargo test -p rustcta-exchange-gateway mexc --lib --message-format short
+cargo test -p rustcta-exchange-gateway mexc_adapter_should_load_perpetual_funding_rate_from_contract_public_rest -- --nocapture
+cargo test -p rustcta-exchange-gateway mexc_adapter_should_set_perpetual_leverage_for_both_position_types -- --nocapture
 python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/mexc/endpoint_mapping.yaml
 python3 scripts/audit_gateway_adapters.py --exchange mexc
 ```

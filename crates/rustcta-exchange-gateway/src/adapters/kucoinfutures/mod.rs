@@ -8,13 +8,14 @@ use rustcta_exchange_api::{
     BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
     CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
     CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, HeartbeatCapability, HistoryCapability,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, ReconnectCapability, StreamAuthCapability,
-    StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
+    FundingRatesResponse, HeartbeatCapability, HistoryCapability, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse,
+    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, ReconnectCapability, StreamAuthCapability, StreamHeartbeatDirection,
+    StreamResyncCapability, StreamRuntimeCapability, SymbolRulesRequest, SymbolRulesResponse,
+    TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -216,6 +217,7 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
         capabilities.supports_balances = self.config.private_rest_enabled();
         capabilities.supports_positions = self.config.private_rest_enabled();
         capabilities.supports_fees = self.config.private_rest_enabled();
+        capabilities.supports_funding_rates = true;
         capabilities.supports_place_order = self.config.private_rest_enabled();
         capabilities.supports_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
@@ -401,6 +403,13 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         self.get_fees_impl(request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.get_funding_rates_impl(request).await
     }
 
     async fn place_order(

@@ -32,17 +32,19 @@ pub(crate) enum ControlPanelView {
     Workspace,
     SpotArb,
     CrossArb,
+    ExchangeLatency,
     FundingArb,
     ApiKeys,
 }
 
 impl ControlPanelView {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 6] = [
         Self::Workspace,
         Self::SpotArb,
         Self::CrossArb,
-        Self::FundingArb,
         Self::ApiKeys,
+        Self::ExchangeLatency,
+        Self::FundingArb,
     ];
 
     pub(crate) fn nav_label_key(self) -> &'static str {
@@ -50,6 +52,7 @@ impl ControlPanelView {
             Self::Workspace => "nav_workspace",
             Self::SpotArb => "nav_spot_arb",
             Self::CrossArb => "nav_cross_arb",
+            Self::ExchangeLatency => "nav_exchange_latency",
             Self::FundingArb => "nav_funding_arb",
             Self::ApiKeys => "nav_api_keys",
         }
@@ -60,6 +63,7 @@ impl ControlPanelView {
             Self::Workspace => "workspace",
             Self::SpotArb => "spot-arb",
             Self::CrossArb => "cross-arb",
+            Self::ExchangeLatency => "exchange-latency",
             Self::FundingArb => "funding-arb",
             Self::ApiKeys => "api-keys",
         }
@@ -70,6 +74,7 @@ impl ControlPanelView {
             "workspace" => Some(Self::Workspace),
             "spot-arb" | "spot_arb" => Some(Self::SpotArb),
             "cross-arb" | "cross_arb" => Some(Self::CrossArb),
+            "exchange-latency" | "exchange_latency" => Some(Self::ExchangeLatency),
             "funding-arb" | "funding_arb" => Some(Self::FundingArb),
             "api-keys" | "api_keys" => Some(Self::ApiKeys),
             "legacy" | "overview" | "exchanges" | "symbols" | "plans" | "risk" | "runtime"
@@ -188,6 +193,78 @@ pub(crate) struct GatewayExchangeRowData {
     pub(crate) market: String,
     pub(crate) status: String,
     pub(crate) last_error: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ExchangeLatencyTestData {
+    pub(crate) mode: String,
+    pub(crate) batch_size: String,
+    pub(crate) timeout_ms: String,
+    pub(crate) exchange_count: usize,
+    pub(crate) elapsed_ms: String,
+    pub(crate) rows: Vec<ExchangeLatencyRowData>,
+}
+
+impl ExchangeLatencyTestData {
+    pub(crate) fn from_value(value: &Value, lang: Language) -> Self {
+        Self {
+            mode: text_at(value, "mode", lang),
+            batch_size: text_at(value, "batch_size", lang),
+            timeout_ms: text_at(value, "timeout_ms", lang),
+            exchange_count: value
+                .get("exchange_count")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as usize,
+            elapsed_ms: text_at(value, "elapsed_ms", lang),
+            rows: as_array(value.get("rows").unwrap_or(&Value::Null))
+                .iter()
+                .map(|row| ExchangeLatencyRowData::from_value(row, lang))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ExchangeLatencyRowData {
+    pub(crate) exchange: String,
+    pub(crate) label: String,
+    pub(crate) endpoint_source: String,
+    pub(crate) rest_status: String,
+    pub(crate) rest_latency_ms: String,
+    pub(crate) rest_endpoint: String,
+    pub(crate) rest_error: String,
+    pub(crate) ws_status: String,
+    pub(crate) ws_latency_ms: String,
+    pub(crate) ws_endpoint: String,
+    pub(crate) ws_error: String,
+}
+
+impl ExchangeLatencyRowData {
+    fn from_value(value: &Value, lang: Language) -> Self {
+        let rest = value.get("rest").unwrap_or(&Value::Null);
+        let websocket = value.get("websocket").unwrap_or(&Value::Null);
+        Self {
+            exchange: text_at(value, "exchange", lang),
+            label: text_at(value, "label", lang),
+            endpoint_source: text_at(value, "endpoint_source", lang),
+            rest_status: text_at(rest, "status", lang),
+            rest_latency_ms: latency_text(rest),
+            rest_endpoint: text_at(rest, "endpoint", lang),
+            rest_error: text_at(rest, "error", lang),
+            ws_status: text_at(websocket, "status", lang),
+            ws_latency_ms: latency_text(websocket),
+            ws_endpoint: text_at(websocket, "endpoint", lang),
+            ws_error: text_at(websocket, "error", lang),
+        }
+    }
+}
+
+fn latency_text(value: &Value) -> String {
+    value
+        .get("latency_ms")
+        .and_then(Value::as_u64)
+        .map(|latency| format!("{latency} ms"))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1486,7 +1563,6 @@ impl SpotArbSourceData {
 pub(crate) struct CrossArbPanelData {
     pub(crate) target_refresh_ms: String,
     pub(crate) latest_event_at: String,
-    pub(crate) data_source: String,
     pub(crate) event_dir: String,
     pub(crate) event_file_count: usize,
     pub(crate) valid_events: String,
@@ -1498,8 +1574,6 @@ pub(crate) struct CrossArbPanelData {
     pub(crate) estimated_edge_usdt: f64,
     pub(crate) realized_close_pct: f64,
     pub(crate) realized_profit_usdt: f64,
-    pub(crate) source_tone: &'static str,
-    pub(crate) source_label: String,
     pub(crate) settings_path: String,
     pub(crate) settings_symbol_count: usize,
     pub(crate) instrument_known_symbols: String,
@@ -1535,9 +1609,13 @@ impl CrossArbEventSummaryData {
             .iter()
             .filter(|row| text_at(row, "private_kind", lang).eq_ignore_ascii_case("fill"))
             .count();
-        let private_balance_rows = private_events
+        let balance_events = private_events
             .iter()
             .filter(|row| text_at(row, "private_kind", lang).eq_ignore_ascii_case("balance"))
+            .count();
+        let private_balance_rows = private_events
+            .iter()
+            .filter(|row| private_user_event_kind(row, lang))
             .filter(|row| crate::utils::row_matches_enabled_exchange(row, &enabled_exchanges))
             .cloned()
             .collect::<Vec<_>>();
@@ -1551,11 +1629,21 @@ impl CrossArbEventSummaryData {
             + risk_events.len();
         Self {
             fill_events,
-            balance_events: private_balance_rows.len(),
+            balance_events,
             error_events,
             private_balance_rows,
         }
     }
+}
+
+fn private_user_event_kind(row: &Value, lang: Language) -> bool {
+    matches!(
+        text_at(row, "private_kind", lang)
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "balance" | "fill" | "order" | "trade"
+    )
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1650,8 +1738,12 @@ impl CrossArbSettingsFormData {
             ),
             min_open_spread: pct_setting_text_any(
                 settings,
-                &["min_open_raw_spread", "min_open_spread_pct", "min_open_raw_spread_pct"],
-                0.01,
+                &[
+                    "min_open_raw_spread",
+                    "min_open_spread_pct",
+                    "min_open_raw_spread_pct",
+                ],
+                0.005,
             ),
             min_net_edge: pct_setting_text_any(
                 settings,
@@ -1796,13 +1888,8 @@ impl CrossArbSaveResultData {
 }
 
 impl CrossArbReadinessData {
-    pub(crate) fn from_values(
-        account_readiness: &Value,
-        strategy_readiness: &Value,
-        lang: Language,
-    ) -> Self {
+    pub(crate) fn from_values(account_readiness: &Value, lang: Language) -> Self {
         let account_ready = bool_at(account_readiness, "all_required_credentials_configured");
-        let strategy_ready = bool_at(strategy_readiness, "live_small_ready");
         Self {
             account_text: format!(
                 "{} / {}",
@@ -1819,37 +1906,9 @@ impl CrossArbReadinessData {
                 )
             },
             account_class: if account_ready { "pill" } else { "pill warn" },
-            strategy_text: format!(
-                "{} / {}",
-                text_at(strategy_readiness, "instrument_pairs", lang),
-                text_at(strategy_readiness, "expected_exchange_symbol_pairs", lang)
-            ),
-            strategy_label: if strategy_ready {
-                s(lang, "ready")
-            } else {
-                let missing_rules =
-                    crate::utils::numeric_at(strategy_readiness, "missing_instrument_pairs")
-                        as usize;
-                let missing_books =
-                    crate::utils::numeric_at(strategy_readiness, "missing_market_snapshot_pairs")
-                        as usize;
-                if missing_rules > 0 || missing_books > 0 {
-                    format!(
-                        "{}: {} / {}",
-                        s(lang, "missing_pairs"),
-                        missing_rules,
-                        missing_books
-                    )
-                } else {
-                    let blockers = strategy_readiness
-                        .get("blockers")
-                        .and_then(Value::as_array)
-                        .map(Vec::len)
-                        .unwrap_or_default();
-                    format!("{}: {}", s(lang, "readiness_blockers"), blockers)
-                }
-            },
-            strategy_class: if strategy_ready { "pill" } else { "pill warn" },
+            strategy_text: String::new(),
+            strategy_label: String::new(),
+            strategy_class: "pill neutral",
         }
     }
 }
@@ -1863,12 +1922,9 @@ impl CrossArbPanelData {
         instrument_feasibility: &Value,
         lang: Language,
     ) -> Self {
-        let data_source = text_at(cross_arb, "data_source", lang);
-        let online = bool_at(cross_arb, "online");
         Self {
             target_refresh_ms: text_at(cross_arb, "target_refresh_ms", lang),
             latest_event_at: text_at(cross_arb, "latest_event_at", lang),
-            data_source: data_source.clone(),
             event_dir: text_at(cross_arb, "event_dir", lang),
             event_file_count: cross_arb
                 .get("files")
@@ -1878,30 +1934,12 @@ impl CrossArbPanelData {
             valid_events: text_at(summary, "valid_events", lang),
             parse_errors: text_at(summary, "parse_errors", lang),
             can_open_opportunities: text_at(summary, "can_open_opportunities", lang),
-            market_can_open_opportunities: text_at(
-                summary,
-                "market_can_open_opportunities",
-                lang,
-            ),
+            market_can_open_opportunities: text_at(summary, "market_can_open_opportunities", lang),
             open_signals: text_at(summary, "open_signals", lang),
             order_events: text_at(summary, "order_events", lang),
             estimated_edge_usdt: crate::utils::numeric_at(summary, "estimated_edge_usdt"),
             realized_close_pct: crate::utils::numeric_at(summary, "realized_close_pct"),
             realized_profit_usdt: crate::utils::numeric_at(profit_summary, "realized_profit_usdt"),
-            source_tone: if online {
-                "pill"
-            } else if data_source == "historical_events" {
-                "pill warn"
-            } else {
-                "pill bad"
-            },
-            source_label: if online {
-                s(lang, "online")
-            } else if data_source == "historical_events" {
-                s(lang, "historical_mode")
-            } else {
-                s(lang, "offline")
-            },
             settings_path: text_at(settings, "path", lang),
             settings_symbol_count: settings
                 .get("symbols")
@@ -1962,7 +2000,6 @@ pub(crate) struct CrossArbExchangeConsoleRowData {
     pub(crate) taker_volume: String,
     pub(crate) order_count: usize,
     pub(crate) taker_success_rate: String,
-    pub(crate) latency: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1971,20 +2008,12 @@ pub(crate) struct CrossArbExchangeStatusCardData {
     pub(crate) status_class: &'static str,
     pub(crate) status_label: String,
     pub(crate) subscriptions: String,
-    pub(crate) messages: String,
-    pub(crate) latency: String,
     pub(crate) server_offset: String,
-    pub(crate) book_count: String,
-    pub(crate) last_update: String,
     pub(crate) reconnects: String,
 }
 
 impl CrossArbExchangeConsoleRowData {
-    pub(crate) fn from_exchanges(
-        exchanges: &[String],
-        private_events: &[Value],
-        lang: Language,
-    ) -> Vec<Self> {
+    pub(crate) fn from_exchanges(exchanges: &[String], private_events: &[Value]) -> Vec<Self> {
         exchanges
             .iter()
             .map(|exchange| Self {
@@ -2004,7 +2033,6 @@ impl CrossArbExchangeConsoleRowData {
                     private_events,
                     exchange,
                 ),
-                latency: crate::utils::cross_arb_exchange_latency(private_events, exchange, lang),
             })
             .collect()
     }
@@ -2014,8 +2042,8 @@ impl CrossArbExchangeStatusCardData {
     pub(crate) fn from_values(
         exchanges: &[String],
         exchange_status: &[Value],
-        market_snapshots: &[Value],
         console_rows: &[CrossArbExchangeConsoleRowData],
+        private_events: &[Value],
         symbol_count: usize,
         lang: Language,
     ) -> Vec<Self> {
@@ -2029,54 +2057,30 @@ impl CrossArbExchangeStatusCardData {
                 let fallback_console = console_rows.iter().find(|row| {
                     canonical_exchange_name(&row.exchange) == canonical_exchange_name(exchange)
                 });
-                let messages = status
-                    .and_then(|row| row.get("message_count"))
-                    .map(|value| value_text(value, lang))
-                    .filter(|value| value != "-")
-                    .unwrap_or_else(|| {
-                        fallback_console
-                            .map(|row| row.order_count.to_string())
-                            .unwrap_or_else(|| "0".to_string())
-                    });
                 let subscriptions = status
                     .and_then(|row| row.get("streamed_symbol_count"))
                     .map(|value| value_text(value, lang))
                     .filter(|value| value != "-")
                     .unwrap_or_else(|| symbol_count.to_string());
-                let latency = status
-                    .and_then(|row| {
-                        row.get("last_latency_ms")
-                            .or_else(|| row.get("max_latency_ms"))
-                            .and_then(Value::as_f64)
-                    })
-                    .map(crate::utils::format_ms)
-                    .or_else(|| fallback_console.map(|row| row.latency.clone()))
-                    .unwrap_or_else(|| "-".to_string());
                 let server_offset = status
                     .and_then(|row| row.get("server_time_offset_ms").and_then(Value::as_i64))
                     .map(|value| format!("{value}ms"))
-                    .unwrap_or_else(|| "-".to_string());
-                let book_count = market_snapshots
-                    .iter()
-                    .filter(|row| {
-                        canonical_exchange_name(&text_at(row, "exchange", Language::En))
-                            == canonical_exchange_name(exchange)
-                    })
-                    .count()
-                    .to_string();
-                let last_update = status
-                    .map(|row| text_at(row, "last_message_at", lang))
-                    .filter(|value| value != "-")
                     .unwrap_or_else(|| "-".to_string());
                 let reconnects = status
                     .and_then(|row| row.get("disconnect_count"))
                     .map(|value| value_text(value, lang))
                     .filter(|value| value != "-")
                     .unwrap_or_else(|| "0".to_string());
+                let private_connected = private_events.iter().any(|row| {
+                    canonical_exchange_name(&text_at(row, "exchange", Language::En))
+                        == canonical_exchange_name(exchange)
+                        && private_user_event_kind(row, Language::En)
+                });
                 let online = status.is_some()
                     || fallback_console
-                        .map(|row| row.order_count > 0 || row.latency != "-")
-                        .unwrap_or(false);
+                        .map(|row| row.order_count > 0)
+                        .unwrap_or(false)
+                    || private_connected;
                 Self {
                     exchange: exchange.clone(),
                     status_class: if online { "pill" } else { "pill warn" },
@@ -2086,11 +2090,7 @@ impl CrossArbExchangeStatusCardData {
                         s(lang, "offline")
                     },
                     subscriptions,
-                    messages,
-                    latency,
                     server_offset,
-                    book_count,
-                    last_update,
                     reconnects,
                 }
             })
@@ -2118,16 +2118,20 @@ impl CrossArbAccountRowData {
                     "pill neutral"
                 };
                 let raw_status = text_at(row, "status", lang);
-                let status_text = if raw_status.trim().is_empty() || raw_status == "-" {
+                let private_connected = private_user_event_kind(row, lang);
+                let status_text = if private_connected {
+                    s(lang, "online")
+                } else if raw_status.trim().is_empty() || raw_status == "-" {
                     s(lang, "configured")
                 } else {
                     raw_status
                 };
-                let status_class = if status_text == "online" {
-                    "pill"
-                } else {
-                    "pill neutral"
-                };
+                let status_class =
+                    if private_connected || status_text.eq_ignore_ascii_case("online") {
+                        "pill"
+                    } else {
+                        "pill neutral"
+                    };
                 let credential_account = if account_id.trim().is_empty() || account_id == "-" {
                     "default".to_string()
                 } else {
@@ -2141,8 +2145,31 @@ impl CrossArbAccountRowData {
                     credential_class,
                     status_text,
                     status_class,
-                    total: crate::utils::money_text(row, "total"),
-                    available: crate::utils::money_text(row, "available"),
+                    total: first_money_text(
+                        row,
+                        &[
+                            "account_console_balance_usdt",
+                            "account_console_balance",
+                            "console_balance_usdt",
+                            "console_balance",
+                            "total_equity_usdt",
+                            "account_equity_usdt",
+                            "account_equity",
+                            "equity",
+                            "usdt_total",
+                            "total",
+                        ],
+                    ),
+                    available: first_money_text(
+                        row,
+                        &[
+                            "available_equity_usdt",
+                            "available_equity",
+                            "usdt_available",
+                            "available",
+                            "free",
+                        ],
+                    ),
                     recorded_at: text_at(row, "recorded_at", lang),
                     credentials_ready,
                     credential_exchange: exchange,
@@ -2298,15 +2325,10 @@ pub(crate) struct CrossArbInstrumentRowData {
     pub(crate) exchange: String,
     pub(crate) canonical_symbol: String,
     pub(crate) exchange_symbol: String,
-    pub(crate) price_tick: String,
-    pub(crate) quantity_step: String,
-    pub(crate) min_qty: String,
-    pub(crate) min_notional: String,
-    pub(crate) required_notional: String,
-    pub(crate) headroom: String,
-    pub(crate) headroom_value: f64,
-    pub(crate) feasibility_label: String,
-    pub(crate) feasibility_class: &'static str,
+    pub(crate) price_precision: String,
+    pub(crate) quantity_precision: String,
+    pub(crate) min_order: String,
+    pub(crate) funding_rate: String,
     pub(crate) status: String,
 }
 
@@ -2314,13 +2336,6 @@ impl CrossArbInstrumentRowData {
     pub(crate) fn from_value_rows(rows: &[Value], lang: Language) -> Vec<Self> {
         rows.iter()
             .map(|row| {
-                let feasibility = row.get("feasibility").unwrap_or(&Value::Null);
-                let known = bool_at(feasibility, "known");
-                let fits_max = bool_at(feasibility, "fits_max");
-                let headroom_value = feasibility
-                    .get("headroom_usdt")
-                    .and_then(Value::as_f64)
-                    .unwrap_or_default();
                 Self {
                     exchange: text_at(row, "exchange", lang),
                     canonical_symbol: text_at(row, "canonical_symbol", lang),
@@ -2330,36 +2345,29 @@ impl CrossArbInstrumentRowData {
                         .map(|value| crate::utils::value_text(value, lang))
                         .filter(|value| value != "-")
                         .unwrap_or_else(|| text_at(row, "exchange_symbol", lang)),
-                    price_tick: text_at(row, "price_tick", lang),
-                    quantity_step: text_at(row, "quantity_step", lang),
-                    min_qty: text_at(row, "min_qty", lang),
-                    min_notional: crate::utils::money_text(row, "min_notional"),
-                    required_notional: feasibility
-                        .get("required_notional_usdt")
+                    price_precision: text_or_fallback(text_at(row, "price_precision", lang), || {
+                        text_at(row, "price_tick", lang)
+                    }),
+                    quantity_precision: text_or_fallback(
+                        text_at(row, "quantity_precision", lang),
+                        || text_at(row, "quantity_step", lang),
+                    ),
+                    min_order: first_nonempty_text(
+                        row,
+                        &[
+                            "min_order",
+                            "min_order_qty",
+                            "min_base_quantity",
+                            "min_qty",
+                            "min_notional",
+                        ],
+                        lang,
+                    ),
+                    funding_rate: row
+                        .get("funding_rate")
                         .and_then(Value::as_f64)
-                        .filter(|value| *value > 0.0)
-                        .map(crate::utils::format_usdt)
-                        .unwrap_or_else(|| "-".to_string()),
-                    headroom: feasibility
-                        .get("headroom_usdt")
-                        .and_then(Value::as_f64)
-                        .map(crate::utils::signed_usdt)
-                        .unwrap_or_else(|| "-".to_string()),
-                    headroom_value,
-                    feasibility_label: if !known {
-                        s(lang, "unknown")
-                    } else if fits_max {
-                        s(lang, "feasible")
-                    } else {
-                        s(lang, "infeasible")
-                    },
-                    feasibility_class: if !known {
-                        "pill neutral"
-                    } else if fits_max {
-                        "pill"
-                    } else {
-                        "pill bad"
-                    },
+                        .map(crate::utils::format_pct)
+                        .unwrap_or_else(|| text_at(row, "funding_rate", lang)),
                     status: text_at(row, "status", lang),
                 }
             })
@@ -2477,17 +2485,22 @@ impl CrossArbOpenOrderRowData {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CrossArbResultRowData {
-    pub(crate) bundle_id: String,
-    pub(crate) lifecycle: String,
     pub(crate) symbol: String,
     pub(crate) route: String,
-    pub(crate) prices: String,
-    pub(crate) target_notional_usdt: String,
+    pub(crate) status: String,
+    pub(crate) open_expected_spread_pct: f64,
+    pub(crate) open_expected_spread: String,
+    pub(crate) open_actual_spread_pct: f64,
+    pub(crate) open_actual_spread: String,
+    pub(crate) close_expected_spread_pct: f64,
+    pub(crate) close_expected_spread: String,
+    pub(crate) close_actual_spread_pct: f64,
+    pub(crate) close_actual_spread: String,
     pub(crate) realized_profit_usdt: f64,
     pub(crate) realized_pnl: String,
-    pub(crate) cumulative_profit_usdt: f64,
-    pub(crate) cumulative_profit: String,
-    pub(crate) updated_at: String,
+    pub(crate) opened_at: String,
+    pub(crate) closed_at: String,
+    pub(crate) four_order_elapsed_ms: String,
 }
 
 impl CrossArbResultRowData {
@@ -2503,17 +2516,29 @@ impl CrossArbResultRowData {
                         "profit_usdt",
                     ],
                 );
-                let cumulative_profit_usdt = first_numeric(
+                let open_expected_spread_pct = first_numeric(
                     row,
                     &[
-                        "cumulative_profit_usdt",
-                        "total_profit_usdt",
-                        "actual_pnl_usdt",
+                        "open_expected_spread_pct",
+                        "planned_spread_pct",
+                        "entry_expected_spread_pct",
+                        "raw_open_spread_pct",
+                        "spread_pct",
                     ],
                 );
+                let open_actual_spread_pct =
+                    first_numeric(row, &["open_actual_spread_pct", "actual_open_spread_pct"]);
+                let close_expected_spread_pct = first_numeric(
+                    row,
+                    &[
+                        "close_expected_spread_pct",
+                        "expected_close_spread_pct",
+                        "close_candidate_profit_pct",
+                    ],
+                );
+                let close_actual_spread_pct =
+                    first_numeric(row, &["close_actual_spread_pct", "actual_close_spread_pct"]);
                 Self {
-                    bundle_id: text_at(row, "bundle_id", lang),
-                    lifecycle: text_at(row, "lifecycle", lang),
                     symbol: text_or_fallback(text_at(row, "symbol", lang), || {
                         text_at(row, "canonical_symbol", lang)
                     }),
@@ -2524,25 +2549,28 @@ impl CrossArbResultRowData {
                         }),
                         text_or_fallback(text_at(row, "short_exchange", lang), || "-".to_string())
                     ),
-                    prices: close_result_price_text(row),
-                    target_notional_usdt: first_money_text(
-                        row,
-                        &["target_notional_usdt", "close_notional_usdt", "quantity"],
-                    ),
-                    realized_profit_usdt,
-                    realized_pnl: format!(
-                        "{} / {}",
-                        crate::utils::signed_usdt(realized_profit_usdt),
-                        crate::utils::format_pct(first_numeric(
-                            row,
-                            &["close_net_profit_pct", "net_profit_pct"],
-                        ))
-                    ),
-                    cumulative_profit_usdt,
-                    cumulative_profit: crate::utils::signed_usdt(cumulative_profit_usdt),
-                    updated_at: text_or_fallback(text_at(row, "updated_at", lang), || {
-                        text_at(row, "recorded_at", lang)
+                    status: text_or_fallback(text_at(row, "status", lang), || {
+                        text_at(row, "lifecycle", lang)
                     }),
+                    open_expected_spread_pct,
+                    open_expected_spread: crate::utils::format_pct(open_expected_spread_pct),
+                    open_actual_spread_pct,
+                    open_actual_spread: crate::utils::format_pct(open_actual_spread_pct),
+                    close_expected_spread_pct,
+                    close_expected_spread: crate::utils::format_pct(close_expected_spread_pct),
+                    close_actual_spread_pct,
+                    close_actual_spread: crate::utils::format_pct(close_actual_spread_pct),
+                    realized_profit_usdt,
+                    realized_pnl: crate::utils::signed_usdt(realized_profit_usdt),
+                    opened_at: first_beijing_time_text(
+                        row,
+                        &["opened_at", "open_time", "planned_at"],
+                    ),
+                    closed_at: first_beijing_time_text(
+                        row,
+                        &["closed_at", "close_time", "recorded_at", "updated_at"],
+                    ),
+                    four_order_elapsed_ms: four_order_elapsed_ms_text(row),
                 }
             })
             .collect()
@@ -2965,6 +2993,16 @@ fn text_or_fallback(value: String, fallback: impl FnOnce() -> String) -> String 
     }
 }
 
+fn first_nonempty_text(value: &Value, keys: &[&str], lang: Language) -> String {
+    keys.iter()
+        .map(|key| text_at(value, key, lang))
+        .find(|text| {
+            let trimmed = text.trim();
+            !trimmed.is_empty() && trimmed != "-"
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn first_numeric(value: &Value, keys: &[&str]) -> f64 {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(Value::as_f64))
@@ -2985,37 +3023,108 @@ fn first_money_text(value: &Value, keys: &[&str]) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn close_result_price_text(row: &Value) -> String {
-    let long_entry = first_price_text(row, &["long_entry_price"]);
-    let short_entry = first_price_text(row, &["short_entry_price"]);
-    let long_close = first_price_text(row, &["long_close_price"]);
-    let short_close = first_price_text(row, &["short_close_price"]);
-    if long_entry != "-" || short_entry != "-" || long_close != "-" || short_close != "-" {
-        return format!("{long_entry}/{short_entry} -> {long_close}/{short_close}");
+fn first_beijing_time_text(value: &Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| {
+            value
+                .get(*key)
+                .and_then(crate::utils::format_beijing_time_value)
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn four_order_elapsed_ms_text(row: &Value) -> String {
+    for key in [
+        "four_order_elapsed_ms",
+        "four_orders_elapsed_ms",
+        "orders_elapsed_ms",
+    ] {
+        if let Some(text) = row.get(key).and_then(Value::as_str) {
+            let text = text.trim();
+            if !text.is_empty() && text != "-" {
+                return text.to_string();
+            }
+        }
     }
-    let legs = row
-        .get("legs")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if !legs.is_empty() {
-        return legs
+    first_numeric_option(row, &["order_elapsed_ms", "execution_elapsed_ms"])
+        .map(format_ms)
+        .or_else(|| elapsed_ms_from_order_legs(row))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn first_numeric_option(value: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_f64))
+        .filter(|value| value.is_finite())
+}
+
+fn elapsed_ms_from_order_legs(row: &Value) -> Option<String> {
+    let mut times = Vec::new();
+    collect_leg_times(row.get("open_legs"), &mut times);
+    collect_leg_times(row.get("legs"), &mut times);
+    if times.len() < 4 {
+        collect_leg_times(row.get("normal_close_legs"), &mut times);
+    }
+    if times.len() < 4 {
+        return None;
+    }
+    let min = times.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = times.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    (min.is_finite() && max.is_finite() && max >= min).then(|| format_ms(max - min))
+}
+
+fn collect_leg_times(value: Option<&Value>, times: &mut Vec<f64>) {
+    let Some(Value::Array(legs)) = value else {
+        return;
+    };
+    for leg in legs {
+        if let Some(timestamp) = ["submitted_at", "acked_at", "filled_at"]
             .iter()
-            .filter_map(|leg| {
-                let role = text_at(leg, "role", Language::En);
-                let price =
-                    first_price_text(leg, &["actual_fill_price", "planned_execution_price"]);
-                (price != "-").then(|| format!("{role}@{price}"))
-            })
-            .collect::<Vec<_>>()
-            .join(" / ");
+            .rev()
+            .find_map(|key| leg.get(*key).and_then(timestamp_ms_from_value))
+        {
+            times.push(timestamp);
+        }
     }
-    let open_leg = row.get("filled_open_leg").unwrap_or(&Value::Null);
-    let close_leg = row.get("emergency_close_leg").unwrap_or(&Value::Null);
-    let open_price = first_price_text(open_leg, &["actual_fill_price"]);
-    let close_price = first_price_text(close_leg, &["actual_fill_price"]);
-    if open_price != "-" || close_price != "-" {
-        format!("{open_price} -> {close_price}")
+}
+
+fn timestamp_ms_from_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(value) => value.as_f64().and_then(normalize_timestamp_ms),
+        Value::String(value) => {
+            let value = value.trim();
+            if value.is_empty() || value == "-" || value.eq_ignore_ascii_case("null") {
+                return None;
+            }
+            if let Ok(timestamp) = value.parse::<f64>() {
+                if let Some(timestamp_ms) = normalize_timestamp_ms(timestamp) {
+                    return Some(timestamp_ms);
+                }
+            }
+            let timestamp_ms = js_sys::Date::parse(value);
+            timestamp_ms.is_finite().then_some(timestamp_ms)
+        }
+        _ => None,
+    }
+}
+
+fn normalize_timestamp_ms(value: f64) -> Option<f64> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    let abs = value.abs();
+    if (1_000_000_000_000.0..100_000_000_000_000.0).contains(&abs) {
+        Some(value)
+    } else if (1_000_000_000.0..100_000_000_000.0).contains(&abs) {
+        Some(value * 1000.0)
+    } else {
+        None
+    }
+}
+
+fn format_ms(value: f64) -> String {
+    if value.is_finite() {
+        format!("{value:.0}")
     } else {
         "-".to_string()
     }

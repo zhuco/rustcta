@@ -1,0 +1,23 @@
+{
+  "exchange": "mexc",
+  "operation": "set_leverage",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/private/position/change_leverage",
+  "auth": "signed",
+  "headers": {
+    "apikey": { "match": "exact", "value": "key" },
+    "request-time": { "match": "non_empty" },
+    "signature": { "match": "non_empty" },
+    "content-type": { "match": "exact", "value": "application/json" }
+  },
+  "query": {
+    "symbol": "BTC_USDT",
+    "leverage": "4",
+    "openType": "2",
+    "positionType": "1"
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["secret"]
+}

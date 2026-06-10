@@ -8,13 +8,14 @@ use rustcta_exchange_api::{
     CancelOrderResponse, ClosePositionRequest, ClosePositionResponse, CountdownCancelAllRequest,
     CountdownCancelAllResponse, ExchangeApiError, ExchangeApiResult,
     ExchangeClient as ApiExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
-    OrderListResponse, PerpAccountControlProvider, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
-    SetPositionModeResponse, SymbolAccountConfigRequest, SymbolAccountConfigResponse,
-    SymbolRulesRequest, SymbolRulesResponse,
+    FundingRatesRequest, FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PerpAccountControlProvider, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
+    SymbolAccountConfigRequest, SymbolAccountConfigResponse, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, ExchangeError, ExchangeId, TenantId};
 
@@ -178,6 +179,24 @@ pub trait GatewayClient: Send + Sync {
         )
         .await?
         .into_fees()
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request_id: String,
+        tenant_id: TenantId,
+        account_id: Option<AccountId>,
+        request: FundingRatesRequest,
+    ) -> Result<FundingRatesResponse, GatewayError> {
+        self.send_request(
+            request_id,
+            tenant_id,
+            account_id,
+            GatewayOperation::GetFundingRates,
+            GatewayRequestPayload::GetFundingRates(request),
+        )
+        .await?
+        .into_funding_rates()
     }
 
     async fn place_order(
@@ -689,6 +708,21 @@ impl ApiExchangeClient for GatewayExchangeClient {
         )
         .await?
         .into_fees()
+        .map_err(|error| gateway_error_to_exchange_api(&self.exchange, error))
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        let request_id = request_id_or(&request.context.request_id, "gateway-get-funding-rates");
+        self.send_exchange_request(
+            request_id,
+            GatewayOperation::GetFundingRates,
+            GatewayRequestPayload::GetFundingRates(request),
+        )
+        .await?
+        .into_funding_rates()
         .map_err(|error| gateway_error_to_exchange_api(&self.exchange, error))
     }
 

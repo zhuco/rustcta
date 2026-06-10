@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use rustcta_exchange_api::{
     AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
-    ExchangeClient, ExchangeStreamEvent, FeesRequest, PlaceOrderRequest, PrivateStreamKind,
-    PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription, RequestContext,
+    ExchangeClient, ExchangeStreamEvent, FeesRequest, FundingRatesRequest, PlaceOrderRequest,
+    PositionMode, PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind,
+    PublicStreamSubscription, RequestContext, SetLeverageRequest, SetPositionModeRequest,
     SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
@@ -26,7 +27,7 @@ use super::streams::{
     bybit_public_subscribe_payload, bybit_public_ws_url, classify_ws_control,
     parse_bybit_public_stream_events,
 };
-use super::{BybitGatewayAdapter, BybitGatewayConfig};
+use super::{BybitGatewayAdapter, BybitGatewayConfig, GatewayAdapter};
 
 #[test]
 fn bybit_signing_should_match_fixture_vector() {
@@ -111,6 +112,33 @@ fn bybit_fee_parser_should_parse_account_fee_rate_rows() {
     assert_eq!(fees[0].maker_rate, "0.0001");
     assert_eq!(fees[0].taker_rate, "0.0006");
     assert_eq!(fees[0].source.as_deref(), Some("bybit.v5.account_fee_rate"));
+}
+
+#[test]
+fn bybit_capabilities_should_declare_public_funding_rates() {
+    let adapter = BybitGatewayAdapter::default_public().expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_funding_rates);
+    assert!(capabilities.capabilities_v2.funding_rates.is_supported());
+}
+
+#[test]
+fn bybit_account_control_capabilities_should_track_private_rest() {
+    let public = BybitGatewayAdapter::default_public().expect("adapter");
+    let public_capabilities = GatewayAdapter::account_control_capabilities(&public);
+    assert!(!public_capabilities.supports_leverage);
+    assert!(!public_capabilities.supports_position_mode_change);
+
+    let private = BybitGatewayAdapter::new(BybitGatewayConfig {
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+    let private_capabilities = GatewayAdapter::account_control_capabilities(&private);
+    assert!(private_capabilities.supports_leverage);
+    assert!(private_capabilities.supports_position_mode_change);
 }
 
 #[test]
@@ -265,6 +293,57 @@ async fn bybit_get_fees_should_send_signed_fee_rate_request() {
     let request_lower = requests[0].to_ascii_lowercase();
     assert!(request_lower.contains("x-bapi-api-key: test-key"));
     assert!(!requests[0].contains("test-secret"));
+}
+
+#[tokio::test]
+async fn bybit_get_funding_rates_should_send_public_funding_history_request() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "fundingRate": "0.0001",
+                "fundingRateTimestamp": "1700000000000"
+            }]
+        }
+    })])
+    .await;
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = ExchangeClient::get_funding_rates(
+        &adapter,
+        FundingRatesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("funding"),
+            symbols: vec![symbol_scope("BTCUSDT")],
+        },
+    )
+    .await
+    .expect("funding");
+
+    assert_eq!(response.rates.len(), 1);
+    assert_eq!(response.rates[0].funding_rate, "0.0001");
+    assert!(response.rates[0].funding_time.is_some());
+    assert_eq!(
+        response.rates[0].source.as_deref(),
+        Some("bybit.v5.market.funding_history")
+    );
+    let request = actual_http_request(&seen.lock().unwrap()[0]);
+    assert_eq!(request.path, "/v5/market/funding/history");
+    assert_eq!(
+        request.query.get("category").map(String::as_str),
+        Some("linear")
+    );
+    assert_eq!(
+        request.query.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
+    );
+    assert_eq!(request.query.get("limit").map(String::as_str), Some("1"));
 }
 
 #[tokio::test]
@@ -448,6 +527,94 @@ async fn bybit_advanced_orders_should_send_signed_v5_runtime_requests() {
     assert_eq!(body["request"][0]["symbol"], "BTCUSDT");
     assert_eq!(body["request"][0]["orderId"], "3001");
     assert_eq!(body["request"][0]["orderLinkId"], "cli-batch-1");
+}
+
+#[tokio::test]
+async fn bybit_set_leverage_should_send_signed_v5_position_request() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {},
+        "retExtInfo": {},
+        "time": 1700000000000_i64
+    })])
+    .await;
+
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .set_leverage(SetLeverageRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-leverage"),
+            symbol: symbol_scope("BTCUSDT"),
+            leverage: 3,
+        })
+        .await
+        .expect("set leverage");
+
+    assert!(response.accepted);
+    assert_eq!(response.leverage, 3);
+    assert_eq!(response.symbol.exchange_symbol.symbol, "BTCUSDT");
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_bybit_request(&requests[0], "POST", "/v5/position/set-leverage");
+    load_request_spec("set_leverage.json")
+        .assert_matches(&actual_http_request(&requests[0]))
+        .expect("set leverage request spec");
+    let body = request_body_json(&requests[0]);
+    assert_eq!(body["category"], "linear");
+    assert_eq!(body["symbol"], "BTCUSDT");
+    assert_eq!(body["buyLeverage"], "3");
+    assert_eq!(body["sellLeverage"], "3");
+}
+
+#[tokio::test]
+async fn bybit_set_position_mode_should_send_signed_v5_switch_mode_request() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {},
+        "retExtInfo": {},
+        "time": 1700000000000_i64
+    })])
+    .await;
+
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .set_position_mode(SetPositionModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-position-mode"),
+            exchange: exchange_id(),
+            mode: PositionMode::Hedge,
+        })
+        .await
+        .expect("set position mode");
+
+    assert!(response.accepted);
+    assert_eq!(response.mode, PositionMode::Hedge);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_bybit_request(&requests[0], "POST", "/v5/position/switch-mode");
+    let body = request_body_json(&requests[0]);
+    assert_eq!(body["category"], "linear");
+    assert_eq!(body["mode"], 3);
 }
 
 fn exchange_id() -> ExchangeId {

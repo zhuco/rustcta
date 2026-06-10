@@ -2,10 +2,10 @@ use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderResponse, BalancesResponse, BatchCancelOrdersResponse, BatchPlaceOrdersResponse,
     CancelAllOrdersResponse, CancelOrderResponse, ClosePositionResponse,
-    CountdownCancelAllResponse, FeesResponse, OpenOrdersResponse, OrderBookResponse,
-    OrderListResponse, PlaceOrderResponse, PositionsResponse, QueryOrderResponse,
-    RecentFillsResponse, SetLeverageResponse, SetPositionModeResponse, SymbolAccountConfigResponse,
-    SymbolRulesResponse,
+    CountdownCancelAllResponse, FeesResponse, FundingRatesResponse, OpenOrdersResponse,
+    OrderBookResponse, OrderListResponse, PlaceOrderResponse, PositionsResponse,
+    QueryOrderResponse, RecentFillsResponse, SetLeverageResponse, SetPositionModeResponse,
+    SymbolAccountConfigResponse, SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, TenantId};
 
@@ -68,6 +68,14 @@ impl GatewayProtocolResponse {
         self.require_accepted()?;
         match self.payload {
             GatewayResponsePayload::Fees(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_funding_rates(self) -> Result<FundingRatesResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::FundingRates(response) => Ok(response),
             other => Err(unexpected_payload(self.operation, other)),
         }
     }

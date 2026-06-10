@@ -9,7 +9,8 @@ use rustcta_exchange_api::{
     ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
     OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
     QueryOrderRequest, QueryOrderResponse, RecentFillsRequest, RecentFillsResponse, ReconcilePlan,
-    ReconcileTrigger, RetryReconcilePolicy, EXCHANGE_API_SCHEMA_VERSION,
+    ReconcileTrigger, RetryReconcilePolicy, SetLeverageRequest, SetLeverageResponse,
+    SetPositionModeRequest, SetPositionModeResponse, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     ExchangeError, ExchangeErrorClass, MarketType, OrderSide, OrderStatus, OrderType, PositionSide,
@@ -455,6 +456,58 @@ impl BybitGatewayAdapter {
             fees,
         })
     }
+
+    pub(super) async fn set_leverage_impl(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_supported_market_type(request.symbol.market_type)?;
+        if request.symbol.market_type == MarketType::Spot {
+            return Err(ExchangeApiError::Unsupported {
+                operation: self.profile_operation(
+                    "bybit.set_leverage_spot_unsupported",
+                    "bybiteu.set_leverage_spot_unsupported",
+                ),
+            });
+        }
+        let operation = self.profile_operation("bybit.set_leverage", "bybiteu.set_leverage");
+        let body = bybit_set_leverage_body(&request)?;
+        self.send_signed_post_json(operation, "/v5/position/set-leverage", &body)
+            .await?;
+        Ok(SetLeverageResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            symbol: request.symbol,
+            leverage: request.leverage,
+            accepted: true,
+            message: None,
+        })
+    }
+
+    pub(super) async fn set_position_mode_impl(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        let operation =
+            self.profile_operation("bybit.set_position_mode", "bybiteu.set_position_mode");
+        let body = bybit_set_position_mode_body(&request);
+        self.send_signed_post_json(operation, "/v5/position/switch-mode", &body)
+            .await?;
+        Ok(SetPositionModeResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            mode: request.mode,
+            accepted: true,
+            message: None,
+        })
+    }
 }
 
 fn bybit_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
@@ -522,6 +575,28 @@ fn bybit_amend_order_body(request: &AmendOrderRequest) -> ExchangeApiResult<Valu
         request.client_order_id.as_deref(),
     )?;
     Ok(body)
+}
+
+fn bybit_set_leverage_body(request: &SetLeverageRequest) -> ExchangeApiResult<Value> {
+    if request.leverage == 0 {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "bybit set_leverage requires leverage greater than zero".to_string(),
+        });
+    }
+    let leverage = request.leverage.to_string();
+    Ok(json!({
+        "category": bybit_category(request.symbol.market_type),
+        "symbol": normalize_bybit_symbol(&request.symbol.exchange_symbol.symbol)?,
+        "buyLeverage": leverage,
+        "sellLeverage": leverage,
+    }))
+}
+
+fn bybit_set_position_mode_body(request: &SetPositionModeRequest) -> Value {
+    json!({
+        "category": "linear",
+        "mode": if request.mode.is_hedge() { 3 } else { 0 },
+    })
 }
 
 fn insert_order_id(

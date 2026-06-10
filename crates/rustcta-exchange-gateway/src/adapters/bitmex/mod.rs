@@ -422,6 +422,7 @@ fn bitmex_capabilities_v2(private_rest: bool) -> ExchangeClientCapabilitiesV2 {
         },
         endpoints: bitmex_endpoint_capabilities(private_rest),
         credential_scopes: trade_scopes,
+        ..ExchangeClientCapabilitiesV2::default()
     }
 }
 

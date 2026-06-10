@@ -1,8 +1,9 @@
 use rustcta_exchange_api::{
     AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
     CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
-    OpenOrdersRequest, PlaceOrderRequest, PositionsRequest, QueryOrderRequest,
-    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    OpenOrdersRequest, PlaceOrderRequest, PositionMode, PositionsRequest, QueryOrderRequest,
+    QuoteMarketOrderRequest, RecentFillsRequest, SetLeverageRequest, SetPositionModeRequest,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -15,7 +16,7 @@ use super::test_support::{
     futures_symbol_scope, option_symbol_scope, perpetual_symbol_scope, private_config,
     spawn_rest_server, symbol_scope,
 };
-use super::{OkxGatewayAdapter, OkxGatewayConfig};
+use super::{GatewayAdapter, OkxGatewayAdapter, OkxGatewayConfig};
 
 #[test]
 fn okx_signing_vector_fixtures_should_verify() {
@@ -33,6 +34,9 @@ async fn okx_adapter_should_keep_private_operations_and_streams_unsupported() {
     let adapter = OkxGatewayAdapter::default_public().expect("adapter");
     assert!(adapter.capabilities().supports_public_rest);
     assert!(!adapter.capabilities().supports_private_rest);
+    let account_control = GatewayAdapter::account_control_capabilities(&adapter);
+    assert!(!account_control.supports_leverage);
+    assert!(!account_control.supports_position_mode_change);
     let error = adapter
         .get_balances(BalancesRequest {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -864,4 +868,73 @@ async fn okx_adapter_should_return_unsupported_when_private_credentials_are_miss
         .await
         .expect_err("missing credentials should be unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[tokio::test]
+async fn okx_adapter_should_set_derivative_leverage_with_standard_account_control_request() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "0",
+        "msg": "",
+        "data": [{"lever": "5", "mgnMode": "cross", "instId": "BTC-USDT-SWAP"}]
+    })])
+    .await;
+
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let account_control = GatewayAdapter::account_control_capabilities(&adapter);
+    assert!(account_control.supports_leverage);
+    assert!(account_control.supports_position_mode_change);
+    let response = adapter
+        .set_leverage(SetLeverageRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-leverage"),
+            symbol: perpetual_symbol_scope(),
+            leverage: 5,
+        })
+        .await
+        .expect("set leverage");
+
+    assert!(response.accepted);
+    assert_eq!(response.leverage, 5);
+    assert_eq!(response.symbol.market_type, MarketType::Perpetual);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_okx_request_method(&requests[0], "POST", "/api/v5/account/set-leverage");
+    load_request_spec("okx/request_specs/set_leverage.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("set leverage request spec");
+    let body = requests[0].body.as_ref().expect("set leverage body");
+    assert_eq!(body["instId"], "BTC-USDT-SWAP");
+    assert_eq!(body["lever"], "5");
+    assert_eq!(body["mgnMode"], "cross");
+}
+
+#[tokio::test]
+async fn okx_adapter_should_set_position_mode_with_standard_account_control_request() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "0",
+        "msg": "",
+        "data": []
+    })])
+    .await;
+
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let response = adapter
+        .set_position_mode(SetPositionModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-position-mode"),
+            exchange: exchange_id(),
+            mode: PositionMode::Hedge,
+        })
+        .await
+        .expect("set position mode");
+
+    assert!(response.accepted);
+    assert_eq!(response.mode, PositionMode::Hedge);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_okx_request_method(&requests[0], "POST", "/api/v5/account/set-position-mode");
+    let body = requests[0].body.as_ref().expect("set position mode body");
+    assert_eq!(body["posMode"], "long_short_mode");
 }

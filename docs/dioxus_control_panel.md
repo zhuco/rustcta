@@ -71,19 +71,46 @@ Write-like UI actions either call the audited strategy command route or append a
 local-agent command. The browser never executes shell scripts and never calls
 exchange APIs.
 
+## Single Entrypoint
+
+The operational entrypoint for this panel is `scripts/rustcta_server.sh`.
+Use it to build, upload, and restart the server copy of the Web panel:
+
+```bash
+scripts/rustcta_server.sh deploy-control-panel
+```
+
+For local static rebuilds without server upload:
+
+```bash
+scripts/rustcta_server.sh build-web
+```
+
+The script builds `web-ui/dioxus`, copies the Dioxus release output into
+`web-ui/dioxus/dist`, uploads that exact `dist` directory to
+`/home/cta/rustcta/web-ui/dioxus/dist`, and restarts `control-api`.
+
+For the live cross-arb strategy plus the Web panel, use one stack entrypoint:
+
+```bash
+scripts/rustcta_server.sh deploy-cross-arb-live-stack
+```
+
+That command rebuilds/uploads the Dioxus panel, the control API binary, the
+cross-arb live runner binary, and the live strategy config before restarting
+both systemd user services.
+
 ## Build
 
 ```bash
-cd web-ui/dioxus
-dx build --release
+scripts/rustcta_server.sh build-web
 ```
 
-For production-style static hosting, sync the Dioxus release output into
-`web-ui/dioxus/dist` and point the control API app at that directory:
+For direct debugging only, the equivalent manual build is:
 
 ```bash
-RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \
-cargo run -p rustcta-control-api-app --bin rustcta-control-api
+cd web-ui/dioxus
+dx build --release --debug-symbols false
 ```
 
 If `dx` is missing:
@@ -93,7 +120,11 @@ rustup target add wasm32-unknown-unknown
 cargo install dioxus-cli --version 0.7.9 --locked
 ```
 
-Dioxus 0.7 writes release web assets under `web-ui/dioxus/target/dx/rustcta-control-panel/release/web/public`. If that path changes, set `DIOXUS_BUILD_PUBLIC` before running the helper script.
+Dioxus 0.7 writes release web assets under the workspace target directory at
+`dx/rustcta-control-panel/release/web/public`. The server script discovers the
+workspace target directory with `cargo metadata`. If that path changes, set
+`RUSTCTA_DIOXUS_BUILD_PUBLIC` before running
+`scripts/rustcta_server.sh build-web`.
 
 ## Local Run
 
@@ -142,6 +173,17 @@ Pid and log files:
 | Control API | process manager specific | process manager specific |
 
 Static assets are served from `web-ui/dioxus/dist` by default.
+
+For the cross-exchange arbitrage page, the control API must read the live runner
+dashboard snapshot:
+
+```bash
+RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json
+```
+
+Do not point the active control panel at
+`logs/cross_exchange_arbitrage/cross_arb_dashboard_snapshot.json`; that is not
+the current live runner output.
 
 ## Direct Commands
 

@@ -7,6 +7,7 @@ use crate::api::{
 };
 use crate::api_keys::ApiKeysPanel;
 use crate::cross_arb::CrossArbPanel;
+use crate::exchange_latency::ExchangeLatencyPanel;
 use crate::funding_arb::FundingArbPanel;
 use crate::i18n::{command_label, s, t};
 use crate::spot_arb::SpotArbPanel;
@@ -102,7 +103,7 @@ pub(crate) fn App() -> Element {
                     let result = fetch_strategy_live_data(&token_value, data()).await;
                     apply_strategy_live_fetch(result, data, refresh_error_count, message);
                 }
-                TimeoutFuture::new(1000).await;
+                TimeoutFuture::new(5_000).await;
             }
         }
     });
@@ -263,6 +264,17 @@ fn render_active_view(
                     api_key_exchange,
                     api_key_account,
                     api_key_namespace
+                }
+            }
+        }
+        ControlPanelView::ExchangeLatency => {
+            let snapshot = data();
+            rsx! {
+                ExchangeLatencyPanel {
+                    cross_arb: snapshot.cross_arb,
+                    token,
+                    message,
+                    lang
                 }
             }
         }

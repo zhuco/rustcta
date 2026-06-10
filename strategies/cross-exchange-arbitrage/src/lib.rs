@@ -1,14 +1,16 @@
+#![recursion_limit = "256"]
+
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_strategy_sdk::{
-    AccountPermission, ExecutionIntent, ExecutionOrderAck, ExecutionOrderCommand,
-    MarketDataChannel, MarketDataSubscription, MarketType, OrderSide as SdkOrderSide, OrderType,
-    RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration, SdkResult,
-    StrategyCommandSchema, StrategyConfigSchema, StrategyContext, StrategyEvent,
-    StrategyInstanceId, StrategyRuntime, StrategySnapshot, StrategySnapshotSchema, StrategySpec,
-    StrategyStatus, TimeInForce,
+    AccountPermission, ExecutionCancelCommand, ExecutionIntent, ExecutionOrderAck,
+    ExecutionOrderCommand, MarketDataChannel, MarketDataSubscription, MarketType,
+    OrderSide as SdkOrderSide, OrderType, RequiredAccountPermission, RiskCapability,
+    RiskCapabilityDeclaration, SdkResult, StrategyCommandSchema, StrategyConfigSchema,
+    StrategyContext, StrategyEvent, StrategyInstanceId, StrategyRuntime, StrategySnapshot,
+    StrategySnapshotSchema, StrategySpec, StrategyStatus, TimeInForce,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,19 +25,24 @@ pub use app_runtime::{
 };
 pub use core::{
     evaluate_dual_taker_close, evaluate_dual_taker_open_opportunities,
-    evaluate_ready_dual_taker_open_opportunities, filter_open_opportunities_by_risk,
-    inspect_single_leg_net_positions, plan_startup_usdt_position_takeover,
-    select_high_volatility_symbols, ArbitrageRiskState, CanonicalSymbol, CloseReason,
-    DualTakerArbitrageConfig, DualTakerCloseEvaluation, DualTakerFeeEstimate,
-    DualTakerOpenOpportunity, ExchangeFeeRates, ExchangeId, ExchangeRuntimeStatus,
-    ExchangeStartupReadiness, ExchangeStatusRegistry, FeeBreakdown, FeeModel, FeeRole,
-    FillInferenceType, FundingEstimate, FundingModel, FundingSettlementLedger, MakerLegKind,
-    NetPosition, NetPositionWarning, OpenArbitragePosition, OpenBlockReason, OrderBookTop,
-    OrderSide, PairedTakerFillState, PositionSide, PrecisionRegistry, QuantityUnit,
-    SimulatedBundleState, SimulatedBundleStatus, SingleLegGuard, StartupPositionTakeoverPlan,
-    StartupReadiness, StartupSingleLegResolution, StartupUsdtPosition, StrategyLogEventKind,
-    StrategyLogRotationConfig, StrategyRoute, SymbolPrecision, TakerFillAudit, TakerOrderDraft,
-    TakerOrderRole, VolatilityRankDirection, VolatilityRankTicker, VolatilityUniverseConfig,
+    evaluate_dual_taker_open_opportunities_with_audit,
+    evaluate_ready_dual_taker_open_opportunities, evaluate_slippage_capture_open_opportunities,
+    filter_open_opportunities_by_risk, inspect_single_leg_net_positions,
+    plan_startup_usdt_position_takeover, select_high_volatility_symbols, ArbitrageRiskState,
+    CanonicalSymbol, CloseReason, CrossArbExecutionModule, DualTakerArbitrageConfig,
+    DualTakerCloseEvaluation, DualTakerFeeEstimate, DualTakerOpenOpportunity, ExchangeFeeRates,
+    ExchangeId, ExchangeRuntimeStatus, ExchangeStartupReadiness, ExchangeStatusRegistry,
+    FeeBreakdown, FeeModel, FeeRole, FillInferenceType, FundingEstimate, FundingModel,
+    FundingSettlementLedger, MakerLegKind, NetPosition, NetPositionWarning, OpenArbitragePosition,
+    OpenBlockReason, OpenOpportunityAudit, OpenOpportunityAuditReport, OpenOpportunityDecision,
+    OpenOpportunityRejectReason, OrderBookTop, OrderSide, PairedTakerFillState, PositionSide,
+    PrecisionRegistry, QuantityUnit, SimulatedBundleState, SimulatedBundleStatus, SingleLegGuard,
+    SlippageCaptureArbitrageConfig, SlippageCaptureHedgePlan, SlippageCaptureMakerOrderDraft,
+    SlippageCaptureOpenOpportunity, SlippageCaptureOrderRole, SlippageCaptureStartupGate,
+    StartupPositionTakeoverPlan, StartupReadiness, StartupSingleLegResolution, StartupUsdtPosition,
+    StrategyLogEventKind, StrategyLogRotationConfig, StrategyRoute, SymbolPrecision,
+    TakerFillAudit, TakerOrderDraft, TakerOrderRole, VolatilityRankDirection, VolatilityRankTicker,
+    VolatilityUniverseConfig,
 };
 pub use runtime_contract::{
     build_runtime_contract, default_runtime_contract, CrossArbDashboardSnapshot,
@@ -85,6 +92,10 @@ pub struct CrossExchangeArbitrageConfig {
     #[serde(default)]
     pub dual_taker: DualTakerArbitrageConfig,
     #[serde(default)]
+    pub execution_module: CrossArbExecutionModule,
+    #[serde(default)]
+    pub slippage_capture: SlippageCaptureArbitrageConfig,
+    #[serde(default)]
     pub logging: StrategyLogRotationConfig,
     #[serde(default)]
     pub volatility_universe: VolatilityUniverseConfig,
@@ -105,6 +116,8 @@ impl Default for CrossExchangeArbitrageConfig {
             max_position_notional_quote: default_max_position_notional_quote(),
             market_type: default_market_type(),
             dual_taker: DualTakerArbitrageConfig::default(),
+            execution_module: CrossArbExecutionModule::default(),
+            slippage_capture: SlippageCaptureArbitrageConfig::default(),
             logging: StrategyLogRotationConfig::default(),
             volatility_universe: VolatilityUniverseConfig::default(),
             max_consecutive_losses: default_max_consecutive_losses(),
@@ -166,6 +179,12 @@ impl CrossExchangeArbitrageConfig {
         } else if bool_at(value, &["enable_live_trading"]).is_some_and(|enabled| enabled) {
             config.dry_run = false;
         }
+        if let Some(module) = text_at(value, &["execution_module"])
+            .or_else(|| text_at(value, &["execution", "module"]))
+            .or_else(|| text_at(value, &["execution", "open_module"]))
+        {
+            config.execution_module = parse_execution_module(&module);
+        }
 
         let configured_target_notional = f64_at(value, &["max_live_notional_per_trade"])
             .or_else(|| f64_at(value, &["sizing", "target_notional_usdt"]))
@@ -173,31 +192,40 @@ impl CrossExchangeArbitrageConfig {
 
         if let Some(value) = configured_target_notional {
             config.dual_taker.target_notional_usdt = value;
+            config.slippage_capture.target_notional_usdt = value;
             config.max_position_notional_quote = trim_float(value);
         }
         if let Some(value) = f64_at(value, &["thresholds", "min_open_raw_spread"]) {
             config.dual_taker.min_open_spread_pct = value;
+            config.slippage_capture.min_open_spread_pct = value;
             config.min_profit_bps = value * 10_000.0;
         } else if config.min_profit_bps > 0.0 {
             config.dual_taker.min_open_spread_pct = config.min_profit_bps / 10_000.0;
+            config.slippage_capture.min_open_spread_pct = config.min_profit_bps / 10_000.0;
         }
         if let Some(value) = f64_at(value, &["thresholds", "min_open_maker_taker_net_edge"])
             .or_else(|| f64_at(value, &["dual_taker", "min_open_net_profit_pct"]))
+            .or_else(|| f64_at(value, &["slippage_capture", "min_open_net_profit_pct"]))
         {
             config.dual_taker.min_open_net_profit_pct = value;
+            config.slippage_capture.min_open_net_profit_pct = value;
         }
         if let Some(value) = f64_at(value, &["thresholds", "max_open_raw_spread"]) {
             config.dual_taker.max_open_spread_pct = value;
+            config.slippage_capture.max_open_spread_pct = value;
         }
         if let Some(value) = f64_at(value, &["execution", "taker_ioc_slippage_limit_pct"])
             .or_else(|| f64_at(value, &["risk", "max_taker_slippage_pct"]))
         {
             config.dual_taker.taker_slippage_pct = value;
+            config.slippage_capture.hedge_taker_slippage_pct = value;
+            config.slippage_capture.close_taker_slippage_pct = value;
         }
         if let Some(value) = f64_at(value, &["thresholds", "close_min_net_profit_pct"])
             .or_else(|| f64_at(value, &["thresholds", "lock_profit_dual_taker_pct"]))
         {
             config.dual_taker.close_min_net_profit_pct = value;
+            config.slippage_capture.close_min_net_profit_pct = value;
         }
         if let Some(value) = f64_at(value, &["dual_taker", "expected_close_spread_pct"])
             .or_else(|| f64_at(value, &["thresholds", "expected_close_spread_pct"]))
@@ -208,21 +236,32 @@ impl CrossExchangeArbitrageConfig {
             .or_else(|| f64_at(value, &["market", "top_of_book_capacity_ratio"]))
         {
             config.dual_taker.top_of_book_capacity_ratio = value.clamp(0.0, 1.0);
+            config.slippage_capture.hedge_top_of_book_capacity_ratio = value.clamp(0.0, 1.0);
+        }
+        if let Some(value) = bool_at(value, &["execution", "enforce_top_depth_on_open"])
+            .or_else(|| bool_at(value, &["execution_quality", "enforce_top_depth_on_open"]))
+            .or_else(|| bool_at(value, &["dual_taker", "enforce_top_depth_on_open"]))
+        {
+            config.dual_taker.enforce_top_depth_on_open = value;
+            config.slippage_capture.enforce_hedge_top_depth = value;
         }
         if let Some(value) = u64_at(value, &["risk", "max_book_age_ms"])
             .or_else(|| u64_at(value, &["market", "stale_quote_ms"]))
             .or_else(|| u64_at(value, &["detection", "stale_book_ms"]))
         {
             config.dual_taker.orderbook_stale_ms = value;
+            config.slippage_capture.orderbook_stale_ms = value;
         }
         if let Some(value) = usize_at(value, &["market", "depth_levels"])
             .or_else(|| usize_at(value, &["market", "public_book_depth"]))
             .or_else(|| usize_at(value, &["detection", "depth_levels"]))
         {
             config.dual_taker.min_orderbook_levels = value.max(1);
+            config.slippage_capture.min_orderbook_levels = value.max(1);
         }
         if let Some(value) = u64_at(value, &["execution", "single_leg_timeout_ms"]) {
             config.dual_taker.single_leg_timeout_ms = value;
+            config.slippage_capture.maker_order_timeout_ms = value;
         }
         if let Some(value) = u32_at(value, &["risk", "max_consecutive_single_leg_fills"]) {
             config.dual_taker.max_consecutive_single_leg_fills = value.max(1);
@@ -235,23 +274,29 @@ impl CrossExchangeArbitrageConfig {
         }
         if let Some(value) = usize_at(value, &["sizing", "max_positions_per_exchange"]) {
             config.dual_taker.max_positions_per_exchange = value.max(1);
+            config.slippage_capture.max_positions_per_exchange = value.max(1);
         }
         if let Some(value) = usize_at(value, &["risk", "max_open_bundles"])
             .or_else(|| usize_at(value, &["dual_taker", "max_open_bundles"]))
         {
             config.dual_taker.max_open_bundles = value.max(1);
+            config.slippage_capture.max_open_bundles = value.max(1);
         }
         if let Some(value) = i64_at(value, &["risk", "symbol_cooldown_after_close_secs"]) {
             config.dual_taker.symbol_cooldown_secs = value.max(0);
+            config.slippage_capture.symbol_cooldown_secs = value.max(0);
         }
         if let Some(value) = i64_at(value, &["risk", "max_hold_seconds"]) {
             config.dual_taker.max_hold_secs = value.max(1);
+            config.slippage_capture.max_hold_secs = value.max(1);
         }
         if let Some(value) = bool_at(value, &["dual_taker", "close_on_max_hold_requires_profit"])
             .or_else(|| bool_at(value, &["risk", "close_on_max_hold_requires_profit"]))
         {
             config.dual_taker.close_on_max_hold_requires_profit = value;
+            config.slippage_capture.close_on_max_hold_requires_profit = value;
         }
+        config.apply_slippage_capture_runtime_value(value);
         if let Some(value) = u64_at(value, &["logging", "max_file_bytes"]) {
             config.logging.max_file_bytes = value;
         }
@@ -398,6 +443,104 @@ impl CrossExchangeArbitrageConfig {
             self.volatility_universe.monitor_orderbook = value;
         }
     }
+
+    fn apply_slippage_capture_runtime_value(&mut self, value: &Value) {
+        if let Some(value) = f64_at(value, &["slippage_capture", "target_notional_usdt"]) {
+            self.slippage_capture.target_notional_usdt = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "min_open_spread_pct"]) {
+            self.slippage_capture.min_open_spread_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "min_open_net_profit_pct"]) {
+            self.slippage_capture.min_open_net_profit_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "max_open_spread_pct"]) {
+            self.slippage_capture.max_open_spread_pct = value.max(0.0);
+        }
+        if let Some(value) = i64_at(value, &["slippage_capture", "startup_skip_spread_secs"])
+            .or_else(|| i64_at(value, &["execution", "startup_skip_spread_secs"]))
+        {
+            self.slippage_capture.startup_skip_spread_secs = value.max(0);
+        }
+        if let Some(value) = u64_at(value, &["slippage_capture", "max_signal_age_ms"])
+            .or_else(|| u64_at(value, &["execution", "max_signal_age_ms"]))
+        {
+            self.slippage_capture.max_signal_age_ms = value.max(1);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "maker_price_offset_pct"])
+            .or_else(|| f64_at(value, &["execution", "maker_price_offset_pct"]))
+            .or_else(|| f64_at(value, &["execution", "slippage_capture_offset_pct"]))
+        {
+            self.slippage_capture.maker_price_offset_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "hedge_taker_slippage_pct"]) {
+            self.slippage_capture.hedge_taker_slippage_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "close_taker_slippage_pct"]) {
+            self.slippage_capture.close_taker_slippage_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "close_min_net_profit_pct"]) {
+            self.slippage_capture.close_min_net_profit_pct = value.max(0.0);
+        }
+        if let Some(value) = i64_at(value, &["slippage_capture", "max_hold_secs"]) {
+            self.slippage_capture.max_hold_secs = value.max(1);
+        }
+        if let Some(value) = bool_at(
+            value,
+            &["slippage_capture", "close_on_max_hold_requires_profit"],
+        ) {
+            self.slippage_capture.close_on_max_hold_requires_profit = value;
+        }
+        if let Some(value) = u64_at(value, &["slippage_capture", "maker_order_timeout_ms"])
+            .or_else(|| u64_at(value, &["execution", "maker_order_timeout_ms"]))
+            .or_else(|| u64_at(value, &["execution", "maker_auto_cancel_ms"]))
+        {
+            self.slippage_capture.maker_order_timeout_ms = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["slippage_capture", "max_concurrent_maker_orders"])
+            .or_else(|| usize_at(value, &["execution", "max_concurrent_maker_orders"]))
+        {
+            self.slippage_capture.max_concurrent_maker_orders = value.max(1);
+        }
+        if let Some(value) = bool_at(value, &["slippage_capture", "cancel_unfilled_maker"]) {
+            self.slippage_capture.cancel_unfilled_maker = value;
+        }
+        if let Some(value) = f64_at(value, &["slippage_capture", "max_maker_top_depth_usdt"])
+            .or_else(|| f64_at(value, &["execution", "max_maker_top_depth_usdt"]))
+        {
+            self.slippage_capture.max_maker_top_depth_usdt = value.max(0.0);
+        }
+        if let Some(value) = f64_at(
+            value,
+            &["slippage_capture", "hedge_top_of_book_capacity_ratio"],
+        ) {
+            self.slippage_capture.hedge_top_of_book_capacity_ratio = value.clamp(0.0, 1.0);
+        }
+        if let Some(value) = bool_at(value, &["slippage_capture", "enforce_hedge_top_depth"]) {
+            self.slippage_capture.enforce_hedge_top_depth = value;
+        }
+        if let Some(value) = u64_at(value, &["slippage_capture", "orderbook_stale_ms"]) {
+            self.slippage_capture.orderbook_stale_ms = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["slippage_capture", "min_orderbook_levels"]) {
+            self.slippage_capture.min_orderbook_levels = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["slippage_capture", "max_open_bundles"]) {
+            self.slippage_capture.max_open_bundles = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["slippage_capture", "max_positions_per_exchange"]) {
+            self.slippage_capture.max_positions_per_exchange = value.max(1);
+        }
+        if let Some(value) = usize_at(
+            value,
+            &["slippage_capture", "max_active_bundles_per_symbol"],
+        ) {
+            self.slippage_capture.max_active_bundles_per_symbol = value.max(1);
+        }
+        if let Some(value) = i64_at(value, &["slippage_capture", "symbol_cooldown_secs"]) {
+            self.slippage_capture.symbol_cooldown_secs = value.max(0);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -408,12 +551,16 @@ pub struct CrossExchangeArbitrageSnapshotPayload {
     pub last_event_at: Option<DateTime<Utc>>,
     pub configured_venues: Vec<String>,
     pub configured_symbols: usize,
+    pub execution_module: String,
     pub excluded_bases: Vec<String>,
     pub target_notional_usdt: String,
     pub min_open_spread_pct: String,
     pub min_open_net_profit_pct: String,
     pub max_open_spread_pct: String,
     pub close_min_net_profit_pct: String,
+    pub slippage_capture_maker_price_offset_pct: String,
+    pub slippage_capture_maker_order_timeout_ms: u64,
+    pub slippage_capture_startup_skip_spread_secs: i64,
     pub orderbook_stale_ms: u64,
     pub high_volatility_universe_enabled: bool,
     pub high_volatility_refresh_secs: u64,
@@ -460,12 +607,24 @@ impl CrossExchangeArbitrageRuntime {
             last_event_at: self.last_event_at,
             configured_venues: self.config.active_venues(),
             configured_symbols: self.config.active_symbols().len(),
+            execution_module: self.config.execution_module.as_str().to_string(),
             excluded_bases: self.config.excluded_bases.clone(),
             target_notional_usdt: trim_float(self.config.dual_taker.target_notional_usdt),
             min_open_spread_pct: trim_float(self.config.dual_taker.min_open_spread_pct),
             min_open_net_profit_pct: trim_float(self.config.dual_taker.min_open_net_profit_pct),
             max_open_spread_pct: trim_float(self.config.dual_taker.max_open_spread_pct),
             close_min_net_profit_pct: trim_float(self.config.dual_taker.close_min_net_profit_pct),
+            slippage_capture_maker_price_offset_pct: trim_float(
+                self.config.slippage_capture.maker_price_offset_pct,
+            ),
+            slippage_capture_maker_order_timeout_ms: self
+                .config
+                .slippage_capture
+                .maker_order_timeout_ms,
+            slippage_capture_startup_skip_spread_secs: self
+                .config
+                .slippage_capture
+                .startup_skip_spread_secs,
             orderbook_stale_ms: self.config.dual_taker.orderbook_stale_ms,
             high_volatility_universe_enabled: self.config.volatility_universe.enabled,
             high_volatility_refresh_secs: self.config.volatility_universe.refresh_secs,
@@ -692,6 +851,198 @@ pub async fn submit_taker_order_pair_concurrently(
     ConcurrentTakerOrderSubmission { first, second }
 }
 
+pub async fn submit_slippage_capture_maker_order(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    order: &SlippageCaptureMakerOrderDraft,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+) -> SdkResult<ExecutionOrderAck> {
+    ctx.execution()
+        .submit_order(slippage_capture_maker_order_command(
+            ctx,
+            bundle_id,
+            order,
+            risk_profile_id,
+            requested_at,
+        ))
+        .await
+}
+
+pub async fn submit_slippage_capture_hedge_order(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    hedge: &SlippageCaptureHedgePlan,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+) -> SdkResult<ExecutionOrderAck> {
+    ctx.execution()
+        .submit_order(slippage_capture_hedge_order_command(
+            ctx,
+            bundle_id,
+            hedge,
+            risk_profile_id,
+            requested_at,
+        ))
+        .await
+}
+
+pub fn slippage_capture_maker_order_command(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    order: &SlippageCaptureMakerOrderDraft,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+) -> ExecutionOrderCommand {
+    let role = debug_name_to_snake(order.role);
+    let side = sdk_order_side(order.side);
+    let client_order_id = format!(
+        "{}:{}:{}:{}",
+        ctx.strategy_id(),
+        bundle_id,
+        order.exchange,
+        role
+    );
+    ExecutionOrderCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        idempotency_key: format!("{}:{}", ctx.run_id(), client_order_id),
+        client_order_id,
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: order.exchange.to_string(),
+        symbol: order.canonical_symbol.as_pair(),
+        side,
+        order_type: OrderType::Limit,
+        quantity: trim_float(order.quantity),
+        price: Some(trim_float(order.limit_price)),
+        time_in_force: Some(TimeInForce::GoodTilCanceled),
+        reduce_only: order.reduce_only,
+        metadata: BTreeMap::from([
+            ("bundle_id".to_string(), json!(bundle_id)),
+            ("role".to_string(), json!(role)),
+            (
+                "execution_style".to_string(),
+                json!("slippage_capture_maker_open"),
+            ),
+            ("open_module".to_string(), json!("slippage_capture")),
+            ("post_only_requested".to_string(), json!(order.post_only)),
+            (
+                "auto_cancel_after_ms".to_string(),
+                json!(order.auto_cancel_after_ms),
+            ),
+            ("cancel_if_unfilled".to_string(), json!(true)),
+            (
+                "top_of_book_price".to_string(),
+                json!(trim_float(order.top_of_book_price)),
+            ),
+            (
+                "planned_execution_price".to_string(),
+                json!(trim_float(order.limit_price)),
+            ),
+            (
+                "planned_base_quantity".to_string(),
+                json!(trim_float(order.base_quantity)),
+            ),
+            (
+                "exchange_order_quantity".to_string(),
+                json!(trim_float(order.quantity)),
+            ),
+            (
+                "quantity_unit".to_string(),
+                json!(debug_name_to_snake(order.quantity_unit)),
+            ),
+            (
+                "contract_size_base".to_string(),
+                json!(trim_float(order.contract_size)),
+            ),
+            (
+                "planned_notional_usdt".to_string(),
+                json!(trim_float(order.planned_notional_usdt())),
+            ),
+            ("hedge_after_fill_required".to_string(), json!(true)),
+            (
+                "hedge_trigger".to_string(),
+                json!("private_fill_or_rest_sync"),
+            ),
+        ]),
+    }
+}
+
+pub fn slippage_capture_hedge_order_command(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    hedge: &SlippageCaptureHedgePlan,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+) -> ExecutionOrderCommand {
+    let mut command = taker_order_command(
+        ctx,
+        bundle_id,
+        &hedge.order,
+        risk_profile_id,
+        requested_at,
+        "hedge",
+    );
+    command.metadata.insert(
+        "execution_style".to_string(),
+        json!("slippage_capture_taker_hedge"),
+    );
+    command
+        .metadata
+        .insert("open_module".to_string(), json!("slippage_capture"));
+    command
+        .metadata
+        .insert("hedge_trigger".to_string(), json!(hedge.trigger));
+    command.metadata.insert(
+        "filled_maker_base_quantity".to_string(),
+        json!(trim_float(hedge.filled_maker_base_quantity)),
+    );
+    command
+}
+
+pub fn slippage_capture_maker_cancel_command(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    maker_order: &SlippageCaptureMakerOrderDraft,
+    client_order_id: String,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+) -> ExecutionCancelCommand {
+    ExecutionCancelCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        client_order_id: Some(client_order_id.clone()),
+        execution_order_id: None,
+        idempotency_key: format!("{}:{}:cancel", ctx.run_id(), client_order_id),
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: maker_order.exchange.to_string(),
+        symbol: maker_order.canonical_symbol.as_pair(),
+        metadata: BTreeMap::from([
+            ("bundle_id".to_string(), json!(bundle_id)),
+            (
+                "execution_style".to_string(),
+                json!("slippage_capture_maker_cancel"),
+            ),
+            (
+                "cancel_reason".to_string(),
+                json!("maker_order_timeout_or_unfilled"),
+            ),
+            (
+                "auto_cancel_after_ms".to_string(),
+                json!(maker_order.auto_cancel_after_ms),
+            ),
+        ]),
+    }
+}
+
 fn taker_order_command(
     ctx: &StrategyContext,
     bundle_id: &str,
@@ -701,10 +1052,7 @@ fn taker_order_command(
     leg_index: &str,
 ) -> ExecutionOrderCommand {
     let role = debug_name_to_snake(order.role);
-    let side = match order.side {
-        OrderSide::Buy => SdkOrderSide::Buy,
-        OrderSide::Sell => SdkOrderSide::Sell,
-    };
+    let side = sdk_order_side(order.side);
     let client_order_id = format!(
         "{}:{}:{}:{}",
         ctx.strategy_id(),
@@ -774,6 +1122,13 @@ fn taker_order_command(
                 json!(true),
             ),
         ]),
+    }
+}
+
+fn sdk_order_side(side: OrderSide) -> SdkOrderSide {
+    match side {
+        OrderSide::Buy => SdkOrderSide::Buy,
+        OrderSide::Sell => SdkOrderSide::Sell,
     }
 }
 
@@ -860,6 +1215,15 @@ fn parse_market_type(value: &str) -> MarketType {
         "future" | "futures" => MarketType::Futures,
         "option" | "options" => MarketType::Option,
         other => MarketType::Custom(other.to_string()),
+    }
+}
+
+fn parse_execution_module(value: &str) -> CrossArbExecutionModule {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "slippage_capture" | "maker_taker" | "maker_taker_slippage" | "slippage-maker" => {
+            CrossArbExecutionModule::SlippageCapture
+        }
+        _ => CrossArbExecutionModule::DualTaker,
     }
 }
 
@@ -987,6 +1351,11 @@ pub fn config_schema() -> StrategyConfigSchema {
                     "type": "string",
                     "enum": ["perpetual", "perp", "swap", "futures", "future", "spot", "margin"]
                 },
+                "execution_module": {
+                    "type": "string",
+                    "enum": ["dual_taker", "slippage_capture", "maker_taker", "maker_taker_slippage"],
+                    "default": "dual_taker"
+                },
                 "excluded_bases": {
                     "type": "array",
                     "items": { "type": "string", "minLength": 1 }
@@ -1018,6 +1387,36 @@ pub fn config_schema() -> StrategyConfigSchema {
                         "symbol_cooldown_secs": { "type": "integer", "minimum": 0 },
                         "max_hold_secs": { "type": "integer", "minimum": 1 },
                         "close_on_max_hold_requires_profit": { "type": "boolean" }
+                    }
+                },
+                "slippage_capture": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "target_notional_usdt": { "type": "number", "minimum": 0.0 },
+                        "min_open_spread_pct": { "type": "number", "minimum": 0.0 },
+                        "min_open_net_profit_pct": { "type": "number", "minimum": 0.0 },
+                        "max_open_spread_pct": { "type": "number", "minimum": 0.0 },
+                        "startup_skip_spread_secs": { "type": "integer", "minimum": 0, "default": 10 },
+                        "max_signal_age_ms": { "type": "integer", "minimum": 1, "default": 3000 },
+                        "maker_price_offset_pct": { "type": "number", "minimum": 0.0 },
+                        "hedge_taker_slippage_pct": { "type": "number", "minimum": 0.0 },
+                        "close_taker_slippage_pct": { "type": "number", "minimum": 0.0 },
+                        "close_min_net_profit_pct": { "type": "number", "minimum": 0.0 },
+                        "max_hold_secs": { "type": "integer", "minimum": 1 },
+                        "close_on_max_hold_requires_profit": { "type": "boolean" },
+                        "maker_order_timeout_ms": { "type": "integer", "minimum": 1, "default": 1000 },
+                        "max_concurrent_maker_orders": { "type": "integer", "minimum": 1, "default": 1 },
+                        "cancel_unfilled_maker": { "type": "boolean" },
+                        "max_maker_top_depth_usdt": { "type": "number", "minimum": 0.0 },
+                        "hedge_top_of_book_capacity_ratio": { "type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0 },
+                        "enforce_hedge_top_depth": { "type": "boolean" },
+                        "orderbook_stale_ms": { "type": "integer", "minimum": 1 },
+                        "min_orderbook_levels": { "type": "integer", "minimum": 1 },
+                        "max_open_bundles": { "type": "integer", "minimum": 1 },
+                        "max_positions_per_exchange": { "type": "integer", "minimum": 1 },
+                        "max_active_bundles_per_symbol": { "type": "integer", "minimum": 1 },
+                        "symbol_cooldown_secs": { "type": "integer", "minimum": 0 }
                     }
                 },
                 "logging": {
@@ -1071,6 +1470,7 @@ fn common_snapshot_schema() -> Value {
                 "items": { "type": "string" }
             },
             "configured_symbols": { "type": "integer", "minimum": 0 },
+            "execution_module": { "type": "string" },
             "excluded_bases": {
                 "type": "array",
                 "items": { "type": "string" }
@@ -1080,6 +1480,9 @@ fn common_snapshot_schema() -> Value {
             "min_open_net_profit_pct": { "type": "string" },
             "max_open_spread_pct": { "type": "string" },
             "close_min_net_profit_pct": { "type": "string" },
+            "slippage_capture_maker_price_offset_pct": { "type": "string" },
+            "slippage_capture_maker_order_timeout_ms": { "type": "integer", "minimum": 1 },
+            "slippage_capture_startup_skip_spread_secs": { "type": "integer", "minimum": 0 },
             "orderbook_stale_ms": { "type": "integer", "minimum": 1 },
             "high_volatility_universe_enabled": { "type": "boolean" },
             "high_volatility_refresh_secs": { "type": "integer", "minimum": 1 },
@@ -1555,6 +1958,109 @@ mod tests {
         assert!(orders
             .iter()
             .all(|order| order.metadata["planned_execution_price"].is_string()));
+    }
+
+    #[test]
+    fn slippage_capture_commands_should_encode_maker_timeout_and_hedge_trigger() {
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "strategy-1",
+            "run-1",
+            json!({}),
+            execution,
+        );
+        let symbol = CanonicalSymbol::new("EDGE", "USDT");
+        let maker = SlippageCaptureMakerOrderDraft {
+            exchange: ExchangeId::new("binance"),
+            canonical_symbol: symbol.clone(),
+            side: OrderSide::Sell,
+            base_quantity: 0.055,
+            quantity: 0.055,
+            quantity_unit: QuantityUnit::Base,
+            contract_size: 1.0,
+            top_of_book_price: 100.6,
+            limit_price: 100.7,
+            reduce_only: false,
+            post_only: false,
+            auto_cancel_after_ms: 1_000,
+            role: SlippageCaptureOrderRole::OpenMakerShort,
+        };
+        let hedge = SlippageCaptureHedgePlan {
+            exchange: ExchangeId::new("gate"),
+            canonical_symbol: symbol.clone(),
+            side: OrderSide::Buy,
+            reference_price: 100.0,
+            filled_maker_base_quantity: 0.055,
+            order: TakerOrderDraft {
+                exchange: ExchangeId::new("gate"),
+                canonical_symbol: symbol,
+                side: OrderSide::Buy,
+                base_quantity: 0.055,
+                quantity: 0.055,
+                quantity_unit: QuantityUnit::Base,
+                contract_size: 1.0,
+                reference_price: 100.0,
+                worst_acceptable_price: 100.05,
+                reduce_only: false,
+                role: TakerOrderRole::OpenLong,
+            },
+            trigger: "on_maker_fill_private_stream_or_rest_fill_sync".to_string(),
+        };
+        let requested_at = Utc::now();
+
+        let maker_command = slippage_capture_maker_order_command(
+            &ctx,
+            "bundle-slip",
+            &maker,
+            "cross-arb-live",
+            requested_at,
+        );
+        let hedge_command = slippage_capture_hedge_order_command(
+            &ctx,
+            "bundle-slip",
+            &hedge,
+            "cross-arb-live",
+            requested_at,
+        );
+        let cancel_command = slippage_capture_maker_cancel_command(
+            &ctx,
+            "bundle-slip",
+            &maker,
+            maker_command.client_order_id.clone(),
+            "cross-arb-live",
+            requested_at,
+        );
+
+        assert_eq!(maker_command.order_type, OrderType::Limit);
+        assert_eq!(
+            maker_command.time_in_force,
+            Some(TimeInForce::GoodTilCanceled)
+        );
+        assert_eq!(
+            maker_command.metadata["execution_style"],
+            json!("slippage_capture_maker_open")
+        );
+        assert_eq!(maker_command.metadata["auto_cancel_after_ms"], json!(1000));
+        assert_eq!(
+            maker_command.metadata["hedge_after_fill_required"],
+            json!(true)
+        );
+        assert_eq!(hedge_command.order_type, OrderType::ImmediateOrCancel);
+        assert_eq!(
+            hedge_command.metadata["execution_style"],
+            json!("slippage_capture_taker_hedge")
+        );
+        assert_eq!(
+            hedge_command.metadata["hedge_trigger"],
+            json!("on_maker_fill_private_stream_or_rest_fill_sync")
+        );
+        assert_eq!(
+            cancel_command.metadata["cancel_reason"],
+            json!("maker_order_timeout_or_unfilled")
+        );
     }
 
     #[test]

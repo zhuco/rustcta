@@ -755,6 +755,7 @@ fn gateway_request_should_serialize_advanced_spot_order_payloads() {
     assert!(!capabilities.supports_quote_market_order);
     assert!(!capabilities.supports_amend_order);
     assert!(!capabilities.supports_order_list);
+    assert!(!capabilities.supports_funding_rates);
     assert!(capabilities.private_stream_capabilities.is_some());
     assert_eq!(
         capabilities.order_book,
@@ -777,6 +778,7 @@ fn capabilities_should_default_advanced_spot_flags_for_legacy_payloads() {
         "supports_balances": true,
         "supports_positions": false,
         "supports_fees": true,
+        "supports_funding_rates": true,
         "supports_place_order": false,
         "supports_cancel_order": false,
         "supports_query_order": true,
@@ -799,6 +801,7 @@ fn capabilities_should_default_advanced_spot_flags_for_legacy_payloads() {
     assert!(!capabilities.supports_quote_market_order);
     assert!(!capabilities.supports_amend_order);
     assert!(!capabilities.supports_order_list);
+    assert!(capabilities.supports_funding_rates);
     assert!(capabilities.private_stream_capabilities.is_none());
     assert!(capabilities.supports_order_book_snapshot);
     assert_eq!(capabilities.max_order_book_depth, Some(20));
@@ -856,6 +859,7 @@ fn capability_v2_should_round_trip_structured_fields() {
         max_limit: Some(1000),
         max_window_ms: Some(86_400_000),
     };
+    capabilities.capabilities_v2.funding_rates = CapabilitySupport::native();
     capabilities.capabilities_v2.order_history =
         HistoryCapability::unsupported("closed order history not exposed");
     capabilities.capabilities_v2.endpoints = vec![EndpointCapability {
@@ -884,6 +888,7 @@ fn capability_v2_should_round_trip_structured_fields() {
         "composed"
     );
     assert_eq!(value["capabilities_v2"]["endpoints"][0]["auth"], "hmac");
+    assert_eq!(value["capabilities_v2"]["funding_rates"]["mode"], "native");
     assert_eq!(value["capabilities_v2"]["credential_scopes"][1], "trade");
 
     let round_trip: ExchangeClientCapabilities = serde_json::from_value(value).unwrap();
@@ -918,6 +923,10 @@ fn capability_v2_should_default_missing_nested_fields() {
         StreamRuntimeCapability::default()
     );
     assert!(capabilities.endpoints.is_empty());
+    assert_eq!(
+        capabilities.funding_rates,
+        CapabilitySupport::unsupported("not declared")
+    );
     assert!(capabilities.credential_scopes.is_empty());
 }
 
@@ -931,6 +940,7 @@ fn capabilities_should_refresh_v2_from_legacy_flags() {
     capabilities.supports_cancel_order = true;
     capabilities.supports_batch_place_order = true;
     capabilities.supports_recent_fills = true;
+    capabilities.supports_funding_rates = true;
     capabilities.max_recent_fill_limit = Some(500);
 
     capabilities.refresh_v2_from_legacy_flags();
@@ -946,6 +956,10 @@ fn capabilities_should_refresh_v2_from_legacy_flags() {
     assert_eq!(
         capabilities.capabilities_v2.fills_history.max_limit,
         Some(500)
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.funding_rates,
+        CapabilitySupport::native()
     );
     assert_eq!(
         capabilities.capabilities_v2.credential_scopes,
@@ -971,6 +985,7 @@ fn capabilities_should_apply_v2_to_legacy_flags() {
         max_limit: Some(10),
         max_window_ms: None,
     };
+    capabilities.capabilities_v2.funding_rates = CapabilitySupport::native();
 
     capabilities.apply_v2_to_legacy_flags();
 
@@ -978,9 +993,129 @@ fn capabilities_should_apply_v2_to_legacy_flags() {
     assert!(capabilities.supports_private_rest);
     assert!(capabilities.supports_batch_place_order);
     assert!(capabilities.supports_cancel_all_orders);
+    assert!(capabilities.supports_funding_rates);
     assert!(capabilities.supports_recent_fills);
     assert_eq!(capabilities.max_recent_fill_limit, Some(10));
     assert!(!capabilities.supports_batch_cancel_order);
+}
+
+#[test]
+fn normalized_order_state_should_collapse_venue_statuses_to_strategy_state_machine() {
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::New),
+        NormalizedOrderState::New
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::Open),
+        NormalizedOrderState::New
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::PendingCancel),
+        NormalizedOrderState::New
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::PartiallyFilled),
+        NormalizedOrderState::PartiallyFilled
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::Filled),
+        NormalizedOrderState::Filled
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::Cancelled),
+        NormalizedOrderState::Canceled
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::Expired),
+        NormalizedOrderState::Canceled
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::Rejected),
+        NormalizedOrderState::Rejected
+    );
+    assert_eq!(
+        NormalizedOrderState::from(OrderStatus::Unknown),
+        NormalizedOrderState::Rejected
+    );
+    assert!(NormalizedOrderState::Filled.is_terminal());
+    assert!(!NormalizedOrderState::New.is_terminal());
+}
+
+#[test]
+fn exchange_adapter_profile_should_report_missing_features_and_inconsistencies() {
+    let mut capabilities = ExchangeClientCapabilities::new(exchange_id());
+    capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
+    capabilities.supports_public_rest = true;
+    capabilities.supports_private_rest = true;
+    capabilities.supports_order_book_snapshot = true;
+    capabilities.supports_place_order = true;
+    capabilities.supports_cancel_order = true;
+    capabilities.supports_query_order = true;
+    capabilities.supports_open_orders = true;
+    capabilities.supports_recent_fills = true;
+    capabilities.supports_positions = true;
+    capabilities.supports_funding_rates = true;
+    capabilities.supports_post_only = true;
+    capabilities.supports_order_types = vec![
+        OrderType::Market,
+        OrderType::Limit,
+        OrderType::PostOnly,
+        OrderType::IOC,
+    ];
+    capabilities.supports_time_in_force = vec![TimeInForce::GTC, TimeInForce::IOC];
+    capabilities.order_book = OrderBookCapability::snapshot_only(Some(100));
+    capabilities.refresh_v2_from_legacy_flags();
+
+    let profile = ExchangeAdapterProfile::from_capabilities(capabilities, None);
+
+    assert!(profile.spot_futures_unified);
+    assert!(profile.order_types.limit);
+    assert!(profile.order_types.market);
+    assert!(profile.order_types.ioc);
+    assert!(profile.order_types.post_only);
+    assert_eq!(
+        profile.cancel_replace,
+        AdapterSupport::Composed {
+            reason: "composed from cancel_order followed by place_order".to_string()
+        }
+    );
+    assert!(!profile
+        .missing_features()
+        .iter()
+        .any(|item| item.feature == "funding_rate"));
+    assert!(profile
+        .missing_features()
+        .iter()
+        .any(|item| item.feature == "leverage_control"));
+    assert!(profile
+        .missing_features()
+        .iter()
+        .any(|item| item.feature == "position_mode_control"));
+    assert!(profile
+        .inconsistent_behaviors()
+        .iter()
+        .any(|item| item.behavior == "cancel_replace_atomicity"));
+    assert!(profile
+        .inconsistent_behaviors()
+        .iter()
+        .any(|item| item.behavior == "order_book_recovery"));
+}
+
+#[test]
+fn exchange_api_audit_report_should_collect_profile_gaps_and_plan() {
+    let capabilities = ExchangeClientCapabilities::new(exchange_id());
+    let profile = ExchangeAdapterProfile::from_capabilities(capabilities, None);
+    let report = ExchangeApiAuditReport::from_profiles(Utc::now(), vec![profile]);
+
+    assert_eq!(report.exchanges.len(), 1);
+    assert!(report
+        .missing_features
+        .iter()
+        .any(|item| item.feature == "spot_futures_unified"));
+    assert!(report
+        .implementation_plan
+        .iter()
+        .any(|item| item.title == "wire reliable streams"));
 }
 
 #[test]

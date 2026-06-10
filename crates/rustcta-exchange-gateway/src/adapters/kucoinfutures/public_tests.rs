@@ -1,5 +1,6 @@
 use rustcta_exchange_api::{
-    ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeClient, FundingRatesRequest, OrderBookRequest, SymbolRulesRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use serde_json::json;
 
@@ -82,6 +83,50 @@ async fn kucoinfutures_adapter_should_load_level2_20_order_book_from_public_rest
         request.query.get("symbol").map(String::as_str),
         Some("XBTUSDTM")
     );
+}
+
+#[tokio::test]
+async fn kucoinfutures_adapter_should_load_latest_funding_rate_from_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "200000",
+        "data": {
+            "items": [{
+                "symbol": "XBTUSDTM",
+                "timePoint": 1743055200000_i64,
+                "fundingRate": "0.0001",
+                "funding": "-0.0123",
+                "currency": "USDT"
+            }]
+        }
+    })])
+    .await;
+    let adapter = KuCoinFuturesGatewayAdapter::new(KuCoinFuturesGatewayConfig {
+        rest_base_url: base_url,
+        ..KuCoinFuturesGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = ExchangeClient::get_funding_rates(
+        &adapter,
+        FundingRatesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("funding"),
+            symbols: vec![symbol_scope()],
+        },
+    )
+    .await
+    .expect("funding");
+
+    assert_eq!(response.rates.len(), 1);
+    assert_eq!(response.rates[0].funding_rate, "0.0001");
+    assert!(response.rates[0].funding_time.is_some());
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.path, "/api/v1/funding-history");
+    assert_eq!(
+        request.query.get("symbol").map(String::as_str),
+        Some("XBTUSDTM")
+    );
+    assert_eq!(request.query.get("pageSize").map(String::as_str), Some("1"));
 }
 
 #[tokio::test]

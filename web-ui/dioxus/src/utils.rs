@@ -1136,6 +1136,45 @@ pub(crate) fn strategy_log_rows_for_category(
     lang: Language,
 ) -> Vec<LogRow> {
     let source_label = strategy_log_source_label(logs, lang);
+    if let Some(events) = logs.get("events").and_then(Value::as_array) {
+        let mut rows = events
+            .iter()
+            .rev()
+            .filter(|event| category == "all" || strategy_log_event_matches(event, category))
+            .map(|item| {
+                let level = text_at(item, "level", lang);
+                let message = item
+                    .get("message")
+                    .or_else(|| item.get("error"))
+                    .or_else(|| item.get("warning"))
+                    .map(|value| value_text(value, lang))
+                    .unwrap_or_else(|| compact(item));
+                let message = strategy_log_display_message(&message, lang);
+                let timestamp = log_timestamp_text(item).unwrap_or_else(|| "-".to_string());
+                LogRow {
+                    class_name: log_class(&level, &message).to_string(),
+                    timestamp,
+                    level: if level == "-" {
+                        "INFO".to_string()
+                    } else {
+                        level
+                    },
+                    source: source_label.clone(),
+                    message,
+                }
+            })
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            rows.push(LogRow {
+                timestamp: "-".to_string(),
+                level: "INFO".to_string(),
+                source: source_label,
+                message: t(lang, "no_exception_logs").to_string(),
+                class_name: "log-info".to_string(),
+            });
+        }
+        return rows;
+    }
     let source = match category {
         "all" => logs.get("lines"),
         other => logs
@@ -1184,6 +1223,49 @@ pub(crate) fn strategy_log_rows_for_category(
 
 pub(crate) fn strategy_log_source_text(logs: &Value, lang: Language) -> String {
     let label = strategy_log_source_label(logs, lang);
+    if logs.get("events").is_some()
+        || logs.get("configured").is_some()
+        || logs.get("readable").is_some()
+        || logs.get("event_count").is_some()
+    {
+        let target = text_at(logs, "target", lang);
+        let path = text_at(logs, "path", lang);
+        let source = if target != "-" {
+            target
+        } else if path != "-" {
+            path
+        } else {
+            "-".to_string()
+        };
+        let mut parts = vec![format!("{label}: {source}")];
+        if let Some(configured) = logs.get("configured").and_then(Value::as_bool) {
+            parts.push(format!(
+                "{} {}",
+                t(lang, "configured"),
+                bool_text(configured, lang)
+            ));
+        }
+        if let Some(readable) = logs.get("readable").and_then(Value::as_bool) {
+            let readable_label = match lang {
+                Language::Zh => "可读",
+                Language::En => "Readable",
+            };
+            parts.push(format!("{readable_label} {}", bool_text(readable, lang)));
+        }
+        let event_count = logs.get("event_count").and_then(Value::as_u64).or_else(|| {
+            logs.get("events")
+                .and_then(Value::as_array)
+                .map(|events| events.len() as u64)
+        });
+        if let Some(event_count) = event_count {
+            parts.push(format!("{} {event_count}", t(lang, "event_count")));
+        }
+        let read_error = text_at(logs, "read_error", lang);
+        if read_error != "-" {
+            parts.push(format!("error {read_error}"));
+        }
+        return parts.join(" · ");
+    }
     let path = text_at(logs, "path", lang);
     let pointer = text_at(logs, "source_pointer", lang);
     if pointer == "-" {
@@ -1194,17 +1276,28 @@ pub(crate) fn strategy_log_source_text(logs: &Value, lang: Language) -> String {
 }
 
 fn strategy_log_source_label(logs: &Value, lang: Language) -> String {
-    let source = text_at(logs, "source", Language::En);
-    let path = text_at(logs, "path", Language::En);
-    let is_spot_arb = source.contains("spot_arb")
-        || source.contains("strategy_runtime")
-        || path.contains("spot_spot_arbitrage")
-        || path.contains("control_panel/strategy_");
-    match (lang, is_spot_arb) {
-        (Language::Zh, true) => "现货套利".to_string(),
-        (Language::Zh, false) => "策略日志".to_string(),
-        (Language::En, true) => "spot-arb".to_string(),
-        (Language::En, false) => "strategy".to_string(),
+    let source = text_at(logs, "source", Language::En).to_ascii_lowercase();
+    let path = text_at(logs, "path", Language::En).to_ascii_lowercase();
+    let target = text_at(logs, "target", Language::En).to_ascii_lowercase();
+    let haystack = format!("{source} {path} {target}");
+    let is_cross_arb = haystack.contains("cross_arb")
+        || haystack.contains("cross-arb")
+        || haystack.contains("cross_exchange")
+        || haystack.contains("cross-exchange");
+    let is_funding_arb = haystack.contains("funding");
+    let is_spot_arb = haystack.contains("spot_arb")
+        || haystack.contains("spot_spot")
+        || haystack.contains("strategy_runtime")
+        || haystack.contains("control_panel/strategy_");
+    match (lang, is_cross_arb, is_funding_arb, is_spot_arb) {
+        (Language::Zh, true, _, _) => "跨所合约套利".to_string(),
+        (Language::Zh, _, true, _) => "资金费率套利".to_string(),
+        (Language::Zh, _, _, true) => "现货套利".to_string(),
+        (Language::Zh, _, _, _) => "策略日志".to_string(),
+        (Language::En, true, _, _) => "cross-arb".to_string(),
+        (Language::En, _, true, _) => "funding-arb".to_string(),
+        (Language::En, _, _, true) => "spot-arb".to_string(),
+        (Language::En, _, _, _) => "strategy".to_string(),
     }
 }
 
@@ -1212,7 +1305,39 @@ fn strategy_log_display_message(message: &str, lang: Language) -> String {
     if !lang.is_zh() {
         return message.to_string();
     }
-    translate_strategy_log_message(message).unwrap_or_else(|| message.to_string())
+    translate_cross_arb_trade_event_message(message)
+        .or_else(|| translate_strategy_log_message(message))
+        .unwrap_or_else(|| message.to_string())
+}
+
+fn translate_cross_arb_trade_event_message(message: &str) -> Option<String> {
+    let lower = message.to_ascii_lowercase();
+    let action = kv_log_value(message, "action").unwrap_or_else(|| "-".to_string());
+    let lifecycle = kv_log_value(message, "lifecycle").unwrap_or_else(|| action.clone());
+    if !lower.contains("cross-arb trade event")
+        && !lower.contains("cross-arb emergency close")
+        && !action.starts_with("cross_arb_")
+        && !lifecycle.starts_with("cross_arb_")
+    {
+        return None;
+    }
+    let symbol = kv_log_value(message, "symbol")
+        .or_else(|| kv_log_value(message, "canonical_symbol"))
+        .unwrap_or_else(|| "-".to_string());
+    let operation = zh_cross_arb_operation(&action, &lifecycle);
+    let reason = kv_log_value(message, "failure_reason")
+        .or_else(|| kv_log_value(message, "emergency_trigger_reason"))
+        .unwrap_or_default();
+    let reason = zh_cross_arb_failure_reason(&reason);
+    let reason = if reason.is_empty() {
+        "无".to_string()
+    } else {
+        reason
+    };
+    Some(format!(
+        "策略日志=跨所合约套利 | 交易对={} | 执行操作={} | 原因={}",
+        symbol, operation, reason
+    ))
 }
 
 fn translate_strategy_log_message(message: &str) -> Option<String> {
@@ -1411,6 +1536,208 @@ fn translate_strategy_log_message(message: &str) -> Option<String> {
     None
 }
 
+fn kv_log_value(message: &str, key: &str) -> Option<String> {
+    let marker = format!("{key}=");
+    let rest = message.split_once(&marker)?.1.trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = rest.strip_prefix('"') {
+        let mut escaped = false;
+        let mut value = String::new();
+        for ch in stripped.chars() {
+            if escaped {
+                value.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                break;
+            } else {
+                value.push(ch);
+            }
+        }
+        return normalized_log_value(value);
+    }
+    normalized_log_value(
+        rest.split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .trim_matches('"')
+            .trim_end_matches(',')
+            .to_string(),
+    )
+}
+
+fn normalized_log_value(value: String) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value == "-" || value.eq_ignore_ascii_case("null") {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn zh_cross_arb_operation(action: &str, lifecycle: &str) -> String {
+    let value = if lifecycle != "-" && !lifecycle.is_empty() {
+        lifecycle
+    } else {
+        action
+    };
+    let lower = value.to_ascii_lowercase();
+    let text = match lower.as_str() {
+        "cross_arb_open_decision_audit" => "开仓决策审核",
+        "cross_arb_open" | "open" => "开仓执行",
+        "cross_arb_close" | "close" => "平仓执行",
+        "cross_arb_emergency_close" | "emergency_close" => "应急平仓",
+        "cross_arb_order" | "order" => "订单提交",
+        "cross_arb_fill" | "fill" => "成交回报",
+        "cross_arb_pair_execution" | "pair_execution" => "双腿执行",
+        _ if lower.contains("open_decision") => "开仓决策审核",
+        _ if lower.contains("emergency_close") => "应急平仓",
+        _ if lower.contains("close") => "平仓执行",
+        _ if lower.contains("open") => "开仓执行",
+        _ if lower.contains("fill") => "成交回报",
+        _ if lower.contains("order") => "订单提交",
+        _ => value,
+    };
+    text.to_string()
+}
+
+fn zh_cross_arb_failure_reason(reason: &str) -> String {
+    let reason = reason.trim();
+    if reason.is_empty() || reason == "-" {
+        return String::new();
+    }
+    let segments = reason
+        .split(';')
+        .map(zh_cross_arb_failure_reason_segment)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.len() > 1 {
+        return segments.join("; ");
+    }
+    if let Some(segment) = segments.into_iter().next() {
+        return segment;
+    }
+    String::new()
+}
+
+fn zh_cross_arb_failure_reason_segment(reason: &str) -> String {
+    let reason = reason.trim();
+    if reason.is_empty() || reason == "-" {
+        return String::new();
+    }
+    let lower = reason.to_ascii_lowercase();
+    let text = match lower.as_str() {
+        "below_min_net_profit" => "低于最低净利润阈值",
+        "insufficient_top_depth" => "盘口顶层深度不足",
+        "close-only control is enabled" => "已启用只平仓控制，禁止新开仓",
+        "new entries are paused by control config" => "控制配置已暂停新开仓",
+        "new entries are stopped by runtime deadline" => "运行时截止时间已停止新开仓",
+        "invalid_long_book" => "多头盘口无效",
+        "invalid_short_book" => "空头盘口无效",
+        "stale_long_book" => "多头盘口过期",
+        "stale_short_book" => "空头盘口过期",
+        "above_max_spread" => "价差超过最大允许阈值",
+        "strategy_halted" => "策略已暂停",
+        "max_open_bundles" => "已达到最大开仓组合数",
+        "symbol_already_active" => "交易对已有活跃套利组合",
+        "symbol_cooling_down" => "交易对处于冷却期",
+        "exchange_position_limit" => "触发交易所持仓限制",
+        "private websocket did not confirm fill before timeout; rest readback is disabled for the trading hot path" => {
+            "私有 WebSocket 未在超时前确认成交，且热路径禁用了 REST 回读"
+        }
+        _ if lower.contains("private websocket did not confirm fill before timeout") => {
+            "私有 WebSocket 未在超时前确认成交"
+        }
+        _ if lower.contains("status=expired")
+            && lower.contains("accepted=true")
+            && lower.contains("error=-") =>
+        {
+            return format!(
+                "{} 已被交易所接受，但 IOC 限价单过期未成交",
+                reason
+                    .split_whitespace()
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+        _ if lower.contains("open route") && lower.contains("is cooling down until") => {
+            return reason
+                .replace("open route", "开仓路线")
+                .replace("is cooling down until", "冷却中，直到")
+                .replace("after recent_partial_close_emergency_repair", "原因：最近部分平仓后应急修复")
+                .replace("after recent_incomplete_open", "原因：最近开仓不完整")
+                .replace("after single_leg_open_fill", "原因：最近单腿开仓成交")
+                .replace("after completed close", "原因：最近完成平仓");
+        }
+        _ if lower.contains("live execution halted because unmanaged exchange positions were detected") =>
+        {
+            return reason.replace(
+                "live execution halted because unmanaged exchange positions were detected",
+                "检测到交易所存在程序未管理仓位，实盘执行已暂停",
+            );
+        }
+        _ if lower.contains("short leg notional is below exchange minimum") => {
+            "空头腿名义金额低于交易所最低下单额"
+        }
+        _ if lower.contains("long leg notional is below exchange minimum") => {
+            "多头腿名义金额低于交易所最低下单额"
+        }
+        _ if lower.contains("quantity is below exchange minimum") => "数量低于交易所最低下单要求",
+        _ if lower.contains("top-of-book executable depth")
+            && lower.contains("is below target notional") =>
+        {
+            return reason
+                .replace("top-of-book executable depth", "盘口顶层可执行深度")
+                .replace("is below target notional", "低于目标名义金额");
+        }
+        _ if lower.contains("raw spread")
+            && lower.contains("is below min open raw spread") =>
+        {
+            return reason
+                .replace("raw spread", "原始价差")
+                .replace("is below min open raw spread", "低于开仓最低原始价差")
+                .replace("live ", "实盘");
+        }
+        _ if lower.contains("expected net edge")
+            && lower.contains("is below min open net edge") =>
+        {
+            return reason
+                .replace("expected net edge", "预期净边际")
+                .replace("is below min open net edge", "低于开仓最低净边际")
+                .replace("live ", "实盘");
+        }
+        _ if lower.contains("live raw spread")
+            && lower.contains("is below execution quality min") =>
+        {
+            return reason
+                .replace("live raw spread", "实盘原始价差")
+                .replace("is below execution quality min", "低于执行质量最低要求");
+        }
+        _ if lower.contains("live expected net edge")
+            && lower.contains("is below execution quality min") =>
+        {
+            return reason
+                .replace("live expected net edge", "实盘预期净边际")
+                .replace("is below execution quality min", "低于执行质量最低要求");
+        }
+        _ if lower.contains("display-only row has no executable order drafts") => {
+            "该机会仅展示，无可执行订单草稿"
+        }
+        _ if lower.contains("private_ws_confirmation_timeout") => "私有 WebSocket 成交确认超时",
+        _ if lower.contains("emergency close not filled") => "应急平仓未成交",
+        _ if lower.contains("not filled") => "订单未成交",
+        _ if lower.contains("submit_failed") => "订单提交失败",
+        _ if lower.contains("rejected") => "订单被拒绝",
+        _ if lower.contains("timeout") => "执行超时",
+        _ => reason,
+    };
+    text.to_string()
+}
+
 fn kv_token<'a>(message: &'a str, key: &str) -> Option<&'a str> {
     message
         .split_once(key)
@@ -1453,6 +1780,16 @@ pub(crate) fn strategy_log_count(logs: &Value, category: &str) -> usize {
         .and_then(Value::as_u64)
         .map(|value| value as usize)
         .or_else(|| {
+            if let Some(events) = logs.get("events").and_then(Value::as_array) {
+                return Some(if category == "all" {
+                    events.len()
+                } else {
+                    events
+                        .iter()
+                        .filter(|event| strategy_log_event_matches(event, category))
+                        .count()
+                });
+            }
             let source = if category == "all" {
                 logs.get("lines")
             } else {
@@ -1462,6 +1799,28 @@ pub(crate) fn strategy_log_count(logs: &Value, category: &str) -> usize {
             source.and_then(Value::as_array).map(Vec::len)
         })
         .unwrap_or_default()
+}
+
+fn strategy_log_event_matches(event: &Value, category: &str) -> bool {
+    let level = text_at(event, "level", Language::En).to_ascii_lowercase();
+    let message = text_at(event, "message", Language::En).to_ascii_lowercase();
+    match category {
+        "error" => level == "error" || message.contains("error") || message.contains("failed"),
+        "warn" => level == "warn" || level == "warning" || message.contains("warn"),
+        "trade" => {
+            message.contains("order")
+                || message.contains("fill")
+                || message.contains("trade")
+                || message.contains("pnl")
+        }
+        "control" => message.contains("control") || message.contains("command"),
+        "balance" => message.contains("balance") || message.contains("equity"),
+        "market" => {
+            message.contains("book") || message.contains("market") || message.contains("spread")
+        }
+        "info" => level == "info" || level == "-",
+        _ => false,
+    }
 }
 
 pub(crate) fn collect_log_value(
@@ -1712,6 +2071,19 @@ pub(crate) fn log_class(level: &str, message: &str) -> &'static str {
     let text = format!("{level} {message}").to_ascii_lowercase();
     if text.contains("error") || text.contains("panic") || text.contains("fail") {
         "log-error"
+    } else if text.contains("actual_pnl_usdt=-")
+        || text.contains("realized_profit_usdt=-")
+        || text.contains("pnl=-")
+        || text.contains("亏损")
+        || text.contains("loss")
+    {
+        "log-loss"
+    } else if text.contains("actual_pnl_usdt=")
+        || text.contains("realized_profit_usdt=")
+        || text.contains(" profit")
+        || text.contains("盈利")
+    {
+        "log-profit"
     } else if text.contains("warn") || text.contains("stale") || text.contains("risk") {
         "log-warn"
     } else if text.contains("accepted") || text.contains("connected") || text.contains("ok") {
@@ -2120,15 +2492,6 @@ pub(crate) fn cross_arb_exchange_taker_success(rows: &[Value], exchange: &str) -
     }
 }
 
-pub(crate) fn cross_arb_exchange_latency(rows: &[Value], exchange: &str, lang: Language) -> String {
-    rows.iter()
-        .filter(|row| text_at(row, "exchange", lang).eq_ignore_ascii_case(exchange))
-        .filter_map(|row| row.get("latency_ms").and_then(Value::as_f64))
-        .max_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
-        .map(format_ms)
-        .unwrap_or_else(|| "-".to_string())
-}
-
 pub(crate) fn cross_arb_symbol_capital(rows: &[Value], symbol: &str) -> f64 {
     rows.iter()
         .filter(|row| cross_arb_row_symbol(row).eq_ignore_ascii_case(symbol))
@@ -2311,8 +2674,9 @@ fn object_is_sensitive_credential_field(values: &Map<String, Value>) -> bool {
 }
 
 fn log_timestamp_text(value: &Value) -> Option<String> {
-    [
+    let field_timestamp = [
         "timestamp",
+        "occurred_at",
         "recorded_at",
         "updated_at",
         "created_at",
@@ -2323,7 +2687,34 @@ fn log_timestamp_text(value: &Value) -> Option<String> {
         "timestamp_ms",
     ]
     .iter()
-    .find_map(|key| value.get(*key).and_then(format_beijing_time_value))
+    .find_map(|key| value.get(*key).and_then(format_beijing_time_value));
+    field_timestamp.or_else(|| {
+        value
+            .get("message")
+            .and_then(Value::as_str)
+            .and_then(log_timestamp_from_message)
+    })
+}
+
+fn log_timestamp_from_message(message: &str) -> Option<String> {
+    let trimmed = message.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let trimmed = trimmed.trim_start_matches('[');
+    for length in [35usize, 30, 29, 25, 24, 23, 20, 19] {
+        if trimmed.len() < length {
+            continue;
+        }
+        let candidate = trimmed[..length]
+            .trim_end_matches(']')
+            .trim_end_matches(',')
+            .trim();
+        if let Some(timestamp) = format_beijing_time_text(candidate) {
+            return Some(timestamp);
+        }
+    }
+    None
 }
 
 fn is_time_key(key: &str) -> bool {
@@ -2340,7 +2731,7 @@ fn is_time_key(key: &str) -> bool {
         || key.contains("timestamp")
 }
 
-fn format_beijing_time_value(value: &Value) -> Option<String> {
+pub(crate) fn format_beijing_time_value(value: &Value) -> Option<String> {
     match value {
         Value::String(value) => format_beijing_time_text(value),
         Value::Number(value) => value

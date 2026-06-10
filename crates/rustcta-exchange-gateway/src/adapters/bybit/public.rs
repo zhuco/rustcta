@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
-    SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRatesRequest, FundingRatesResponse,
+    OrderBookRequest, OrderBookResponse, SymbolRulesRequest, SymbolRulesResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
 
-use super::parser::{normalize_bybit_symbol, parse_orderbook_snapshot, parse_symbol_rules};
+use super::parser::{
+    normalize_bybit_symbol, parse_funding_rate_snapshot, parse_orderbook_snapshot,
+    parse_symbol_rules,
+};
 use super::BybitGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
@@ -86,6 +90,52 @@ impl BybitGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
             order_book,
+        })
+    }
+
+    pub(super) async fn get_funding_rates_impl(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        if request.symbols.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "bybit.get_funding_rates requires at least one symbol".to_string(),
+            });
+        }
+        let mut rates = Vec::with_capacity(request.symbols.len());
+        for symbol in request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            self.ensure_supported_market_type(symbol.market_type)?;
+            if symbol.market_type == MarketType::Spot {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "bybit.get_funding_rates_spot_unsupported",
+                });
+            }
+            let mut params = HashMap::new();
+            params.insert(
+                "category".to_string(),
+                bybit_category(symbol.market_type).to_string(),
+            );
+            params.insert(
+                "symbol".to_string(),
+                normalize_bybit_symbol(&symbol.exchange_symbol.symbol)?,
+            );
+            params.insert("limit".to_string(), "1".to_string());
+            let value = self
+                .rest
+                .send_public_get("/v5/market/funding/history", &params)
+                .await?;
+            rates.push(parse_funding_rate_snapshot(
+                &self.exchange_id,
+                symbol,
+                &value,
+            )?);
+        }
+        Ok(FundingRatesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            rates,
         })
     }
 }

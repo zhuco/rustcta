@@ -3,14 +3,17 @@ use rustcta_strategy_cross_exchange_arbitrage::core::{QuantityUnit, TakerFillAud
 use rustcta_strategy_cross_exchange_arbitrage::{
     cross_exchange_market_data_subscriptions,
     cross_exchange_market_data_subscriptions_for_high_volatility, evaluate_dual_taker_close,
-    evaluate_dual_taker_open_opportunities, evaluate_ready_dual_taker_open_opportunities,
+    evaluate_dual_taker_open_opportunities, evaluate_dual_taker_open_opportunities_with_audit,
+    evaluate_ready_dual_taker_open_opportunities, evaluate_slippage_capture_open_opportunities,
     inspect_single_leg_net_positions, plan_startup_usdt_position_takeover, ArbitrageRiskState,
-    CanonicalSymbol, CloseReason, CrossExchangeArbitrageConfig, DualTakerArbitrageConfig,
-    ExchangeId, ExchangeStartupReadiness, ExchangeStatusRegistry, FeeModel, NetPosition,
-    OpenArbitragePosition, OpenBlockReason, OrderBookTop, OrderSide, PairedTakerFillState,
-    PositionSide, PrecisionRegistry, SingleLegGuard, StartupReadiness, StartupUsdtPosition,
-    StrategyLogEventKind, StrategyLogRotationConfig, SymbolPrecision, TakerOrderRole,
-    VolatilityRankDirection, VolatilityRankTicker,
+    CanonicalSymbol, CloseReason, CrossArbExecutionModule, CrossExchangeArbitrageConfig,
+    DualTakerArbitrageConfig, ExchangeId, ExchangeStartupReadiness, ExchangeStatusRegistry,
+    FeeModel, MakerLegKind, NetPosition, OpenArbitragePosition, OpenBlockReason,
+    OpenOpportunityDecision, OpenOpportunityRejectReason, OrderBookTop, OrderSide,
+    PairedTakerFillState, PositionSide, PrecisionRegistry, SingleLegGuard,
+    SlippageCaptureArbitrageConfig, SlippageCaptureOrderRole, SlippageCaptureStartupGate,
+    StartupReadiness, StartupUsdtPosition, StrategyLogEventKind, StrategyLogRotationConfig,
+    SymbolPrecision, TakerOrderRole, VolatilityRankDirection, VolatilityRankTicker,
 };
 use rustcta_strategy_sdk::{MarketDataChannel, MarketType};
 use serde_json::json;
@@ -308,6 +311,250 @@ fn dual_taker_open_should_use_one_shared_quantity_and_configured_spread_window()
         &above_max, &precision, &fee_model, &config, now
     )
     .is_empty());
+}
+
+#[test]
+fn slippage_capture_should_skip_startup_then_select_thin_maker_book_and_taker_hedge() {
+    let started_at = fixed_now();
+    let now = started_at + Duration::seconds(11);
+    let symbol = CanonicalSymbol::new("EDGE", "USDT");
+    let precision = precision_registry(&symbol);
+    let config = SlippageCaptureArbitrageConfig {
+        target_notional_usdt: 5.5,
+        min_open_spread_pct: 0.005,
+        max_open_spread_pct: 0.05,
+        maker_price_offset_pct: 0.001,
+        maker_order_timeout_ms: 1_000,
+        max_maker_top_depth_usdt: 20.0,
+        ..SlippageCaptureArbitrageConfig::default()
+    };
+    let startup_gate = SlippageCaptureStartupGate::evaluate(started_at, started_at, &config);
+    assert!(startup_gate.blocked);
+    assert!(evaluate_slippage_capture_open_opportunities(
+        Some(&startup_gate),
+        &valid_open_books(&symbol, started_at),
+        &precision,
+        &FeeModel::default(),
+        &config,
+        None,
+        started_at,
+    )
+    .is_empty());
+
+    let books = vec![
+        book("binance", &symbol, 99.9, 100.0, 20.0, 0.08, now),
+        book("gate", &symbol, 100.6, 100.7, 20.0, 20.0, now),
+    ];
+    let ready_gate = SlippageCaptureStartupGate::evaluate(started_at, now, &config);
+    let opportunities = evaluate_slippage_capture_open_opportunities(
+        Some(&ready_gate),
+        &books,
+        &precision,
+        &FeeModel::default(),
+        &config,
+        None,
+        now,
+    );
+
+    assert_eq!(opportunities.len(), 1);
+    let opportunity = &opportunities[0];
+    assert_eq!(opportunity.maker_leg_kind, MakerLegKind::LongMakerBuy);
+    assert_eq!(opportunity.maker_exchange, ExchangeId::new("binance"));
+    assert_eq!(opportunity.hedge_exchange, ExchangeId::new("gate"));
+    assert_eq!(
+        opportunity.maker_order.role,
+        SlippageCaptureOrderRole::OpenMakerLong
+    );
+    assert_eq!(opportunity.maker_order.side, OrderSide::Buy);
+    assert_eq!(opportunity.maker_order.auto_cancel_after_ms, 1_000);
+    assert!(!opportunity.maker_order.reduce_only);
+    assert!(opportunity.maker_order.post_only);
+    assert!(
+        (opportunity.maker_order.limit_price - 99.9).abs() < EPSILON,
+        "buy maker limit should be ask price minus configured offset rounded to tick"
+    );
+    assert_eq!(
+        opportunity.hedge_after_fill.order.role,
+        TakerOrderRole::OpenShort
+    );
+    assert_eq!(opportunity.hedge_after_fill.order.side, OrderSide::Sell);
+    assert!(opportunity.close_orders_are_dual_taker);
+    assert!(opportunity.expected_net_pnl_usdt > 0.0);
+}
+
+#[test]
+fn slippage_capture_should_size_hedge_using_worst_price_min_notional() {
+    let now = fixed_now();
+    let symbol = CanonicalSymbol::new("BAN", "USDT");
+    let gate = ExchangeId::new("gate");
+    let binance = ExchangeId::new("binance");
+    let mut precision = PrecisionRegistry::default();
+    precision.insert(
+        gate.clone(),
+        symbol.clone(),
+        SymbolPrecision {
+            price_tick: 0.00001,
+            quantity_step: 1.0,
+            min_quantity: 1.0,
+            min_notional_usdt: 0.0,
+            quantity_unit: QuantityUnit::Contracts,
+            contract_size: 10.0,
+        },
+    );
+    precision.insert(
+        binance.clone(),
+        symbol.clone(),
+        SymbolPrecision {
+            price_tick: 0.00001,
+            quantity_step: 1.0,
+            min_quantity: 1.0,
+            min_notional_usdt: 5.0,
+            quantity_unit: QuantityUnit::Base,
+            contract_size: 1.0,
+        },
+    );
+    let config = SlippageCaptureArbitrageConfig {
+        target_notional_usdt: 5.2,
+        min_open_spread_pct: 0.008,
+        min_open_net_profit_pct: 0.001,
+        max_open_spread_pct: 0.10,
+        maker_price_offset_pct: 0.0025,
+        hedge_taker_slippage_pct: 0.005,
+        max_maker_top_depth_usdt: 0.0,
+        enforce_hedge_top_depth: false,
+        ..SlippageCaptureArbitrageConfig::default()
+    };
+    let books = vec![
+        book("gate", &symbol, 0.07090, 0.07111, 2_000.0, 1.0, now),
+        book("binance", &symbol, 0.07172, 0.07173, 50_000.0, 2_000.0, now),
+    ];
+
+    let opportunities = evaluate_slippage_capture_open_opportunities(
+        None,
+        &books,
+        &precision,
+        &FeeModel::default(),
+        &config,
+        None,
+        now,
+    );
+
+    let opportunity = opportunities
+        .iter()
+        .find(|opportunity| {
+            opportunity.hedge_exchange == binance
+                && opportunity.hedge_after_fill.order.side == OrderSide::Sell
+        })
+        .expect("binance sell hedge opportunity");
+    assert_eq!(opportunity.maker_leg_kind, MakerLegKind::LongMakerBuy);
+    assert!(
+        opportunity.quantity > 70.0,
+        "quantity should be raised above the BAN failure case"
+    );
+    assert!(opportunity.maker_notional_usdt >= 5.2);
+    assert!(
+        opportunity.hedge_after_fill.order.worst_acceptable_price
+            * opportunity.hedge_after_fill.order.quantity
+            >= 5.0
+    );
+}
+
+#[test]
+fn config_should_select_slippage_capture_module_and_parse_runtime_aliases() {
+    let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+        "execution": {
+            "module": "maker_taker_slippage",
+            "startup_skip_spread_secs": 10,
+            "maker_order_timeout_ms": 750,
+            "maker_price_offset_pct": 0.002,
+            "max_maker_top_depth_usdt": 12.5
+        },
+        "slippage_capture": {
+            "hedge_taker_slippage_pct": 0.003,
+            "cancel_unfilled_maker": true
+        }
+    }));
+
+    assert_eq!(
+        config.execution_module,
+        CrossArbExecutionModule::SlippageCapture
+    );
+    assert_eq!(config.slippage_capture.startup_skip_spread_secs, 10);
+    assert_eq!(config.slippage_capture.maker_order_timeout_ms, 750);
+    assert_eq!(config.slippage_capture.maker_price_offset_pct, 0.002);
+    assert_eq!(config.slippage_capture.max_maker_top_depth_usdt, 12.5);
+    assert_eq!(config.slippage_capture.hedge_taker_slippage_pct, 0.003);
+    assert!(config.slippage_capture.cancel_unfilled_maker);
+}
+
+#[test]
+fn open_audit_should_record_configured_spread_rejection_reason() {
+    let now = fixed_now();
+    let symbol = CanonicalSymbol::new("EDGE", "USDT");
+    let precision = precision_registry(&symbol);
+    let fee_model = FeeModel::default();
+    let config = DualTakerArbitrageConfig {
+        target_notional_usdt: 50.0,
+        min_open_spread_pct: 0.005,
+        min_open_net_profit_pct: 0.02,
+        max_open_spread_pct: 0.05,
+        ..DualTakerArbitrageConfig::default()
+    };
+    let books = vec![
+        book("binance", &symbol, 99.9, 100.0, 20.0, 20.0, now),
+        book("gate", &symbol, 101.0, 101.1, 20.0, 20.0, now),
+    ];
+
+    let report = evaluate_dual_taker_open_opportunities_with_audit(
+        &books, &precision, &fee_model, &config, None, now,
+    );
+
+    assert!(report.opportunities.is_empty());
+    assert_eq!(report.audits.len(), 1);
+    let audit = &report.audits[0];
+    assert_eq!(audit.decision, OpenOpportunityDecision::Rejected);
+    assert_eq!(
+        audit.reject_reason,
+        Some(OpenOpportunityRejectReason::BelowMinNetProfit)
+    );
+    assert!((audit.raw_spread_pct - 0.01).abs() < EPSILON);
+    assert_eq!(audit.configured_open_spread_pct, config.min_open_spread_pct);
+    assert!(audit.expected_net_profit_pct.is_some());
+    assert!(audit.estimated_round_trip_fee_usdt.is_some());
+    assert!(audit.long_top_depth_usdt > config.target_notional_usdt);
+    assert!(audit.short_top_depth_usdt > config.target_notional_usdt);
+}
+
+#[test]
+fn open_audit_should_record_risk_rejection_after_basic_spread_passes() {
+    let now = fixed_now();
+    let symbol = CanonicalSymbol::new("EDGE", "USDT");
+    let precision = precision_registry(&symbol);
+    let fee_model = FeeModel::default();
+    let config = DualTakerArbitrageConfig {
+        target_notional_usdt: 5.5,
+        min_open_spread_pct: 0.005,
+        max_open_spread_pct: 0.05,
+        ..DualTakerArbitrageConfig::default()
+    };
+    let mut risk_state = ArbitrageRiskState::default();
+    risk_state.record_open(open_position("bundle-edge", symbol.clone(), now));
+
+    let report = evaluate_dual_taker_open_opportunities_with_audit(
+        &valid_open_books(&symbol, now),
+        &precision,
+        &fee_model,
+        &config,
+        Some(&risk_state),
+        now,
+    );
+
+    assert!(report.opportunities.is_empty());
+    assert_eq!(report.audits.len(), 1);
+    assert_eq!(
+        report.audits[0].reject_reason,
+        Some(OpenOpportunityRejectReason::SymbolAlreadyActive)
+    );
 }
 
 #[test]

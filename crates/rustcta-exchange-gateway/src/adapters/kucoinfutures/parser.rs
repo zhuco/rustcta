@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRateSnapshot, SymbolRules, SymbolScope,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
@@ -121,6 +122,47 @@ pub fn parse_orderbook_snapshot(
         .and_then(value_as_i64)
         .and_then(DateTime::<Utc>::from_timestamp_millis);
     Ok(snapshot)
+}
+
+pub fn parse_funding_rate_snapshot(
+    exchange_id: &ExchangeId,
+    symbol: SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<FundingRateSnapshot> {
+    let row = value
+        .get("data")
+        .and_then(|data| data.get("items"))
+        .or_else(|| value.get("items"))
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "KuCoin Futures funding history missing data.items",
+                value,
+            )
+        })?;
+    let funding_rate = string_or_number(row.get("fundingRate")).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "KuCoin Futures funding history missing fundingRate",
+            row,
+        )
+    })?;
+    Ok(FundingRateSnapshot {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol,
+        funding_rate,
+        predicted_funding_rate: None,
+        funding_time: row
+            .get("timePoint")
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        next_funding_time: None,
+        mark_price: None,
+        source: Some("kucoinfutures.private.funding-history".to_string()),
+        updated_at: Utc::now(),
+    })
 }
 
 pub fn normalize_kucoinfutures_symbol(symbol: &str) -> ExchangeApiResult<String> {

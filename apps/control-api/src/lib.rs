@@ -17,9 +17,11 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
+use tokio_tungstenite::connect_async;
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8091";
 const DEFAULT_TENANT_ID: &str = "local";
@@ -267,6 +269,52 @@ struct LocalSideEffectState {
     audit: Arc<Mutex<Vec<Value>>>,
 }
 
+#[derive(Debug, Clone)]
+struct ExchangeLatencyTarget {
+    exchange: String,
+    label: String,
+    rest_url: String,
+    ws_url: String,
+    endpoint_source: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ExchangeLatencyTestRequest {
+    mode: Option<String>,
+    batch_size: Option<usize>,
+    timeout_ms: Option<u64>,
+    exchanges: Option<Vec<String>>,
+    gateway_endpoints: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExchangeLatencyTestResponse {
+    generated_at: chrono::DateTime<Utc>,
+    mode: String,
+    batch_size: usize,
+    timeout_ms: u64,
+    exchange_count: usize,
+    elapsed_ms: u64,
+    rows: Vec<ExchangeLatencyRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExchangeLatencyRow {
+    exchange: String,
+    label: String,
+    endpoint_source: String,
+    rest: EndpointLatencyResult,
+    websocket: EndpointLatencyResult,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EndpointLatencyResult {
+    status: String,
+    latency_ms: Option<u64>,
+    endpoint: String,
+    error: Option<String>,
+}
+
 #[derive(Clone)]
 struct LocalCredentialState {
     exchange_api_key_store: PathBuf,
@@ -300,6 +348,10 @@ fn local_agent_router(state: LocalSideEffectState) -> Router {
     Router::new()
         .route("/api/local-agent/status", get(local_agent_status))
         .route("/api/local-agent/audit", get(local_agent_audit))
+        .route(
+            "/api/local-agent/exchange-latency-test",
+            post(local_agent_exchange_latency_test),
+        )
         .route(
             "/api/local-agent/strategy-config",
             get(local_agent_strategy_config_draft).post(local_agent_strategy_config),
@@ -410,6 +462,8 @@ struct CrossArbExchangeConfigUpdateRequest {
     #[serde(default)]
     exchanges: Vec<Value>,
     #[serde(default = "default_true_bool")]
+    replace: bool,
+    #[serde(default = "default_true_bool")]
     apply: bool,
 }
 
@@ -462,7 +516,19 @@ struct CrossArbSettingsUpdateRequest {
     #[serde(default)]
     max_close_spread_pct: Option<f64>,
     #[serde(default)]
+    execution_module: Option<String>,
+    #[serde(default)]
+    maker_price_offset_pct: Option<f64>,
+    #[serde(default)]
+    maker_order_timeout_ms: Option<u64>,
+    #[serde(default)]
+    hedge_taker_slippage_pct: Option<f64>,
+    #[serde(default)]
+    close_taker_slippage_pct: Option<f64>,
+    #[serde(default)]
     execution_profile: Option<String>,
+    #[serde(default)]
+    trading_enabled: Option<bool>,
     #[serde(default = "default_true_bool")]
     apply: bool,
 }
@@ -638,6 +704,764 @@ async fn exchange_api_key_status(
         supported_exchanges,
         exchanges,
     })
+}
+
+async fn local_agent_exchange_latency_test(
+    State(state): State<LocalSideEffectState>,
+    Json(request): Json<ExchangeLatencyTestRequest>,
+) -> Response {
+    let started = Instant::now();
+    let timeout_ms = request.timeout_ms.unwrap_or(3_000).clamp(500, 15_000);
+    let batch_size = request.batch_size.unwrap_or(5).clamp(1, 50);
+    let mode = match request
+        .mode
+        .as_deref()
+        .unwrap_or("batched")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "all" | "all_concurrent" | "concurrent" => "all_concurrent".to_string(),
+        _ => "batched".to_string(),
+    };
+    let targets = selected_latency_targets(
+        &state,
+        request.exchanges.as_deref(),
+        request.gateway_endpoints.as_deref(),
+    )
+    .await;
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .user_agent("RustCTA-ControlAPI-LatencyProbe/0.1")
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let timeout = Duration::from_millis(timeout_ms);
+    let rows = if mode == "all_concurrent" {
+        probe_latency_batch(targets, client, timeout).await
+    } else {
+        let mut rows = Vec::new();
+        for chunk in targets.chunks(batch_size) {
+            rows.extend(probe_latency_batch(chunk.to_vec(), client.clone(), timeout).await);
+        }
+        rows
+    };
+
+    Json(ExchangeLatencyTestResponse {
+        generated_at: Utc::now(),
+        mode,
+        batch_size,
+        timeout_ms,
+        exchange_count: rows.len(),
+        elapsed_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        rows,
+    })
+    .into_response()
+}
+
+async fn probe_latency_batch(
+    targets: Vec<ExchangeLatencyTarget>,
+    client: reqwest::Client,
+    timeout: Duration,
+) -> Vec<ExchangeLatencyRow> {
+    let tasks = targets
+        .into_iter()
+        .map(|target| {
+            let client = client.clone();
+            tokio::spawn(async move { probe_latency_target(target, client, timeout).await })
+        })
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for task in tasks {
+        if let Ok(row) = task.await {
+            rows.push(row);
+        }
+    }
+    rows.sort_by(|left, right| left.exchange.cmp(&right.exchange));
+    rows
+}
+
+async fn probe_latency_target(
+    target: ExchangeLatencyTarget,
+    client: reqwest::Client,
+    timeout: Duration,
+) -> ExchangeLatencyRow {
+    let (rest, websocket) = tokio::join!(
+        probe_rest_latency(&client, &target.rest_url, timeout),
+        probe_ws_latency(&target.ws_url, timeout)
+    );
+    ExchangeLatencyRow {
+        exchange: target.exchange.to_string(),
+        label: target.label.to_string(),
+        endpoint_source: target.endpoint_source.to_string(),
+        rest,
+        websocket,
+    }
+}
+
+async fn probe_rest_latency(
+    client: &reqwest::Client,
+    endpoint: &str,
+    timeout: Duration,
+) -> EndpointLatencyResult {
+    if endpoint.trim().is_empty() {
+        return EndpointLatencyResult {
+            status: "missing".to_string(),
+            latency_ms: None,
+            endpoint: String::new(),
+            error: Some("endpoint not configured".to_string()),
+        };
+    }
+    let started = Instant::now();
+    match tokio::time::timeout(timeout, client.get(endpoint).send()).await {
+        Ok(Ok(response)) if response.status().is_success() => EndpointLatencyResult {
+            status: "ok".to_string(),
+            latency_ms: Some(elapsed_ms(started)),
+            endpoint: endpoint.to_string(),
+            error: None,
+        },
+        Ok(Ok(response)) => EndpointLatencyResult {
+            status: "error".to_string(),
+            latency_ms: Some(elapsed_ms(started)),
+            endpoint: endpoint.to_string(),
+            error: Some(format!("http {}", response.status())),
+        },
+        Ok(Err(error)) => EndpointLatencyResult {
+            status: "error".to_string(),
+            latency_ms: Some(elapsed_ms(started)),
+            endpoint: endpoint.to_string(),
+            error: Some(error.to_string()),
+        },
+        Err(_) => EndpointLatencyResult {
+            status: "timeout".to_string(),
+            latency_ms: None,
+            endpoint: endpoint.to_string(),
+            error: Some(format!("timeout after {} ms", timeout.as_millis())),
+        },
+    }
+}
+
+async fn probe_ws_latency(endpoint: &str, timeout: Duration) -> EndpointLatencyResult {
+    if endpoint.trim().is_empty() {
+        return EndpointLatencyResult {
+            status: "missing".to_string(),
+            latency_ms: None,
+            endpoint: String::new(),
+            error: Some("endpoint not configured".to_string()),
+        };
+    }
+    let started = Instant::now();
+    match tokio::time::timeout(timeout, connect_async(endpoint)).await {
+        Ok(Ok((_stream, _response))) => EndpointLatencyResult {
+            status: "ok".to_string(),
+            latency_ms: Some(elapsed_ms(started)),
+            endpoint: endpoint.to_string(),
+            error: None,
+        },
+        Ok(Err(error)) => EndpointLatencyResult {
+            status: "error".to_string(),
+            latency_ms: Some(elapsed_ms(started)),
+            endpoint: endpoint.to_string(),
+            error: Some(error.to_string()),
+        },
+        Err(_) => EndpointLatencyResult {
+            status: "timeout".to_string(),
+            latency_ms: None,
+            endpoint: endpoint.to_string(),
+            error: Some(format!("timeout after {} ms", timeout.as_millis())),
+        },
+    }
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+async fn selected_latency_targets(
+    state: &LocalSideEffectState,
+    filter: Option<&[String]>,
+    gateway_endpoints: Option<&[Value]>,
+) -> Vec<ExchangeLatencyTarget> {
+    let mut targets = fallback_exchange_latency_targets();
+    merge_latency_targets(
+        &mut targets,
+        latency_targets_from_cross_arb_config(state).await,
+    );
+    merge_latency_targets(
+        &mut targets,
+        gateway_latency_targets_from_request(gateway_endpoints),
+    );
+    let Some(filter) = filter else {
+        return targets;
+    };
+    let selected = filter
+        .iter()
+        .map(|exchange| normalize_probe_exchange(exchange))
+        .collect::<std::collections::BTreeSet<_>>();
+    if selected.is_empty() {
+        return targets;
+    }
+    targets
+        .into_iter()
+        .filter(|target| selected.contains(&normalize_probe_exchange(&target.exchange)))
+        .collect()
+}
+
+fn merge_latency_targets(
+    targets: &mut Vec<ExchangeLatencyTarget>,
+    overrides: Vec<ExchangeLatencyTarget>,
+) {
+    for override_target in overrides {
+        let key = normalize_probe_exchange(&override_target.exchange);
+        if let Some(existing) = targets
+            .iter_mut()
+            .find(|target| normalize_probe_exchange(&target.exchange) == key)
+        {
+            *existing = merge_latency_target(existing.clone(), override_target);
+        } else {
+            targets.push(override_target);
+        }
+    }
+}
+
+fn merge_latency_target(
+    fallback: ExchangeLatencyTarget,
+    override_target: ExchangeLatencyTarget,
+) -> ExchangeLatencyTarget {
+    ExchangeLatencyTarget {
+        exchange: override_target.exchange,
+        label: if override_target.label.trim().is_empty() {
+            fallback.label
+        } else {
+            override_target.label
+        },
+        rest_url: if override_target.rest_url.trim().is_empty() {
+            fallback.rest_url
+        } else {
+            override_target.rest_url
+        },
+        ws_url: if override_target.ws_url.trim().is_empty() {
+            fallback.ws_url
+        } else {
+            override_target.ws_url
+        },
+        endpoint_source: override_target.endpoint_source,
+    }
+}
+
+fn gateway_latency_targets_from_request(rows: Option<&[Value]>) -> Vec<ExchangeLatencyTarget> {
+    rows.into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let exchange = text_field_any(row, &["exchange", "exchange_id", "venue", "id"])?;
+            let rest_url = text_field_any(
+                row,
+                &[
+                    "rest_url",
+                    "rest",
+                    "rest_base_url",
+                    "public_rest_url",
+                    "public_rest_base_url",
+                ],
+            )
+            .unwrap_or_default();
+            let ws_url = text_field_any(
+                row,
+                &[
+                    "ws_url",
+                    "websocket_url",
+                    "websocket",
+                    "public_ws_url",
+                    "public_websocket_url",
+                ],
+            )
+            .unwrap_or_default();
+            if rest_url.is_empty() && ws_url.is_empty() {
+                return None;
+            }
+            Some(ExchangeLatencyTarget {
+                exchange: gateway_exchange_key(&exchange),
+                label: exchange,
+                rest_url,
+                ws_url,
+                endpoint_source: "gateway_endpoint_metadata".to_string(),
+            })
+        })
+        .collect()
+}
+
+async fn latency_targets_from_cross_arb_config(
+    state: &LocalSideEffectState,
+) -> Vec<ExchangeLatencyTarget> {
+    let operation_id = local_operation_id();
+    let Ok(view) = load_cross_arb_exchange_config(state, &operation_id, false).await else {
+        return Vec::new();
+    };
+    view.exchange_map
+        .iter()
+        .filter_map(|(exchange, config)| {
+            let rest_url = cross_arb_rest_probe_url(config).unwrap_or_default();
+            let ws_url = cross_arb_ws_probe_url(config).unwrap_or_default();
+            if rest_url.is_empty() && ws_url.is_empty() {
+                return None;
+            }
+            Some(ExchangeLatencyTarget {
+                exchange: exchange.clone(),
+                label: exchange_label(exchange),
+                rest_url,
+                ws_url,
+                endpoint_source: "gateway_config".to_string(),
+            })
+        })
+        .collect()
+}
+
+fn cross_arb_rest_probe_url(config: &Value) -> Option<String> {
+    text_field_any(
+        config,
+        &[
+            "private_rest_base_url",
+            "public_rest_base_url",
+            "rest_base_url",
+        ],
+    )
+    .or_else(|| route_endpoint(config, &["rest_public", "public_rest", "rest"]))
+}
+
+fn cross_arb_ws_probe_url(config: &Value) -> Option<String> {
+    text_field_any(
+        config,
+        &["private_ws_url", "public_ws_url", "ws_url", "websocket_url"],
+    )
+    .or_else(|| route_endpoint(config, &["ws_public", "public_ws", "websocket", "ws"]))
+}
+
+fn route_endpoint(config: &Value, names: &[&str]) -> Option<String> {
+    let routes = config.get("routes")?;
+    for name in names {
+        let Some(value) = routes.get(*name) else {
+            continue;
+        };
+        if let Some(text) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+        if let Some(text) = value
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+    }
+    None
+}
+
+fn text_field_any(value: &Value, fields: &[&str]) -> Option<String> {
+    fields.iter().find_map(|field| {
+        value
+            .get(*field)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && *text != "-")
+            .map(ToString::to_string)
+    })
+}
+
+fn gateway_exchange_key(exchange: &str) -> String {
+    match exchange.trim().to_ascii_lowercase().as_str() {
+        "gate" | "gate.io" | "gateio" => "gateio".to_string(),
+        "binance-futures" | "binance_futures" => "binance_futures".to_string(),
+        other => other.replace([' ', '.'], "_"),
+    }
+}
+
+fn exchange_label(exchange: &str) -> String {
+    fallback_exchange_latency_targets()
+        .into_iter()
+        .find(|target| {
+            normalize_probe_exchange(&target.exchange) == normalize_probe_exchange(exchange)
+        })
+        .map(|target| target.label)
+        .unwrap_or_else(|| exchange.to_string())
+}
+
+fn normalize_probe_exchange(exchange: &str) -> String {
+    exchange
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['.', '-', '_', ' '], "")
+}
+
+fn fallback_exchange_latency_targets() -> Vec<ExchangeLatencyTarget> {
+    vec![
+        ExchangeLatencyTarget {
+            exchange: "binance".to_string(),
+            label: "Binance".to_string(),
+            rest_url: "https://api.binance.com/api/v3/time".to_string(),
+            ws_url: "wss://stream.binance.com:9443/ws/btcusdt@trade".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "binance_futures".to_string(),
+            label: "Binance Futures".to_string(),
+            rest_url: "https://fapi.binance.com/fapi/v1/time".to_string(),
+            ws_url: "wss://fstream.binance.com/ws/btcusdt@trade".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "okx".to_string(),
+            label: "OKX".to_string(),
+            rest_url: "https://www.okx.com/api/v5/public/time".to_string(),
+            ws_url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bybit".to_string(),
+            label: "Bybit".to_string(),
+            rest_url: "https://api.bybit.com/v5/market/time".to_string(),
+            ws_url: "wss://stream.bybit.com/v5/public/spot".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitget".to_string(),
+            label: "Bitget".to_string(),
+            rest_url: "https://api.bitget.com/api/v2/public/time".to_string(),
+            ws_url: "wss://ws.bitget.com/v2/ws/public".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "gateio".to_string(),
+            label: "Gate.io".to_string(),
+            rest_url: "https://api.gateio.ws/api/v4/spot/time".to_string(),
+            ws_url: "wss://api.gateio.ws/ws/v4/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "kucoin".to_string(),
+            label: "KuCoin".to_string(),
+            rest_url: "https://api.kucoin.com/api/v1/timestamp".to_string(),
+            ws_url: "wss://ws-api-spot.kucoin.com/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "mexc".to_string(),
+            label: "MEXC".to_string(),
+            rest_url: "https://api.mexc.com/api/v3/time".to_string(),
+            ws_url: "wss://wbs.mexc.com/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "coinbase".to_string(),
+            label: "Coinbase".to_string(),
+            rest_url: "https://api.exchange.coinbase.com/time".to_string(),
+            ws_url: "wss://ws-feed.exchange.coinbase.com".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "kraken".to_string(),
+            label: "Kraken".to_string(),
+            rest_url: "https://api.kraken.com/0/public/Time".to_string(),
+            ws_url: "wss://ws.kraken.com/v2".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitfinex".to_string(),
+            label: "Bitfinex".to_string(),
+            rest_url: "https://api-pub.bitfinex.com/v2/platform/status".to_string(),
+            ws_url: "wss://api-pub.bitfinex.com/ws/2".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitstamp".to_string(),
+            label: "Bitstamp".to_string(),
+            rest_url: "https://www.bitstamp.net/api/v2/ticker/btcusd/".to_string(),
+            ws_url: "wss://ws.bitstamp.net".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "crypto_com".to_string(),
+            label: "Crypto.com".to_string(),
+            rest_url: "https://api.crypto.com/exchange/v1/public/get-instruments".to_string(),
+            ws_url: "wss://stream.crypto.com/exchange/v1/market".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "htx".to_string(),
+            label: "HTX".to_string(),
+            rest_url: "https://api.huobi.pro/v1/common/timestamp".to_string(),
+            ws_url: "wss://api.huobi.pro/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitmart".to_string(),
+            label: "BitMart".to_string(),
+            rest_url: "https://api-cloud.bitmart.com/system/time".to_string(),
+            ws_url: "wss://ws-manager-compress.bitmart.com/api?protocol=1.1".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "poloniex".to_string(),
+            label: "Poloniex".to_string(),
+            rest_url: "https://api.poloniex.com/timestamp".to_string(),
+            ws_url: "wss://ws.poloniex.com/ws/public".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "gemini".to_string(),
+            label: "Gemini".to_string(),
+            rest_url: "https://api.gemini.com/v1/pubticker/btcusd".to_string(),
+            ws_url: "wss://api.gemini.com/v1/marketdata/BTCUSD".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitmex".to_string(),
+            label: "BitMEX".to_string(),
+            rest_url: "https://www.bitmex.com/api/v1/instrument/active".to_string(),
+            ws_url: "wss://www.bitmex.com/realtime".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "deribit".to_string(),
+            label: "Deribit".to_string(),
+            rest_url: "https://www.deribit.com/api/v2/public/get_time".to_string(),
+            ws_url: "wss://www.deribit.com/ws/api/v2".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitflyer".to_string(),
+            label: "bitFlyer".to_string(),
+            rest_url: "https://api.bitflyer.com/v1/getmarkets".to_string(),
+            ws_url: "wss://ws.lightstream.bitflyer.com/json-rpc".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "upbit".to_string(),
+            label: "Upbit".to_string(),
+            rest_url: "https://api.upbit.com/v1/market/all".to_string(),
+            ws_url: "wss://api.upbit.com/websocket/v1".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bithumb".to_string(),
+            label: "Bithumb".to_string(),
+            rest_url: "https://api.bithumb.com/public/ticker/BTC_KRW".to_string(),
+            ws_url: "wss://pubwss.bithumb.com/pub/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "coincheck".to_string(),
+            label: "Coincheck".to_string(),
+            rest_url: "https://coincheck.com/api/ticker".to_string(),
+            ws_url: "wss://ws-api.coincheck.com/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitbank".to_string(),
+            label: "bitbank".to_string(),
+            rest_url: "https://public.bitbank.cc/btc_jpy/ticker".to_string(),
+            ws_url: "wss://stream.bitbank.cc/socket.io/?EIO=3&transport=websocket".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "lbank".to_string(),
+            label: "LBank".to_string(),
+            rest_url: "https://api.lbkex.com/v2/timestamp.do".to_string(),
+            ws_url: "wss://www.lbkex.net/ws/V2/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitrue".to_string(),
+            label: "Bitrue".to_string(),
+            rest_url: "https://www.bitrue.com/api/v1/time".to_string(),
+            ws_url: "wss://ws.bitrue.com/kline-api/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bingx".to_string(),
+            label: "BingX".to_string(),
+            rest_url: "https://open-api.bingx.com/openApi/spot/v1/server/time".to_string(),
+            ws_url: "wss://open-api-ws.bingx.com/market".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitvavo".to_string(),
+            label: "Bitvavo".to_string(),
+            rest_url: "https://api.bitvavo.com/v2/time".to_string(),
+            ws_url: "wss://ws.bitvavo.com/v2/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "whitebit".to_string(),
+            label: "WhiteBIT".to_string(),
+            rest_url: "https://whitebit.com/api/v4/public/time".to_string(),
+            ws_url: "wss://api.whitebit.com/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "coinex".to_string(),
+            label: "CoinEx".to_string(),
+            rest_url: "https://api.coinex.com/v2/time".to_string(),
+            ws_url: "wss://socket.coinex.com/v2/spot".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "phemex".to_string(),
+            label: "Phemex".to_string(),
+            rest_url: "https://api.phemex.com/public/time".to_string(),
+            ws_url: "wss://ws.phemex.com".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "woo".to_string(),
+            label: "WOO X".to_string(),
+            rest_url: "https://api.woo.org/v1/public/system_info".to_string(),
+            ws_url: "wss://wss.woo.org/ws/stream".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "ascendex".to_string(),
+            label: "AscendEX".to_string(),
+            rest_url: "https://ascendex.com/api/pro/v1/info".to_string(),
+            ws_url: "wss://ascendex.com/1/api/pro/v1/stream".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitso".to_string(),
+            label: "Bitso".to_string(),
+            rest_url: "https://api.bitso.com/v3/ticker/?book=btc_mxn".to_string(),
+            ws_url: "wss://ws.bitso.com".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "btcturk".to_string(),
+            label: "BtcTurk".to_string(),
+            rest_url: "https://api.btcturk.com/api/v2/server/exchangeinfo".to_string(),
+            ws_url: "wss://ws-feed-pro.btcturk.com".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "luno".to_string(),
+            label: "Luno".to_string(),
+            rest_url: "https://api.luno.com/api/1/ticker?pair=XBTZAR".to_string(),
+            ws_url: "wss://ws.luno.com/api/1/stream/BTCZAR".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "coinone".to_string(),
+            label: "Coinone".to_string(),
+            rest_url: "https://api.coinone.co.kr/public/v2/ticker_new/KRW/BTC".to_string(),
+            ws_url: "wss://stream.coinone.co.kr".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "korbit".to_string(),
+            label: "Korbit".to_string(),
+            rest_url: "https://api.korbit.co.kr/v1/ticker/detailed?currency_pair=btc_krw"
+                .to_string(),
+            ws_url: "wss://ws.korbit.co.kr/v2/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "indodax".to_string(),
+            label: "Indodax".to_string(),
+            rest_url: "https://indodax.com/api/server_time".to_string(),
+            ws_url: "wss://ws3.indodax.com/ws/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "mercado_bitcoin".to_string(),
+            label: "Mercado Bitcoin".to_string(),
+            rest_url: "https://www.mercadobitcoin.net/api/BTC/ticker/".to_string(),
+            ws_url: "wss://ws.mercadobitcoin.net/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "foxbit".to_string(),
+            label: "Foxbit".to_string(),
+            rest_url: "https://api.foxbit.com.br/rest/v3/markets".to_string(),
+            ws_url: "wss://api.foxbit.com.br/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitkub".to_string(),
+            label: "Bitkub".to_string(),
+            rest_url: "https://api.bitkub.com/api/servertime".to_string(),
+            ws_url: "wss://api.bitkub.com/websocket-api/market.ticker.thb_btc".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "coinspot".to_string(),
+            label: "CoinSpot".to_string(),
+            rest_url: "https://www.coinspot.com.au/pubapi/latest".to_string(),
+            ws_url: "wss://www.coinspot.com.au/pubapi/v2".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "btcmarkets".to_string(),
+            label: "BTC Markets".to_string(),
+            rest_url: "https://api.btcmarkets.net/v3/markets/BTC-AUD/ticker".to_string(),
+            ws_url: "wss://socket.btcmarkets.net/v2".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "independent_reserve".to_string(),
+            label: "Independent Reserve".to_string(),
+            rest_url: "https://api.independentreserve.com/Public/GetValidPrimaryCurrencyCodes"
+                .to_string(),
+            ws_url: "wss://websockets.independentreserve.com".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "blockchain_com".to_string(),
+            label: "Blockchain.com".to_string(),
+            rest_url: "https://api.blockchain.com/v3/exchange/tickers/BTC-USD".to_string(),
+            ws_url: "wss://ws.blockchain.info/mercury-gateway/v1/ws".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "cexio".to_string(),
+            label: "CEX.IO".to_string(),
+            rest_url: "https://cex.io/api/ticker/BTC/USD".to_string(),
+            ws_url: "wss://ws.cex.io/ws/".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "bitpanda".to_string(),
+            label: "Bitpanda".to_string(),
+            rest_url: "https://api.exchange.bitpanda.com/public/v1/time".to_string(),
+            ws_url: "wss://streams.exchange.bitpanda.com".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "hitbtc".to_string(),
+            label: "HitBTC".to_string(),
+            rest_url: "https://api.hitbtc.com/api/3/public/time".to_string(),
+            ws_url: "wss://api.hitbtc.com/api/3/ws/public".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+        ExchangeLatencyTarget {
+            exchange: "delta".to_string(),
+            label: "Delta Exchange".to_string(),
+            rest_url: "https://api.delta.exchange/v2/products".to_string(),
+            ws_url: "wss://socket.india.delta.exchange".to_string(),
+            endpoint_source: "fallback_catalog".to_string(),
+        },
+    ]
 }
 
 fn exchange_status_has_configured_field(status: &ExchangeApiKeyExchangeStatus) -> bool {
@@ -2207,7 +3031,11 @@ async fn local_agent_save_cross_arb_exchanges(
         .unwrap_or(CROSS_ARB_STRATEGY_ID)
         .to_string();
 
-    let mut next = Map::<String, Value>::new();
+    let mut next = if request.replace {
+        Map::<String, Value>::new()
+    } else {
+        view.exchange_map.clone()
+    };
     let mut invalid_rows = 0usize;
     for row in &request.exchanges {
         let exchange_hint = row
@@ -2525,6 +3353,29 @@ async fn persist_cross_arb_config(
                 "exchange_count": view.exchanges.len(),
                 "enabled_exchanges": view.enabled_exchanges,
                 "removed_exchanges": view.removed_exchanges,
+                "trading_enabled": command_payload
+                    .get("execution")
+                    .and_then(|execution| execution.get("trading_enabled"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "control_action": if command_payload
+                    .get("execution")
+                    .and_then(|execution| execution.get("trading_enabled"))
+                    .is_some()
+                {
+                    Value::String("control_live_trading_toggle".to_string())
+                } else {
+                    Value::Null
+                },
+                "category": if command_payload
+                    .get("execution")
+                    .and_then(|execution| execution.get("trading_enabled"))
+                    .is_some()
+                {
+                    Value::String("control".to_string())
+                } else {
+                    Value::Null
+                },
                 "would_submit_order": false,
                 "local_path_exposed": false,
             }),
@@ -2643,6 +3494,7 @@ fn cross_arb_settings_response(
 fn cross_arb_settings_view(root: &Value, enabled_exchanges: &[String]) -> Value {
     let thresholds = root.get("thresholds").unwrap_or(&Value::Null);
     let dual_taker = root.get("dual_taker").unwrap_or(&Value::Null);
+    let slippage_capture = root.get("slippage_capture").unwrap_or(&Value::Null);
     let execution_quality = root.get("execution_quality").unwrap_or(&Value::Null);
     let sizing = root.get("sizing").unwrap_or(&Value::Null);
     let risk = root.get("risk").unwrap_or(&Value::Null);
@@ -2715,10 +3567,50 @@ fn cross_arb_settings_view(root: &Value, enabled_exchanges: &[String]) -> Value 
             &["min_open_executable_depth_ratio"],
         ),
         "mode": string_from_paths(&[root], &["mode"]),
+        "execution_module": string_from_paths(
+            &[root, execution],
+            &["execution_module", "open_execution_style"],
+        ),
         "execution_profile": string_from_paths(&[root], &["execution_profile"]),
+        "slippage_capture": {
+            "target_notional_usdt": number_from_paths(
+                &[slippage_capture, sizing, root],
+                &["target_notional_usdt", "max_live_notional_per_trade"],
+            ),
+            "min_open_spread_pct": number_from_paths(
+                &[slippage_capture, thresholds, execution_quality],
+                &["min_open_spread_pct", "min_open_raw_spread", "min_open_raw_spread_pct"],
+            ),
+            "min_open_net_profit_pct": number_from_paths(
+                &[slippage_capture, thresholds, execution_quality],
+                &["min_open_net_profit_pct", "min_open_maker_taker_net_edge", "min_open_net_edge_pct"],
+            ),
+            "maker_price_offset_pct": number_from_paths(
+                &[slippage_capture, execution],
+                &["maker_price_offset_pct", "slippage_capture_offset_pct"],
+            ),
+            "maker_order_timeout_ms": number_from_paths(
+                &[slippage_capture, execution],
+                &["maker_order_timeout_ms", "maker_order_ttl_ms"],
+            ),
+            "hedge_taker_slippage_pct": number_from_paths(
+                &[slippage_capture, execution],
+                &["hedge_taker_slippage_pct", "taker_ioc_slippage_limit_pct"],
+            ),
+            "close_taker_slippage_pct": number_from_paths(
+                &[slippage_capture],
+                &["close_taker_slippage_pct"],
+            ),
+            "close_min_net_profit_pct": number_from_paths(
+                &[slippage_capture, thresholds, execution_quality],
+                &["close_min_net_profit_pct", "lock_profit_dual_taker_pct", "min_close_net_profit_pct"],
+            ),
+            "cancel_unfilled_maker": bool_from_paths(&[slippage_capture], &["cancel_unfilled_maker"]),
+        },
         "execution": {
             "dry_run": bool_from_paths(&[root, execution], &["dry_run"]),
-            "live_orders_enabled": bool_from_paths(&[root], &["enable_live_trading"]),
+            "trading_enabled": bool_from_paths(&[execution, root], &["trading_enabled", "enable_live_trading"]),
+            "live_orders_enabled": bool_from_paths(&[execution, root], &["trading_enabled", "enable_live_trading"]),
             "start_paused_new_entries": bool_from_paths(&[controls], &["start_paused_new_entries"]),
             "start_close_only": bool_from_paths(&[controls], &["start_close_only"]),
         }
@@ -2744,6 +3636,7 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
         set_root_number(root, "max_live_notional_per_trade", value);
         set_nested_number(root, &["sizing", "target_notional_usdt"], value);
         set_nested_number(root, &["dual_taker", "target_notional_usdt"], value);
+        set_nested_number(root, &["slippage_capture", "target_notional_usdt"], value);
     }
     if let Some(value) = sanitized_nonnegative(request.min_notional_usdt) {
         set_nested_number(root, &["sizing", "min_notional_usdt"], value);
@@ -2780,10 +3673,20 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
             &["dual_taker", "max_positions_per_exchange"],
             value as f64,
         );
+        set_nested_number(
+            root,
+            &["slippage_capture", "max_positions_per_exchange"],
+            value as f64,
+        );
     }
     if let Some(value) = request.max_open_bundles.filter(|value| *value > 0) {
         set_nested_number(root, &["risk", "max_open_bundles"], value as f64);
         set_nested_number(root, &["dual_taker", "max_open_bundles"], value as f64);
+        set_nested_number(
+            root,
+            &["slippage_capture", "max_open_bundles"],
+            value as f64,
+        );
     }
     if let Some(value) = request.max_open_positions.filter(|value| *value > 0) {
         set_nested_number(root, &["risk", "max_open_positions"], value as f64);
@@ -2793,6 +3696,7 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
     if let Some(value) = open_raw {
         set_nested_number(root, &["thresholds", "min_open_raw_spread"], value);
         set_nested_number(root, &["dual_taker", "min_open_spread_pct"], value);
+        set_nested_number(root, &["slippage_capture", "min_open_spread_pct"], value);
         set_nested_number(
             root,
             &["execution_quality", "min_open_raw_spread_pct"],
@@ -2812,6 +3716,11 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
             value,
         );
         set_nested_number(root, &["dual_taker", "min_open_net_profit_pct"], value);
+        set_nested_number(
+            root,
+            &["slippage_capture", "min_open_net_profit_pct"],
+            value,
+        );
         set_nested_number(root, &["execution_quality", "min_open_net_edge_pct"], value);
     }
     if let Some(value) = sanitized_nonnegative(request.min_open_executable_depth_ratio) {
@@ -2832,6 +3741,11 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
         set_nested_number(root, &["dual_taker", "close_min_net_profit_pct"], value);
         set_nested_number(
             root,
+            &["slippage_capture", "close_min_net_profit_pct"],
+            value,
+        );
+        set_nested_number(
+            root,
             &["execution_quality", "min_close_net_profit_pct"],
             value,
         );
@@ -2847,12 +3761,52 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
         set_nested_number(root, &["thresholds", "max_close_spread_pct"], value);
     }
     if let Some(profile) = request
+        .execution_module
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "-")
+    {
+        set_root_string(root, "execution_module", profile);
+        set_nested_string(root, &["execution", "open_execution_style"], profile);
+    }
+    if let Some(value) = sanitized_nonnegative(request.maker_price_offset_pct) {
+        set_nested_number(root, &["slippage_capture", "maker_price_offset_pct"], value);
+        set_nested_number(root, &["execution", "slippage_capture_offset_pct"], value);
+    }
+    if let Some(value) = request.maker_order_timeout_ms.filter(|value| *value > 0) {
+        set_nested_number(
+            root,
+            &["slippage_capture", "maker_order_timeout_ms"],
+            value as f64,
+        );
+        set_nested_number(root, &["execution", "maker_order_ttl_ms"], value as f64);
+        set_nested_number(root, &["execution", "single_leg_timeout_ms"], value as f64);
+    }
+    if let Some(value) = sanitized_nonnegative(request.hedge_taker_slippage_pct) {
+        set_nested_number(
+            root,
+            &["slippage_capture", "hedge_taker_slippage_pct"],
+            value,
+        );
+        set_nested_number(root, &["execution", "taker_ioc_slippage_limit_pct"], value);
+    }
+    if let Some(value) = sanitized_nonnegative(request.close_taker_slippage_pct) {
+        set_nested_number(
+            root,
+            &["slippage_capture", "close_taker_slippage_pct"],
+            value,
+        );
+    }
+    if let Some(profile) = request
         .execution_profile
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "-")
     {
         set_root_string(root, "execution_profile", profile);
+    }
+    if let Some(value) = request.trading_enabled {
+        set_nested_bool(root, &["execution", "trading_enabled"], value);
     }
 }
 
@@ -2987,6 +3941,21 @@ fn set_nested_number(root: &mut Value, path: &[&str], value: f64) {
     object.insert(path[path.len() - 1].to_string(), Value::from(value));
 }
 
+fn set_nested_string(root: &mut Value, path: &[&str], value: &str) {
+    if path.is_empty() {
+        return;
+    }
+    if path.len() == 1 {
+        set_root_string(root, path[0], value);
+        return;
+    }
+    let object = ensure_object_path(root, &path[..path.len() - 1]);
+    object.insert(
+        path[path.len() - 1].to_string(),
+        Value::String(value.to_string()),
+    );
+}
+
 fn set_nested_array(root: &mut Value, path: &[&str], value: Vec<Value>) {
     if path.is_empty() {
         return;
@@ -2997,6 +3966,20 @@ fn set_nested_array(root: &mut Value, path: &[&str], value: Vec<Value>) {
     }
     let object = ensure_object_path(root, &path[..path.len() - 1]);
     object.insert(path[path.len() - 1].to_string(), Value::Array(value));
+}
+
+fn set_nested_bool(root: &mut Value, path: &[&str], value: bool) {
+    if path.is_empty() {
+        return;
+    }
+    if path.len() == 1 {
+        if let Some(object) = root.as_object_mut() {
+            object.insert(path[0].to_string(), Value::Bool(value));
+        }
+        return;
+    }
+    let object = ensure_object_path(root, &path[..path.len() - 1]);
+    object.insert(path[path.len() - 1].to_string(), Value::Bool(value));
 }
 
 fn ensure_object_path<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Map<String, Value> {
@@ -4522,6 +5505,44 @@ exchanges:
         assert!(command_log.contains("\"command\":\"update_cross_arb_exchange_config\""));
         assert!(command_log.contains("\"enabled_exchanges\":[\"gate\"]"));
 
+        let merged = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local-agent/cross-arb/exchanges")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "strategy_id": "cross_arb_live",
+                            "replace": false,
+                            "apply": true,
+                            "exchanges": [
+                                {
+                                    "exchange": "binance",
+                                    "enabled": true,
+                                    "account_id": "BINANCE_ALT",
+                                    "env_prefix": "BINANCE_ALT",
+                                    "private_rest_enabled": true,
+                                    "private_ws_enabled": false
+                                }
+                            ]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(merged.status(), StatusCode::ACCEPTED);
+        let merged_yaml = std::fs::read_to_string(&strategy_path).unwrap();
+        let merged_config: Value = serde_yaml::from_str(&merged_yaml).unwrap();
+        assert_eq!(
+            merged_config["enabled_exchanges"],
+            json!(["binance", "gate"])
+        );
+        assert_eq!(merged_config["exchanges"]["gate"]["enabled"], true);
+
         let deleted = app
             .oneshot(
                 Request::builder()
@@ -4536,13 +5557,13 @@ exchanges:
         let deleted_yaml = std::fs::read_to_string(&strategy_path).unwrap();
         let deleted_config: Value = serde_yaml::from_str(&deleted_yaml).unwrap();
         assert!(deleted_config["exchanges"].get("gate").is_none());
-        assert_eq!(deleted_config["enabled_exchanges"], json!([]));
+        assert_eq!(deleted_config["enabled_exchanges"], json!(["binance"]));
         assert_eq!(
             std::fs::read_to_string(&command_path)
                 .unwrap()
                 .lines()
                 .count(),
-            2
+            3
         );
         let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
         assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_clean"));
@@ -4631,7 +5652,8 @@ exchanges:
                             "min_open_maker_taker_net_edge": 0.002,
                             "min_open_executable_depth_ratio": 1.2,
                             "close_min_net_profit_pct": 0.002,
-                            "expected_close_spread_pct": 0.002
+                            "expected_close_spread_pct": 0.002,
+                            "trading_enabled": true
                         })
                         .to_string(),
                     ))
@@ -4651,6 +5673,14 @@ exchanges:
             json!(0.002)
         );
         assert_eq!(value["settings"]["close_min_net_profit_pct"], json!(0.002));
+        assert_eq!(
+            value["settings"]["execution"]["trading_enabled"],
+            json!(true)
+        );
+        assert_eq!(
+            value["settings"]["execution"]["live_orders_enabled"],
+            json!(true)
+        );
 
         let saved_yaml = std::fs::read_to_string(&strategy_path).unwrap();
         let saved_config: Value = serde_yaml::from_str(&saved_yaml).unwrap();
@@ -4690,6 +5720,7 @@ exchanges:
             saved_config["execution_quality"]["min_close_net_profit_pct"],
             json!(0.002)
         );
+        assert_eq!(saved_config["execution"]["trading_enabled"], json!(true));
         assert_eq!(
             saved_config["enabled_symbols"],
             json!(["EDGE/USDT", "SPCX/USDT"])

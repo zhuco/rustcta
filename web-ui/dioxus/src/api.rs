@@ -38,9 +38,9 @@ const API_CONTROL_AUDIT: &str = "/api/control/audit";
 const API_EXCHANGE_API_KEYS: &str = "/api/exchange-api-keys";
 const API_STRATEGY_LOGS: &str = "/api/strategy-logs";
 const API_CROSS_ARB_INSTRUMENTS: &str = "/api/cross-arb/instruments";
-const API_CROSS_ARB_MARKET_SNAPSHOTS: &str = "/api/cross-arb/market-snapshots";
 const API_LOCAL_CROSS_ARB_EXCHANGES: &str = "/api/local-agent/cross-arb/exchanges";
 const API_LOCAL_CROSS_ARB_SETTINGS: &str = "/api/local-agent/cross-arb/settings";
+const API_LOCAL_EXCHANGE_LATENCY_TEST: &str = "/api/local-agent/exchange-latency-test";
 
 pub(crate) struct DashboardFetch {
     pub(crate) data: DashboardData,
@@ -74,11 +74,6 @@ pub(crate) struct CrossArbInstrumentFetch {
     pub(crate) coverage_ok: bool,
 }
 
-pub(crate) struct CrossArbMarketSnapshotFetch {
-    pub(crate) rows: Vec<Value>,
-    pub(crate) coverage_ok: bool,
-}
-
 fn strategy_command_endpoint(strategy_id: &str) -> String {
     format!("{API_STRATEGIES}/{}/command", path_segment(strategy_id))
 }
@@ -101,6 +96,28 @@ pub(crate) async fn post_local_agent_command(
 
 pub(crate) async fn post_control_command(token: &str, command: &str) -> Result<Value, String> {
     post_local_agent_command(token, command, json!({ "scope": "global" })).await
+}
+
+pub(crate) async fn request_cross_arb_position_close(
+    token: &str,
+    bundle_id: &str,
+    symbol: &str,
+    long_exchange: &str,
+    short_exchange: &str,
+) -> Result<Value, String> {
+    post_local_agent_command(
+        token,
+        "manual_close_cross_arb_position",
+        json!({
+            "strategy_id": "cross_arb_live",
+            "bundle_id": bundle_id,
+            "symbol": symbol,
+            "long_exchange": long_exchange,
+            "short_exchange": short_exchange,
+            "execution_style": "dual_taker_market_close",
+        }),
+    )
+    .await
 }
 
 pub(crate) async fn send_strategy_command(
@@ -498,10 +515,7 @@ pub(crate) async fn refresh_spot_exchange_control(
 
 pub(crate) async fn fetch_cross_arb_settings(token: &str) -> Result<Value, String> {
     match api_get(API_LOCAL_CROSS_ARB_SETTINGS, token).await {
-        Ok(value) => Ok(value
-            .get("settings")
-            .cloned()
-            .unwrap_or(value)),
+        Ok(value) => Ok(value.get("settings").cloned().unwrap_or(value)),
         Err(_) => {
             let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
             Ok(
@@ -565,14 +579,20 @@ pub(crate) async fn fetch_cross_arb_instrument_data(
     })
 }
 
-pub(crate) async fn fetch_cross_arb_market_snapshot_data(
+pub(crate) async fn run_exchange_latency_test(
     token: &str,
-) -> Result<CrossArbMarketSnapshotFetch, String> {
-    let value = api_get(API_CROSS_ARB_MARKET_SNAPSHOTS, token).await?;
-    Ok(CrossArbMarketSnapshotFetch {
-        rows: as_array(value.get("snapshots").unwrap_or(&Value::Null)),
-        coverage_ok: bool_at(&value, "coverage_ok"),
-    })
+    mode: &str,
+    batch_size: usize,
+    timeout_ms: u64,
+    gateway_endpoints: Value,
+) -> Result<Value, String> {
+    let body = json!({
+        "mode": mode,
+        "batch_size": batch_size,
+        "timeout_ms": timeout_ms,
+        "gateway_endpoints": gateway_endpoints,
+    });
+    api_post_json(API_LOCAL_EXCHANGE_LATENCY_TEST, token, &body).await
 }
 
 async fn fetch_or_previous(

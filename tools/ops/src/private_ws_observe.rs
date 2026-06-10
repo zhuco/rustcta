@@ -522,6 +522,11 @@ fn binance_private_event_rows(
         "execution_type": order.get("x").cloned().unwrap_or(Value::Null),
         "exchange_order_id": order.get("i").cloned().unwrap_or(Value::Null),
         "client_order_id": order.get("c").cloned().unwrap_or(Value::Null),
+        "last_quantity": order.get("l").cloned().unwrap_or(Value::Null),
+        "last_price": order.get("L").cloned().unwrap_or(Value::Null),
+        "cumulative_quantity": order.get("z").cloned().unwrap_or(Value::Null),
+        "cumulative_quote_quantity": order.get("Z").cloned().unwrap_or(Value::Null),
+        "average_fill_price": average_price_from_quantity_and_quote(order.get("z"), order.get("Z")),
         "latency_ms": latency_ms(now, millis_timestamp(data.get("E").or_else(|| data.get("T")))),
     }))]
 }
@@ -702,6 +707,13 @@ fn private_event_row(
     })
 }
 
+fn average_price_from_quantity_and_quote(quantity: Option<&Value>, quote: Option<&Value>) -> Value {
+    match (number_like(quantity), number_like(quote)) {
+        (Some(quantity), Some(quote)) if quantity.abs() > f64::EPSILON => json!(quote / quantity),
+        _ => Value::Null,
+    }
+}
+
 trait ValueExt {
     fn with_extra(self, extra: Value) -> Value;
 }
@@ -856,15 +868,20 @@ mod tests {
                 "s": "BTCUSDT",
                 "S": "BUY",
                 "x": "TRADE",
-                "X": "PARTIALLY_FILLED",
-                "l": "0.01",
-                "L": "50000"
+                "X": "FILLED",
+                "l": "9",
+                "L": "0.08895",
+                "z": "66",
+                "Z": "5.8707"
             }
         });
         let rows =
             binance_private_event_rows(&sanitize_value(&binance), Some(&binance), Utc::now());
         assert_eq!(rows[0]["private_kind"], "fill");
         assert_eq!(rows[0]["canonical_symbol"], "BTC/USDT");
+        assert_eq!(rows[0]["quantity"], 9.0);
+        assert_eq!(rows[0]["cumulative_quantity"], "66");
+        assert_eq!(rows[0]["average_fill_price"], 0.08895);
 
         let bitget = json!({
             "arg": {"channel": "fill"},

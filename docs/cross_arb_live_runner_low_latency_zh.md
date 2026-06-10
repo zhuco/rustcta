@@ -19,6 +19,28 @@ Status date: 2026-06-09
 
 ## 运行入口
 
+服务器部署的唯一脚本入口：
+
+```bash
+scripts/rustcta_server.sh deploy-cross-arb-live-stack
+```
+
+该入口同时处理：
+
+- Dioxus 控制页构建与上传：`web-ui/dioxus` -> `web-ui/dioxus/dist`。
+- `rustcta-control-api` release binary 上传与 `control-api` 服务重启。
+- `cross-exchange-arbitrage-live-runner` release binary 上传与
+  `cross-arb-live` 服务重启。
+- `config/cross_exchange_arbitrage_usdt.yml` 上传到服务器 config 目录。
+
+控制页读取的 dashboard snapshot 必须是 live runner 输出：
+
+```text
+logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json
+```
+
+不要把控制页指向旧的 `cross_arb_dashboard_snapshot.json`。
+
 分析模式：
 
 ```bash

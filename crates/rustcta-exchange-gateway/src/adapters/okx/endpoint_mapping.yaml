@@ -200,6 +200,21 @@ endpoints:
     rate_limit_bucket: public_ip
     weight: 1
     request_spec_required: false
+  - operation: get_funding_rates
+    transport: rest
+    product: perpetual
+    market_types: [perpetual]
+    method: GET
+    path: /api/v5/public/funding-rate
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    support: native
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/okx/funding.json
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/public_tests.rs
   - operation: get_balances
     transport: rest
     product: mixed
@@ -384,3 +399,33 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
+  - operation: set_leverage
+    support: native
+    transport: rest
+    product: derivatives
+    market_types: [perpetual, futures, options]
+    method: POST
+    path: /api/v5/account/set-leverage
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/okx/request_specs/set_leverage.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/okx/private_tests.rs
+    notes: "Runtime maps shared SetLeverageRequest to instId+lever with mgnMode=cross, matching the adapter's derivative order tdMode."
+  - operation: set_position_mode
+    support: native
+    transport: rest
+    product: derivatives
+    market_types: [perpetual, futures, options]
+    method: POST
+    path: /api/v5/account/set-position-mode
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: false
+    notes: "Runtime maps shared SetPositionModeRequest to posMode=long_short_mode or net_mode."

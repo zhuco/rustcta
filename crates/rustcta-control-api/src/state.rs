@@ -2,7 +2,7 @@ use crate::{
     read_models, AgentConnectionStatus, AgentSummary, ControlApiStateSnapshot, LogEventView,
     LogLevel, StrategyLogTailView, CONTROL_API_SCHEMA_VERSION,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use rustcta_event_ledger::{
     AuditActor, AuditActorType, AuditOutcome, AuditRecord, EventIdentity, EventKind, LedgerEvent,
     LedgerStore,
@@ -543,6 +543,7 @@ async fn read_log_tail(
 
     let mut lines = lines
         .into_iter()
+        .map(strip_ansi_escape_codes)
         .filter(|line| !is_noisy_strategy_log_line(line))
         .collect::<Vec<_>>();
     let truncated_by_lines = lines.len() > max_lines;
@@ -554,7 +555,7 @@ async fn read_log_tail(
     let events = lines
         .into_iter()
         .enumerate()
-        .map(|(index, line)| parse_log_line(index, line, fallback_time, target))
+        .map(|(index, line)| parse_log_line(index, &line, fallback_time, target))
         .collect::<Vec<_>>();
 
     Ok((events, start_offset > 0 || truncated_by_lines))
@@ -620,9 +621,54 @@ fn parse_log_time(line: &str) -> Option<DateTime<Utc>> {
         .next()
         .unwrap_or_default()
         .trim_matches(|ch| ch == '[' || ch == ']');
-    DateTime::parse_from_rfc3339(first_token)
+    parse_log_time_candidate(first_token).or_else(|| parse_log_time_prefix(line))
+}
+
+fn parse_log_time_prefix(line: &str) -> Option<DateTime<Utc>> {
+    let trimmed = line.trim_start().trim_start_matches('[');
+    for length in [35usize, 30, 29, 25, 24, 23, 20, 19] {
+        if trimmed.len() < length {
+            continue;
+        }
+        let candidate = trimmed[..length]
+            .trim_end_matches(']')
+            .trim_end_matches(',')
+            .trim();
+        if let Some(timestamp) = parse_log_time_candidate(candidate) {
+            return Some(timestamp);
+        }
+    }
+    None
+}
+
+fn parse_log_time_candidate(value: &str) -> Option<DateTime<Utc>> {
+    let value = value.trim();
+    DateTime::parse_from_rfc3339(value)
         .map(|timestamp| timestamp.with_timezone(&Utc))
         .ok()
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f")
+                .map(|timestamp| timestamp.and_utc())
+                .ok()
+        })
+}
+
+fn strip_ansi_escape_codes(line: &str) -> String {
+    let mut stripped = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        stripped.push(ch);
+    }
+    stripped
 }
 
 fn contains_private_log_marker(lower: &str) -> bool {
@@ -640,6 +686,7 @@ fn is_noisy_strategy_log_line(line: &str) -> bool {
     let trimmed = lower.trim();
     trimmed.is_empty()
         || trimmed.contains("heartbeat")
+        || trimmed.contains("cross-arb live runner status")
         || trimmed.contains("keep_alive")
         || trimmed.contains("keep-alive")
 }

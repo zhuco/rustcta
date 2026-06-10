@@ -16,6 +16,8 @@ tower-http = { workspace = true, features = ["fs"] }
 rustcta-control-api.workspace = true
 rustcta-event-ledger.workspace = true
 rustcta-supervisor.workspace = true
+reqwest.workspace = true
+tokio-tungstenite.workspace = true
 
 [dev-dependencies]
 tower = "0.5"

@@ -51,6 +51,15 @@ impl GatewayProtocolRequest {
                 validate_exchange_schema(request.schema_version)?;
                 self.validate_context(&request.context)?;
             }
+            GatewayRequestPayload::GetFundingRates(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+                if request.symbols.is_empty() {
+                    return Err(GatewayError::Rejected(
+                        "get_funding_rates requires at least one symbol".to_string(),
+                    ));
+                }
+            }
             GatewayRequestPayload::PlaceOrder(request) => {
                 validate_exchange_schema(request.schema_version)?;
                 self.validate_context(&request.context)?;

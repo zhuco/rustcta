@@ -174,6 +174,11 @@ impl LocalGateway for MockExchangeGateway {
             GatewayRequestPayload::GetFees(request) => {
                 GatewayResponsePayload::Fees(self.handle_get_fees(request)?)
             }
+            GatewayRequestPayload::GetFundingRates(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.get_funding_rates".to_string(),
+                });
+            }
             GatewayRequestPayload::PlaceOrder(request) => {
                 GatewayResponsePayload::PlaceOrder(self.handle_place_order(request)?)
             }

@@ -83,6 +83,9 @@ fn typed_payload_from_legacy_operation(
             GatewayRequestPayload::GetOrderBook(decode_payload(payload)?)
         }
         GatewayOperation::GetFees => GatewayRequestPayload::GetFees(decode_payload(payload)?),
+        GatewayOperation::GetFundingRates => {
+            GatewayRequestPayload::GetFundingRates(decode_payload(payload)?)
+        }
         GatewayOperation::PlaceOrder => GatewayRequestPayload::PlaceOrder(decode_payload(payload)?),
         GatewayOperation::PlaceQuoteMarketOrder => {
             GatewayRequestPayload::PlaceQuoteMarketOrder(decode_payload(payload)?)

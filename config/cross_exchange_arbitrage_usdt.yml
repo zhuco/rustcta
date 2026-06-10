@@ -1,6 +1,7 @@
 mode: live_small
-max_live_notional_per_trade: 5.5
-max_consecutive_losses: 3
+max_live_notional_per_trade: 5.2
+max_consecutive_losses: 10
+execution_module: slippage_capture
 enabled_exchanges:
 - binance
 - gate
@@ -35,21 +36,21 @@ market:
   top_of_book_capacity_ratio: 0.8
 thresholds:
   min_display_raw_spread: 0.001
-  min_open_raw_spread: 0.01
-  min_open_maker_taker_net_edge: 0.002
-  max_open_raw_spread: 0.05
+  min_open_raw_spread: 0.010
+  min_open_maker_taker_net_edge: 0.001
+  max_open_raw_spread: 0.10
   route_overrides: []
-  close_min_net_profit_pct: 0.002
-  lock_profit_dual_taker_pct: 0.002
-  strong_lock_profit_dual_taker_pct: 0.004
+  close_min_net_profit_pct: 0.001
+  lock_profit_dual_taker_pct: 0.001
+  strong_lock_profit_dual_taker_pct: 0.001
   max_close_spread_pct: 0.002
   expected_close_spread_pct: 0.002
 dual_taker:
-  target_notional_usdt: 5.5
-  min_open_spread_pct: 0.01
-  max_open_spread_pct: 0.05
-  taker_slippage_pct: 0.0005
-  close_min_net_profit_pct: 0.002
+  target_notional_usdt: 5.2
+  min_open_spread_pct: 0.010
+  max_open_spread_pct: 0.10
+  taker_slippage_pct: 0.02
+  close_min_net_profit_pct: 0.001
   expected_close_spread_pct: 0.002
   top_of_book_capacity_ratio: 0.8
   orderbook_stale_ms: 6000
@@ -61,21 +62,45 @@ dual_taker:
   symbol_cooldown_secs: 300
   max_hold_secs: 86400
   close_on_max_hold_requires_profit: true
-  min_open_net_profit_pct: 0.002
+  min_open_net_profit_pct: 0.001
+slippage_capture:
+  target_notional_usdt: 5.2
+  min_open_spread_pct: 0.010
+  min_open_net_profit_pct: 0.001
+  max_open_spread_pct: 0.10
+  startup_skip_spread_secs: 10
+  max_signal_age_ms: 3000
+  maker_price_offset_pct: 0.0025
+  hedge_taker_slippage_pct: 0.005
+  close_taker_slippage_pct: 0.005
+  close_min_net_profit_pct: 0.001
+  maker_order_timeout_ms: 3000
+  cancel_unfilled_maker: true
+  max_maker_top_depth_usdt: 0.0
+  hedge_top_of_book_capacity_ratio: 0.8
+  enforce_hedge_top_depth: false
+  orderbook_stale_ms: 6000
+  min_orderbook_levels: 1
+  max_open_bundles: 10
+  max_positions_per_exchange: 10
+  max_active_bundles_per_symbol: 1
+  symbol_cooldown_secs: 15
+  max_hold_secs: 86400
+  close_on_max_hold_requires_profit: true
 execution_quality:
-  min_open_raw_spread_pct: 0.01
-  min_open_net_edge_pct: 0.002
+  min_open_raw_spread_pct: 0.010
+  min_open_net_edge_pct: 0.001
   min_open_executable_depth_ratio: 1.2
-  min_close_net_profit_pct: 0.002
+  min_close_net_profit_pct: 0.001
 sizing:
-  min_notional_usdt: 5.5
-  target_notional_usdt: 5.5
-  max_notional_usdt: 5.5
+  min_notional_usdt: 5.2
+  target_notional_usdt: 5.2
+  max_notional_usdt: 5.2
   exchange_equity_usdt: 50.0
   leverage: 10.0
   max_positions_per_exchange: 10
   capital_fraction_of_smaller_equity: 1.0
-  max_symbol_notional_usdt: 5.5
+  max_symbol_notional_usdt: 5.2
   max_exchange_usage_pct: 1.0
 fees:
   default_maker_fee_rate: 0.0002
@@ -225,31 +250,34 @@ disabled:
     symbol: SPCX/USDT
     reason: binance_tradfi_perps_agreement_required
 execution:
-  trading_enabled: false
+  trading_enabled: true
   require_release_binary: true
   private_ws_confirmation_required: true
-  private_ws_confirmation_timeout_ms: 600
-  allow_rest_readback_confirmation: false
+  private_ws_confirmation_timeout_ms: 2000
+  allow_rest_readback_confirmation: true
+  enforce_top_depth_on_open: true
   open_disabled_exchanges: []
   max_hedge_retries: 1
-  single_leg_timeout_ms: 600
-  maker_order_ttl_ms: 5000
-  max_concurrent_maker_orders: 10
+  single_leg_timeout_ms: 3000
+  maker_order_ttl_ms: 3000
+  max_concurrent_maker_orders: 5
+  max_signal_age_ms: 3000
   maker_price_offset_ticks: 0
+  slippage_capture_offset_pct: 0.0025
   maker_aggressive_after_cancels: 5
   maker_aggressive_step_ticks: 1
   maker_aggressive_max_ticks: 2
   maker_cooldown_after_cancels: 10
   maker_cooldown_ms: 120000
-  taker_ioc_slippage_limit_pct: 0.0005
-  open_execution_style: dual_taker
+  taker_ioc_slippage_limit_pct: 0.005
+  open_execution_style: slippage_capture
   close_execution_style: dual_taker
 private_ws:
   timeout_ms: 15000
   reconnect_delay_ms: 2000
 controls:
   start_paused_new_entries: false
-  start_close_only: true
+  start_close_only: false
 reconciliation:
   open_orders_interval_secs: 5
   positions_interval_secs: 10
@@ -259,17 +287,18 @@ reconciliation:
 risk:
   stale_quote_ms: 6000
   max_book_age_ms: 6000
+  restore_route_cooldowns_from_profit_history: false
   taker_slippage_buffer: 0.0005
-  max_taker_slippage_pct: 0.0005
+  max_taker_slippage_pct: 0.02
   maker_non_fill_penalty: 0.001
   safety_buffer: 0.001
-  max_notional_per_symbol_usdt: 5.5
+  max_notional_per_symbol_usdt: 5.2
   max_notional_per_exchange_usdt: 100.0
   max_total_notional_usdt: 300.0
-  max_single_leg_exposure_usdt: 5.5
-  max_open_bundles: 3
+  max_single_leg_exposure_usdt: 5.2
+  max_open_bundles: 10
   max_open_positions: 20
-  max_consecutive_losses: 3
+  max_consecutive_losses: 10
   max_loss_per_trade_usdt: 100.0
   max_daily_loss_usdt: 500.0
   max_drawdown_usdt: 1000.0
@@ -326,7 +355,6 @@ universe:
   - gate
   - bitget
   symbols:
-  - EDGE/USDT
   - ESPORTS/USDT
   - DRIFT/USDT
   - SPCX/USDT

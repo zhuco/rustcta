@@ -2,7 +2,7 @@ use rustcta_exchange_api::{
     BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest, CancelOrderRequest,
     CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient, FeesRequest,
     OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
-    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    RecentFillsRequest, SetLeverageRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -11,7 +11,7 @@ use super::test_support::{
     assert_signed_request, assert_signed_request_method, context, exchange_id,
     perpetual_symbol_scope, spawn_rest_server, symbol_scope,
 };
-use super::{MexcGatewayAdapter, MexcGatewayConfig};
+use super::{GatewayAdapter, MexcGatewayAdapter, MexcGatewayConfig};
 use crate::request_spec::RequestSpec;
 
 #[tokio::test]
@@ -76,6 +76,11 @@ fn mexc_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
         capabilities.capabilities_v2.fills_history.max_limit,
         Some(1000)
     );
+    assert!(capabilities.supports_funding_rates);
+    assert!(capabilities.capabilities_v2.funding_rates.is_supported());
+    let account_control = GatewayAdapter::account_control_capabilities(&adapter);
+    assert!(account_control.supports_leverage);
+    assert!(!account_control.supports_position_mode_change);
     assert!(capabilities.capabilities_v2.fills_history.supports_since);
     assert!(capabilities.capabilities_v2.fills_history.supports_from_id);
     assert_eq!(
@@ -349,6 +354,73 @@ async fn mexc_adapter_should_place_perpetual_order_on_contract_api() {
     assert_eq!(body["vol"], "2");
     assert_eq!(body["price"], "65000");
     assert_eq!(body["externalOid"], "PERP1");
+}
+
+#[tokio::test]
+async fn mexc_adapter_should_set_perpetual_leverage_for_both_position_types() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({"success": true, "code": 0, "data": true}),
+        json!({"success": true, "code": 0, "data": true}),
+    ])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .set_leverage(SetLeverageRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-leverage"),
+            symbol: perpetual_symbol_scope(),
+            leverage: 4,
+        })
+        .await
+        .expect("set leverage");
+
+    assert!(response.accepted);
+    assert_eq!(response.leverage, 4);
+    assert_eq!(response.symbol.market_type, MarketType::Perpetual);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    for request in &requests {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/v1/private/position/change_leverage");
+        assert_eq!(
+            request.headers.get("apikey").map(String::as_str),
+            Some("key")
+        );
+        assert!(request
+            .headers
+            .get("request-time")
+            .is_some_and(|value| !value.is_empty()));
+        assert!(request
+            .headers
+            .get("signature")
+            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(
+            request.query.get("symbol").map(String::as_str),
+            Some("BTC_USDT")
+        );
+        assert_eq!(request.query.get("leverage").map(String::as_str), Some("4"));
+        assert_eq!(request.query.get("openType").map(String::as_str), Some("2"));
+    }
+    load_request_spec("set_leverage.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("set leverage request spec");
+    assert_eq!(
+        requests[0].query.get("positionType").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        requests[1].query.get("positionType").map(String::as_str),
+        Some("2")
+    );
 }
 
 #[test]

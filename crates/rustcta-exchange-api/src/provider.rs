@@ -5,11 +5,12 @@ use crate::{
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, ExchangeId, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
-    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SymbolRulesRequest, SymbolRulesResponse,
+    ExchangeClientCapabilities, ExchangeId, FeesRequest, FeesResponse, FundingRatesRequest,
+    FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
+    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
+    PositionsRequest, PositionsResponse, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 
 #[async_trait]
@@ -36,6 +37,11 @@ pub trait AdapterFreeExchangeProvider: Send + Sync {
     ) -> ExchangeApiResult<OrderBookResponse>;
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse>;
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse>;
 
     async fn place_order(
         &self,
@@ -145,6 +151,13 @@ where
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         ExchangeClient::get_fees(self, request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ExchangeClient::get_funding_rates(self, request).await
     }
 
     async fn place_order(

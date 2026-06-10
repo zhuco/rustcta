@@ -494,6 +494,7 @@ fn xt_capabilities_v2(private: bool) -> ExchangeClientCapabilitiesV2 {
         } else {
             Vec::new()
         },
+        ..ExchangeClientCapabilitiesV2::default()
     };
     if !private {
         v2.endpoints

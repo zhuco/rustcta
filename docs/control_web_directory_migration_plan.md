@@ -23,6 +23,24 @@ control-panel binary in this checkout.
 
 ## Current Run Command
 
+The server-side control panel must be deployed through the local server helper:
+
+```bash
+scripts/rustcta_server.sh deploy-control-panel
+```
+
+That is the only normal entrypoint for building the Dioxus panel, syncing
+`web-ui/dioxus/dist` to the server, deploying `rustcta-control-api`, and
+restarting the `control-api` user service.
+
+For a full cross-arb live runner plus Web control panel deploy, use:
+
+```bash
+scripts/rustcta_server.sh deploy-cross-arb-live-stack
+```
+
+Direct `cargo run` is for local debugging only:
+
 ```bash
 RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091 \
 RUSTCTA_CONTROL_API_AGENT_ID=local-agent \
@@ -32,6 +50,7 @@ RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=data/control_api/audit.jsonl \
 RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE=data/control_api/exchange_api_keys.env \
 RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG=config/accounts.yml \
 RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \
+RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json \
 cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```
 
@@ -40,6 +59,14 @@ Open `http://127.0.0.1:8091`.
 `127.0.0.1:8091` is the fixed control-panel Web service bind. Do not run the
 control panel through `8080`, `dx serve`, or any other long-running Web service
 port.
+
+The served static directory is always `web-ui/dioxus/dist`. The source tree is
+`web-ui/dioxus`; Dioxus build output under `target/dx/.../public` is an
+intermediate artifact and must be copied into `dist` before deployment.
+
+For the cross-arb page, `control-api` must read
+`logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json`. Do not use the
+old `cross_arb_dashboard_snapshot.json` path for the active panel.
 
 ## Exchange Configuration Contract
 

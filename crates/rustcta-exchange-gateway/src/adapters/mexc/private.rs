@@ -6,7 +6,8 @@ use rustcta_exchange_api::{
     FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderState,
     PlaceOrderRequest, PlaceOrderResponse, Position, PositionsRequest, PositionsResponse,
     QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AssetBalance, CanonicalSymbol, ExchangeSymbol, Fill, MarketType, OrderSide, OrderStatus,
@@ -575,6 +576,48 @@ impl MexcGatewayAdapter {
             positions,
         })
     }
+
+    pub(super) async fn set_leverage_impl(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        if request.symbol.market_type != MarketType::Perpetual {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "mexc.set_leverage_non_perpetual",
+            });
+        }
+        let mut params = mexc_contract_set_leverage_params(&request, 1)?;
+        self.send_contract_signed_post(
+            "mexc.contract.set_leverage",
+            "/api/v1/private/position/change_leverage",
+            &params,
+            None,
+        )
+        .await?;
+        params.insert("positionType".to_string(), "2".to_string());
+        self.send_contract_signed_post(
+            "mexc.contract.set_leverage",
+            "/api/v1/private/position/change_leverage",
+            &params,
+            None,
+        )
+        .await?;
+        Ok(SetLeverageResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            symbol: request.symbol,
+            leverage: request.leverage,
+            accepted: true,
+            message: Some(
+                "mexc contract leverage applied to long and short position types".to_string(),
+            ),
+        })
+    }
 }
 
 fn mexc_place_order_params(
@@ -742,6 +785,29 @@ fn mexc_contract_cancel_body(request: &CancelOrderRequest) -> ExchangeApiResult<
         });
     }
     Ok(Value::Object(body))
+}
+
+fn mexc_contract_set_leverage_params(
+    request: &SetLeverageRequest,
+    position_type: u32,
+) -> ExchangeApiResult<HashMap<String, String>> {
+    if request.leverage == 0 {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "mexc set_leverage requires leverage greater than zero".to_string(),
+        });
+    }
+    let mut params = HashMap::new();
+    params.insert(
+        "symbol".to_string(),
+        normalize_mexc_symbol_for_market(
+            &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
+        )?,
+    );
+    params.insert("leverage".to_string(), request.leverage.to_string());
+    params.insert("openType".to_string(), "2".to_string());
+    params.insert("positionType".to_string(), position_type.to_string());
+    Ok(params)
 }
 
 fn mexc_contract_side(side: OrderSide, reduce_only: bool) -> i64 {

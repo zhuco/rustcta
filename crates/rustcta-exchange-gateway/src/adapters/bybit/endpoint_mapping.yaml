@@ -30,13 +30,19 @@ reconciliation:
   unknown_order_policy: query_order_then_open_orders
 batch:
   place_orders:
-    support: unsupported
-    status: project_unimplemented
-    reason: create-batch not yet wired in this adapter
+    support: native
+    endpoint: /v5/order/create-batch
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    partial_failure: true
   cancel_orders:
-    support: unsupported
-    status: project_unimplemented
-    reason: cancel-batch not yet wired in this adapter
+    support: native
+    endpoint: /v5/order/cancel-batch
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    partial_failure: true
   cancel_all_orders:
     support: native
     atomicity: partial
@@ -105,7 +111,7 @@ endpoints:
     rate_limit_bucket: public_market
     weight: 1
     request_spec_required: false
-  - operation: funding_history
+  - operation: get_funding_rates
     product: perpetual
     transport: rest
     method: GET
@@ -114,8 +120,11 @@ endpoints:
     rate_limit_bucket: public_market
     weight: 1
     request_spec_required: false
-    support: spec_only
-    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bybit/funding_history.json }
+    support: native
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bybit/funding_history.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bybit/tests.rs
   - operation: open_interest
     product: perpetual
     transport: rest
@@ -301,8 +310,12 @@ endpoints:
     rate_limit_bucket: private_trade
     weight: 1
     request_spec_required: true
-    support: unsupported
-    reason: no shared gateway mutation request type for leverage in task-1 adapter surface
+    support: native
+    request_spec:
+      fixture: tests/fixtures/exchanges/bybit/request_specs/set_leverage.json
+    response_parser:
+      status: implemented
+    notes: "Runtime maps the shared SetLeverageRequest leverage to both buyLeverage and sellLeverage for V5 linear/inverse contracts."
   - operation: switch_margin_mode
     product: perpetual
     transport: rest
@@ -315,7 +328,7 @@ endpoints:
     request_spec_required: true
     support: unsupported
     reason: no shared gateway mutation request type for margin mode in task-1 adapter surface
-  - operation: switch_position_mode
+  - operation: set_position_mode
     product: perpetual
     transport: rest
     method: POST
@@ -325,5 +338,5 @@ endpoints:
     rate_limit_bucket: private_trade
     weight: 1
     request_spec_required: true
-    support: unsupported
-    reason: no shared gateway mutation request type for position mode in task-1 adapter surface
+    support: native
+    notes: "Runtime maps shared SetPositionModeRequest to linear account-level mode 3(hedge) or 0(one-way)."

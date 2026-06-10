@@ -9,9 +9,12 @@ use crate::runtime_contract::{
     CrossArbOpportunityRow, CrossArbRouteHealthRow, CrossArbRuntimeContract,
     DEFAULT_ASYNC_DB_QUEUE_EVENTS,
 };
-use crate::CrossExchangeArbitrageConfig;
+use crate::{
+    CrossArbExecutionModule, CrossExchangeArbitrageConfig, OpenOpportunityAudit,
+    OpenOpportunityDecision, OpenOpportunityRejectReason,
+};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CrossArbRuntimeInput {
     pub market_snapshots: usize,
     pub opportunities: usize,
@@ -28,6 +31,7 @@ pub struct CrossArbRuntimeInput {
     pub startup_single_leg_positions_resolved: usize,
     pub singleton_acquired: bool,
     pub price_audit_events: Vec<CrossArbDbPriceAuditEvent>,
+    pub open_decision_audit_events: Vec<CrossArbDbAuditEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -71,6 +75,83 @@ pub struct CrossArbDbPriceAuditEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CrossArbAuthEvidence {
+    pub exchange: String,
+    pub account_id: Option<String>,
+    pub account_key_ref: Option<String>,
+    pub auth_material_loaded: bool,
+    pub trade_permission_confirmed: bool,
+    pub private_stream_ready: bool,
+    pub evidence_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CrossArbDbOpenDecisionAuditEvent {
+    pub event_kind: &'static str,
+    pub opportunity_id: String,
+    pub runtime_mode: &'static str,
+    pub accepted: bool,
+    pub reject_reason: Option<OpenOpportunityRejectReason>,
+    pub recorded_at: DateTime<Utc>,
+    pub audit: OpenOpportunityAudit,
+    pub risk_flags: Vec<String>,
+    pub auth_evidence: Vec<CrossArbAuthEvidence>,
+    pub raw_record_required: bool,
+    pub non_blocking_enqueue_required: bool,
+}
+
+impl CrossArbDbOpenDecisionAuditEvent {
+    pub fn from_open_audit(
+        audit: OpenOpportunityAudit,
+        runtime_mode: &'static str,
+        auth_evidence: Vec<CrossArbAuthEvidence>,
+        recorded_at: DateTime<Utc>,
+    ) -> Self {
+        let accepted = audit.decision == OpenOpportunityDecision::Accepted;
+        let reject_reason = audit.reject_reason;
+        let risk_flags = reject_reason
+            .map(|reason| vec![format!("{reason:?}")])
+            .unwrap_or_default();
+        Self {
+            event_kind: "open_decision_audit",
+            opportunity_id: audit.opportunity_id.clone(),
+            runtime_mode,
+            accepted,
+            reject_reason,
+            recorded_at,
+            audit,
+            risk_flags,
+            auth_evidence,
+            raw_record_required: true,
+            non_blocking_enqueue_required: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "audit_event_type", rename_all = "snake_case")]
+pub enum CrossArbDbAuditEvent {
+    Price(CrossArbDbPriceAuditEvent),
+    OpenDecision(CrossArbDbOpenDecisionAuditEvent),
+}
+
+impl CrossArbDbAuditEvent {
+    fn event_kind(&self) -> &'static str {
+        match self {
+            Self::Price(event) => event.event_kind,
+            Self::OpenDecision(event) => event.event_kind,
+        }
+    }
+
+    fn set_non_blocking_enqueue_required(&mut self) {
+        match self {
+            Self::Price(event) => event.non_blocking_enqueue_required = true,
+            Self::OpenDecision(event) => event.non_blocking_enqueue_required = true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CrossArbNotification {
     pub notification_kind: &'static str,
     pub message: String,
@@ -89,11 +170,13 @@ pub struct CrossArbExecutionIntentSummary {
     pub consecutive_loss_closes: u32,
     pub max_consecutive_losses: u32,
     pub stopped_by_loss_guard: bool,
+    pub execution_module: CrossArbExecutionModule,
     pub open_legs_concurrent_required: bool,
+    pub maker_open_then_taker_hedge_required: bool,
     pub close_legs_concurrent_required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CrossArbRuntimeCycle {
     pub contract: CrossArbRuntimeContract,
     pub dashboard_snapshot: CrossArbDashboardSnapshot,
@@ -101,6 +184,7 @@ pub struct CrossArbRuntimeCycle {
     pub notifications: Vec<CrossArbNotification>,
     pub execution: CrossArbExecutionIntentSummary,
     pub queued_price_audit_events: Vec<CrossArbDbPriceAuditEvent>,
+    pub queued_db_audit_events: Vec<CrossArbDbAuditEvent>,
     pub async_db_queue: CrossArbAsyncDbQueueState,
 }
 
@@ -110,7 +194,7 @@ pub struct CrossArbAppRuntime {
     live_orders_enabled: bool,
     storage_events: Vec<CrossArbStorageEvent>,
     notifications: Vec<CrossArbNotification>,
-    async_db_queue: VecDeque<CrossArbDbPriceAuditEvent>,
+    async_db_queue: VecDeque<CrossArbDbAuditEvent>,
     async_db_queue_capacity: usize,
     dropped_db_events: usize,
     consecutive_loss_closes: u32,
@@ -150,8 +234,14 @@ impl CrossArbAppRuntime {
         let mut contract = build_runtime_contract(&self.config, captured_at);
         let price_audit_events = std::mem::take(&mut input.price_audit_events);
         self.apply_consecutive_loss_guard(&price_audit_events, captured_at);
+        let mut db_audit_events = std::mem::take(&mut input.open_decision_audit_events);
+        db_audit_events.extend(
+            price_audit_events
+                .into_iter()
+                .map(CrossArbDbAuditEvent::Price),
+        );
         let async_db_queue =
-            self.enqueue_price_audit_events(price_audit_events, input.db_writer_ready, captured_at);
+            self.enqueue_db_audit_events(db_audit_events, input.db_writer_ready, captured_at);
         self.apply_runtime_state(&mut contract, &input, async_db_queue.clone());
 
         let startup_readiness_satisfied = contract.readiness_gate.all_gates_ready();
@@ -209,10 +299,22 @@ impl CrossArbAppRuntime {
                 consecutive_loss_closes: self.consecutive_loss_closes,
                 max_consecutive_losses: self.config.max_consecutive_losses.max(1),
                 stopped_by_loss_guard: self.stopped_by_loss_guard,
-                open_legs_concurrent_required: true,
+                execution_module: self.config.execution_module,
+                open_legs_concurrent_required: self.config.execution_module
+                    == CrossArbExecutionModule::DualTaker,
+                maker_open_then_taker_hedge_required: self.config.execution_module
+                    == CrossArbExecutionModule::SlippageCapture,
                 close_legs_concurrent_required: true,
             },
-            queued_price_audit_events: self.async_db_queue.iter().cloned().collect(),
+            queued_price_audit_events: self
+                .async_db_queue
+                .iter()
+                .filter_map(|event| match event {
+                    CrossArbDbAuditEvent::Price(event) => Some(event.clone()),
+                    CrossArbDbAuditEvent::OpenDecision(_) => None,
+                })
+                .collect(),
+            queued_db_audit_events: self.async_db_queue.iter().cloned().collect(),
             async_db_queue,
         }
     }
@@ -241,10 +343,7 @@ impl CrossArbAppRuntime {
         self.stopped_by_loss_guard
     }
 
-    pub fn drain_async_db_queue_batch(
-        &mut self,
-        max_events: usize,
-    ) -> Vec<CrossArbDbPriceAuditEvent> {
+    pub fn drain_async_db_queue_batch(&mut self, max_events: usize) -> Vec<CrossArbDbAuditEvent> {
         let mut drained = Vec::new();
         for _ in 0..max_events {
             let Some(event) = self.async_db_queue.pop_front() else {
@@ -298,9 +397,9 @@ impl CrossArbAppRuntime {
         }
     }
 
-    fn enqueue_price_audit_events(
+    fn enqueue_db_audit_events(
         &mut self,
-        events: Vec<CrossArbDbPriceAuditEvent>,
+        events: Vec<CrossArbDbAuditEvent>,
         db_writer_ready: bool,
         recorded_at: DateTime<Utc>,
     ) -> CrossArbAsyncDbQueueState {
@@ -309,11 +408,13 @@ impl CrossArbAppRuntime {
         let mut last_enqueue_at = None;
 
         for mut event in events {
-            event.non_blocking_enqueue_required = true;
+            event.set_non_blocking_enqueue_required();
+            let event_kind = event.event_kind();
             if self.async_db_queue.len() < self.async_db_queue_capacity {
                 self.async_db_queue.push_back(event);
                 enqueued += 1;
                 last_enqueue_at = Some(recorded_at);
+                self.record(event_kind, 1, recorded_at);
             } else {
                 self.dropped_db_events += 1;
                 dropped_this_cycle += 1;
@@ -321,6 +422,7 @@ impl CrossArbAppRuntime {
         }
 
         if enqueued > 0 {
+            self.record("async_db_audit_events_enqueued", enqueued, recorded_at);
             self.record("async_price_audit_events_enqueued", enqueued, recorded_at);
         }
 

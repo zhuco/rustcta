@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
-    SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRatesRequest, FundingRatesResponse,
+    OrderBookRequest, OrderBookResponse, SymbolRulesRequest, SymbolRulesResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 
 use super::parser::{
-    normalize_depth, normalize_okx_symbol_for_market, okx_inst_type, parse_orderbook_snapshot,
-    parse_symbol_rules,
+    is_okx_derivative_market, normalize_depth, normalize_okx_symbol_for_market, okx_inst_type,
+    parse_orderbook_snapshot, parse_symbol_rules,
 };
+use super::types::parse_funding_rate;
 use super::OkxGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
@@ -93,6 +95,50 @@ impl OkxGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
             order_book,
+        })
+    }
+
+    pub(super) async fn get_funding_rates_public_rest(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        if request.symbols.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "okx.get_funding_rates requires at least one symbol".to_string(),
+            });
+        }
+        let mut rates = Vec::with_capacity(request.symbols.len());
+        for symbol in request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            self.ensure_market_type(symbol.market_type)?;
+            if !is_okx_derivative_market(symbol.market_type) {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: self.profile_operation(
+                        "okx.get_funding_rates_spot_unsupported",
+                        "okxus.get_funding_rates_unsupported",
+                        "myokx.get_funding_rates_unsupported",
+                    ),
+                });
+            }
+            let mut params = HashMap::new();
+            params.insert(
+                "instId".to_string(),
+                normalize_okx_symbol_for_market(
+                    &symbol.exchange_symbol.symbol,
+                    symbol.market_type,
+                )?,
+            );
+            let value = self
+                .rest
+                .send_public_request("/api/v5/public/funding-rate", &params)
+                .await?;
+            rates.push(parse_funding_rate(&self.exchange_id, symbol, &value)?);
+        }
+        Ok(FundingRatesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            rates,
         })
     }
 }

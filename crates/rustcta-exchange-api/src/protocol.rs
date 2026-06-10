@@ -5,11 +5,12 @@ use crate::{
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeError, ExchangeId, ExchangeStreamEvent, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
-    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, ResponseMetadata,
-    SymbolRulesRequest, SymbolRulesResponse,
+    FundingRatesRequest, FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, ResponseMetadata, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -19,6 +20,7 @@ pub enum GatewayRequest {
     GetSymbolRules(SymbolRulesRequest),
     GetOrderBook(OrderBookRequest),
     GetFees(FeesRequest),
+    GetFundingRates(FundingRatesRequest),
     PlaceOrder(PlaceOrderRequest),
     PlaceQuoteMarketOrder(QuoteMarketOrderRequest),
     CancelOrder(CancelOrderRequest),
@@ -41,6 +43,7 @@ pub enum GatewayResponse {
     SymbolRules(SymbolRulesResponse),
     OrderBook(OrderBookResponse),
     Fees(FeesResponse),
+    FundingRates(FundingRatesResponse),
     PlaceOrder(PlaceOrderResponse),
     AmendOrder(AmendOrderResponse),
     OrderList(OrderListResponse),

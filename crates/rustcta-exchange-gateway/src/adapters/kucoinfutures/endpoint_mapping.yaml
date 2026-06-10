@@ -183,19 +183,23 @@ endpoints:
     request_spec_required: true
     request_spec:
       fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/trade_fees.json
-  - operation: get_private_funding_fee_history
+  - operation: get_funding_rates
     product: perpetual
     transport: rest
     method: GET
     path: /api/v1/funding-history
-    auth: hmac
-    credential_scopes: [read_only]
-    rate_limit_bucket: futures_private
+    auth: none
+    credential_scopes: []
+    rate_limit_bucket: futures_public
     weight: 1
-    request_spec_required: true
+    request_spec_required: false
     request_spec:
       fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/funding_history.json
-    notes: "Funding history is documented and mapped for reconciliation/audit; no shared gateway funding model exists yet."
+    support: native
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/kucoinfutures/funding_history_success.json
+      test: crates/rustcta-exchange-gateway/src/adapters/kucoinfutures/public_tests.rs
   - operation: place_order
     product: perpetual
     transport: rest

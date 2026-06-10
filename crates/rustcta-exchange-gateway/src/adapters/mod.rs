@@ -9,7 +9,11 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    CancelOrderRequest, ExchangeApiError, ExchangeClient, EXCHANGE_API_SCHEMA_VERSION,
+    AccountControlCapabilities, CancelOrderRequest, ClosePositionRequest, ClosePositionResponse,
+    CountdownCancelAllRequest, CountdownCancelAllResponse, ExchangeApiError, ExchangeApiResult,
+    ExchangeClient, FundingRatesRequest, FundingRatesResponse, SetLeverageRequest,
+    SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
+    SymbolAccountConfigRequest, SymbolAccountConfigResponse, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::ExchangeId;
 
@@ -284,6 +288,62 @@ mod paper_tests;
 #[async_trait]
 pub trait GatewayAdapter: ExchangeClient {
     fn gateway_exchange_status(&self) -> GatewayExchangeStatus;
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        AccountControlCapabilities::unsupported(self.exchange())
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        _request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "get_symbol_account_config",
+        })
+    }
+
+    async fn set_leverage(
+        &self,
+        _request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "set_leverage",
+        })
+    }
+
+    async fn set_position_mode(
+        &self,
+        _request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "set_position_mode",
+        })
+    }
+
+    async fn close_position(
+        &self,
+        _request: ClosePositionRequest,
+    ) -> ExchangeApiResult<ClosePositionResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "close_position",
+        })
+    }
+
+    async fn set_countdown_cancel_all(
+        &self,
+        _request: CountdownCancelAllRequest,
+    ) -> ExchangeApiResult<CountdownCancelAllResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "set_countdown_cancel_all",
+        })
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ExchangeClient::get_funding_rates(self, request).await
+    }
 }
 
 #[derive(Clone)]
@@ -3174,6 +3234,23 @@ impl LocalGateway for AdapterBackedGateway {
                         .map_err(exchange_api_error_to_gateway)?,
                 )
             }
+            GatewayRequestPayload::GetFundingRates(request) => {
+                let exchange = request
+                    .symbols
+                    .first()
+                    .map(|symbol| symbol.exchange.clone())
+                    .ok_or_else(|| {
+                        GatewayError::Rejected(
+                            "get_funding_rates requires at least one symbol scope".to_string(),
+                        )
+                    })?;
+                let adapter = self.adapter_for(&exchange)?;
+                GatewayResponsePayload::FundingRates(
+                    GatewayAdapter::get_funding_rates(adapter.as_ref(), request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
             GatewayRequestPayload::PlaceOrder(request) => {
                 let adapter = self.adapter_for(&request.symbol.exchange)?;
                 GatewayResponsePayload::PlaceOrder(
@@ -3273,14 +3350,55 @@ impl LocalGateway for AdapterBackedGateway {
                         .map_err(exchange_api_error_to_gateway)?,
                 )
             }
-            GatewayRequestPayload::GetSymbolAccountConfig(_)
-            | GatewayRequestPayload::SetLeverage(_)
-            | GatewayRequestPayload::SetPositionMode(_)
-            | GatewayRequestPayload::ClosePosition(_)
-            | GatewayRequestPayload::SetCountdownCancelAll(_) => {
-                return Err(GatewayError::UnsupportedOperation {
-                    operation: operation.as_str().to_string(),
-                });
+            GatewayRequestPayload::GetSymbolAccountConfig(request) => {
+                let adapter = self.adapter_for(&request.symbol.exchange)?;
+                GatewayResponsePayload::SymbolAccountConfig(
+                    adapter
+                        .get_symbol_account_config(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
+            GatewayRequestPayload::SetLeverage(request) => {
+                let adapter = self.adapter_for(&request.symbol.exchange)?;
+                GatewayResponsePayload::SetLeverage(
+                    adapter
+                        .set_leverage(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
+            GatewayRequestPayload::SetPositionMode(request) => {
+                let adapter = self.adapter_for(&request.exchange)?;
+                GatewayResponsePayload::SetPositionMode(
+                    adapter
+                        .set_position_mode(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
+            GatewayRequestPayload::ClosePosition(request) => {
+                let adapter = self.adapter_for(&request.symbol.exchange)?;
+                GatewayResponsePayload::ClosePosition(
+                    adapter
+                        .close_position(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
+            GatewayRequestPayload::SetCountdownCancelAll(request) => {
+                let exchange = request
+                    .symbol
+                    .as_ref()
+                    .map(|symbol| symbol.exchange.clone())
+                    .unwrap_or_else(|| request.exchange.clone());
+                let adapter = self.adapter_for(&exchange)?;
+                GatewayResponsePayload::CountdownCancelAll(
+                    adapter
+                        .set_countdown_cancel_all(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
             }
             GatewayRequestPayload::SubscribeBooks(request) => {
                 if request.subscriptions.is_empty() {

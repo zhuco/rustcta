@@ -67,6 +67,11 @@ WebSocket market-data rules now live under `交易所网关/`.
 - `cross_arb_live_runner_low_latency_zh.md` - cross-exchange perpetual
   arbitrage single-runner, low-latency, live-switch, dashboard, private-WS
   confirmation, and deprecated config-entry rules.
+- `cross_exchange_api_audit_and_slippage_capture_design_zh.md` - shared
+  exchange API audit, slippage-capture execution design, and 2026-06-10
+  OKX/Bybit/MEXC/KuCoin Futures Spot/Perp/funding-rate gateway closure notes.
+- `spot_futures_arbitrage_design_zh.md` - independent Spot + USDT perpetual
+  cash-and-carry strategy design, excluding BTC/ETH/BNB/SOL by default.
 - `cross_exchange_perpetual_precision_constraints_zh.md` - hard constraints for
   cross-exchange perpetual arbitrage precision, contract units, base quantity
   normalization, exchange order strings, and Decimal/integer-scale migration.

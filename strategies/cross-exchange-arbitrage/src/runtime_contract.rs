@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::{CrossExchangeArbitrageConfig, DISPLAY_NAME, MIGRATED_FROM, STRATEGY_KIND};
+use crate::{
+    CrossArbExecutionModule, CrossExchangeArbitrageConfig, DISPLAY_NAME, MIGRATED_FROM,
+    STRATEGY_KIND,
+};
 
 pub const DEFAULT_ASYNC_DB_QUEUE_EVENTS: usize = 16_384;
 
@@ -32,6 +35,8 @@ pub struct CrossArbAsyncDbWriterContract {
     pub records_planned_execution_prices: bool,
     pub records_actual_fill_prices: bool,
     pub records_execution_failure_reason: bool,
+    pub records_open_decision_reject_reason: bool,
+    pub records_open_decision_auth_evidence: bool,
     pub price_audit_fields: Vec<&'static str>,
     pub overflow_policy: &'static str,
 }
@@ -73,8 +78,10 @@ pub struct CrossArbSingletonProcessLockContract {
 pub struct CrossArbExecutionProviderRuntimeContract {
     pub provider_boundary: &'static str,
     pub taker_only: bool,
+    pub supports_slippage_capture_maker_open: bool,
     pub hedge_position_mode_required: bool,
     pub open_legs_concurrent_required: bool,
+    pub maker_open_then_taker_hedge_required: bool,
     pub close_legs_concurrent_required: bool,
     pub waits_for_both_leg_reports: bool,
     pub must_return_planned_and_actual_prices: bool,
@@ -158,10 +165,7 @@ impl CrossArbStartupReadinessGate {
     }
 
     pub fn runtime_gates_ready(&self) -> bool {
-        self.db_writer_ready
-            && self.position_takeover_complete
-            && self.startup_single_leg_positions_resolved
-            && self.singleton_acquired
+        self.db_writer_ready && self.position_takeover_complete && self.singleton_acquired
     }
 
     pub fn all_gates_ready(&self) -> bool {
@@ -200,6 +204,30 @@ pub struct CrossArbDualTakerConfigSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CrossArbSlippageCaptureConfigSummary {
+    pub enabled_when_selected: bool,
+    pub target_notional_usdt: String,
+    pub min_open_spread_pct: String,
+    pub max_open_spread_pct: String,
+    pub min_open_net_profit_pct: String,
+    pub startup_skip_spread_secs: i64,
+    pub max_signal_age_ms: u64,
+    pub maker_price_offset_pct: String,
+    pub hedge_taker_slippage_pct: String,
+    pub close_taker_slippage_pct: String,
+    pub maker_order_timeout_ms: u64,
+    pub cancel_unfilled_maker: bool,
+    pub max_maker_top_depth_usdt: String,
+    pub hedge_top_of_book_capacity_ratio: String,
+    pub enforce_hedge_top_depth: bool,
+    pub open_order_role: &'static str,
+    pub hedge_order_role: &'static str,
+    pub close_order_role: &'static str,
+    pub hedge_after_fill_required: bool,
+    pub dual_taker_close_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CrossArbExchangeStatusRow {
     pub exchange: String,
     pub streamed_symbol_count: usize,
@@ -231,7 +259,9 @@ pub struct CrossArbDashboardSnapshot {
     pub symbols: Vec<String>,
     pub symbol_universe: CrossArbSymbolUniverseSummary,
     pub readiness_gate: CrossArbStartupReadinessGate,
+    pub execution_module: CrossArbExecutionModule,
     pub dual_taker: CrossArbDualTakerConfigSummary,
+    pub slippage_capture: CrossArbSlippageCaptureConfigSummary,
     pub live_orders_enabled: bool,
     pub open_bundles: usize,
     pub pending_orders: usize,
@@ -263,7 +293,9 @@ pub struct CrossArbRuntimeContract {
     pub notification_provider: RuntimeProviderContract,
     pub symbol_universe: CrossArbSymbolUniverseSummary,
     pub readiness_gate: CrossArbStartupReadinessGate,
+    pub execution_module: CrossArbExecutionModule,
     pub dual_taker: CrossArbDualTakerConfigSummary,
+    pub slippage_capture: CrossArbSlippageCaptureConfigSummary,
     pub async_db_writer: CrossArbAsyncDbWriterContract,
     pub position_takeover: CrossArbPositionTakeoverContract,
     pub singleton_process_lock: CrossArbSingletonProcessLockContract,
@@ -312,12 +344,13 @@ pub fn build_runtime_contract(
     let symbol_universe = symbol_universe_summary(config, &symbols);
     let readiness_gate = readiness_gate(&venues, symbols.len());
     let dual_taker = dual_taker_summary(config);
+    let slippage_capture = slippage_capture_summary(config);
     let logging_policy = logging_policy(config);
     let async_db_writer = async_db_writer_contract(false, DEFAULT_ASYNC_DB_QUEUE_EVENTS);
     let async_db_queue = async_db_queue_state(false, 0, DEFAULT_ASYNC_DB_QUEUE_EVENTS, 0, None);
     let position_takeover = position_takeover_contract(false, 0, 0);
     let singleton_process_lock = singleton_process_lock_contract(false);
-    let execution_provider_contract = execution_provider_contract();
+    let execution_provider_contract = execution_provider_contract(config);
 
     let dashboard_snapshot = CrossArbDashboardSnapshot {
         schema_version: 1,
@@ -329,7 +362,9 @@ pub fn build_runtime_contract(
         symbols,
         symbol_universe: symbol_universe.clone(),
         readiness_gate: readiness_gate.clone(),
+        execution_module: config.execution_module,
         dual_taker: dual_taker.clone(),
+        slippage_capture: slippage_capture.clone(),
         live_orders_enabled: false,
         open_bundles: 0,
         pending_orders: 0,
@@ -360,7 +395,9 @@ pub fn build_runtime_contract(
         notification_provider: provider("strategy_notification_provider"),
         symbol_universe,
         readiness_gate,
+        execution_module: config.execution_module,
         dual_taker,
+        slippage_capture,
         async_db_writer,
         position_takeover,
         singleton_process_lock,
@@ -432,6 +469,21 @@ pub fn build_runtime_contract(
             ),
             task(
                 "submit_dual_taker_close_legs_concurrently",
+                "strategy_sdk_execution_provider",
+                true,
+            ),
+            task(
+                "submit_slippage_capture_maker_open",
+                "strategy_sdk_execution_provider",
+                true,
+            ),
+            task(
+                "cancel_unfilled_slippage_capture_maker_open",
+                "strategy_sdk_execution_provider",
+                true,
+            ),
+            task(
+                "submit_slippage_capture_taker_hedge_after_fill",
                 "strategy_sdk_execution_provider",
                 true,
             ),
@@ -538,7 +590,6 @@ fn readiness_gate(venues: &[String], expected_symbol_count: usize) -> CrossArbSt
             "precision_rules",
             "async_db_writer",
             "position_takeover",
-            "startup_single_leg_resolution",
             "singleton_process_lock",
         ],
         exchanges: venues
@@ -573,7 +624,20 @@ pub fn async_db_writer_contract(
         records_planned_execution_prices: true,
         records_actual_fill_prices: true,
         records_execution_failure_reason: true,
+        records_open_decision_reject_reason: true,
+        records_open_decision_auth_evidence: true,
         price_audit_fields: vec![
+            "opportunity_id",
+            "accepted",
+            "reject_reason",
+            "raw_open_spread_bps",
+            "expected_net_profit_pct",
+            "expected_net_pnl_usdt",
+            "long_book_age_ms",
+            "short_book_age_ms",
+            "executable_top_depth_usdt",
+            "target_notional_usdt",
+            "auth_evidence",
             "bundle_id",
             "lifecycle",
             "exchange",
@@ -641,12 +705,17 @@ pub fn singleton_process_lock_contract(acquired: bool) -> CrossArbSingletonProce
     }
 }
 
-pub fn execution_provider_contract() -> CrossArbExecutionProviderRuntimeContract {
+pub fn execution_provider_contract(
+    config: &CrossExchangeArbitrageConfig,
+) -> CrossArbExecutionProviderRuntimeContract {
+    let slippage_capture = config.execution_module == CrossArbExecutionModule::SlippageCapture;
     CrossArbExecutionProviderRuntimeContract {
         provider_boundary: "strategy_sdk_execution_provider",
-        taker_only: true,
+        taker_only: !slippage_capture,
+        supports_slippage_capture_maker_open: true,
         hedge_position_mode_required: true,
-        open_legs_concurrent_required: true,
+        open_legs_concurrent_required: !slippage_capture,
+        maker_open_then_taker_hedge_required: slippage_capture,
         close_legs_concurrent_required: true,
         waits_for_both_leg_reports: true,
         must_return_planned_and_actual_prices: true,
@@ -682,6 +751,34 @@ fn dual_taker_summary(config: &CrossExchangeArbitrageConfig) -> CrossArbDualTake
         stop_after_max_single_leg_fills: true,
         round_trip_fee_legs_in_pnl: 4,
         net_position_inspection_enabled: true,
+    }
+}
+
+fn slippage_capture_summary(
+    config: &CrossExchangeArbitrageConfig,
+) -> CrossArbSlippageCaptureConfigSummary {
+    let slippage = config.slippage_capture;
+    CrossArbSlippageCaptureConfigSummary {
+        enabled_when_selected: config.execution_module == CrossArbExecutionModule::SlippageCapture,
+        target_notional_usdt: decimal_string(slippage.target_notional_usdt),
+        min_open_spread_pct: percent_string(slippage.min_open_spread_pct),
+        max_open_spread_pct: percent_string(slippage.max_open_spread_pct),
+        min_open_net_profit_pct: percent_string(slippage.min_open_net_profit_pct),
+        startup_skip_spread_secs: slippage.startup_skip_spread_secs,
+        max_signal_age_ms: slippage.max_signal_age_ms,
+        maker_price_offset_pct: percent_string(slippage.maker_price_offset_pct),
+        hedge_taker_slippage_pct: percent_string(slippage.hedge_taker_slippage_pct),
+        close_taker_slippage_pct: percent_string(slippage.close_taker_slippage_pct),
+        maker_order_timeout_ms: slippage.maker_order_timeout_ms,
+        cancel_unfilled_maker: slippage.cancel_unfilled_maker,
+        max_maker_top_depth_usdt: decimal_string(slippage.max_maker_top_depth_usdt),
+        hedge_top_of_book_capacity_ratio: percent_string(slippage.hedge_top_of_book_capacity_ratio),
+        enforce_hedge_top_depth: slippage.enforce_hedge_top_depth,
+        open_order_role: "maker_limit_capture",
+        hedge_order_role: "taker_ioc_after_maker_fill",
+        close_order_role: "dual_taker_reduce_only",
+        hedge_after_fill_required: true,
+        dual_taker_close_required: true,
     }
 }
 

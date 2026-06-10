@@ -5,11 +5,12 @@ use crate::{
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClientCapabilities,
-    ExchangeId, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
-    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse,
+    ExchangeId, FeesRequest, FeesResponse, FundingRatesRequest, FundingRatesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 
 #[async_trait]
@@ -36,6 +37,15 @@ pub trait ExchangeClient: Send + Sync {
     ) -> ExchangeApiResult<OrderBookResponse>;
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse>;
+
+    async fn get_funding_rates(
+        &self,
+        _request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "get_funding_rates",
+        })
+    }
 
     async fn place_order(
         &self,

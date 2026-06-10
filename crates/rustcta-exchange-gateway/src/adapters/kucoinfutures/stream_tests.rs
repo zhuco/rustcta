@@ -11,7 +11,7 @@ use super::streams::{
     kucoinfutures_private_subscription_spec, kucoinfutures_public_subscription_spec,
 };
 use super::test_support::{context, exchange_id, symbol_scope};
-use super::{KuCoinFuturesGatewayAdapter, KuCoinFuturesGatewayConfig};
+use super::{GatewayAdapter, KuCoinFuturesGatewayAdapter, KuCoinFuturesGatewayConfig};
 
 #[test]
 fn kucoinfutures_public_stream_spec_should_normalize_symbol_and_ping_pong() {
@@ -115,6 +115,11 @@ async fn kucoinfutures_adapter_should_ack_ws_specs_and_expose_v2_policy() {
     let capabilities = adapter.capabilities();
     assert!(capabilities.supports_public_streams);
     assert!(capabilities.supports_private_streams);
+    assert!(capabilities.supports_funding_rates);
+    assert!(capabilities.capabilities_v2.funding_rates.is_supported());
+    let account_control = GatewayAdapter::account_control_capabilities(&adapter);
+    assert!(!account_control.supports_leverage);
+    assert!(!account_control.supports_position_mode_change);
     assert_eq!(
         capabilities
             .capabilities_v2

@@ -9,7 +9,8 @@ use rustcta_exchange_api::{
     ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
     OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
     QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy, TimeInForce,
+    RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy, SetLeverageRequest,
+    SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse, TimeInForce,
     EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
@@ -663,6 +664,73 @@ impl OkxGatewayAdapter {
             fills,
         })
     }
+
+    pub(super) async fn set_leverage_private_rest(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_market_type(request.symbol.market_type)?;
+        if !is_okx_derivative_market(request.symbol.market_type) {
+            return Err(ExchangeApiError::Unsupported {
+                operation: self.profile_operation(
+                    "okx.set_leverage_spot_unsupported",
+                    "okxus.set_leverage_spot_unsupported",
+                    "myokx.set_leverage_spot_unsupported",
+                ),
+            });
+        }
+        self.ensure_private_rest(self.profile_operation(
+            "okx.set_leverage",
+            "okxus.set_leverage",
+            "myokx.set_leverage",
+        ))?;
+        let body = okx_set_leverage_body(&request)?;
+        self.rest
+            .send_signed_post("/api/v5/account/set-leverage", &body)
+            .await?;
+        Ok(SetLeverageResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            symbol: request.symbol,
+            leverage: request.leverage,
+            accepted: true,
+            message: None,
+        })
+    }
+
+    pub(super) async fn set_position_mode_private_rest(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if self.exchange_id.as_str() != "okx" {
+            return Err(ExchangeApiError::Unsupported {
+                operation: self.profile_operation(
+                    "okx.set_position_mode",
+                    "okxus.set_position_mode",
+                    "myokx.set_position_mode",
+                ),
+            });
+        }
+        self.ensure_private_rest("okx.set_position_mode")?;
+        let body = okx_set_position_mode_body(&request);
+        self.rest
+            .send_signed_post("/api/v5/account/set-position-mode", &body)
+            .await?;
+        Ok(SetPositionModeResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            mode: request.mode,
+            accepted: true,
+            message: None,
+        })
+    }
 }
 
 fn okx_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
@@ -762,6 +830,44 @@ fn okx_quote_market_order_body(request: &QuoteMarketOrderRequest) -> ExchangeApi
         );
     }
     Ok(Value::Object(body))
+}
+
+fn okx_set_leverage_body(request: &SetLeverageRequest) -> ExchangeApiResult<Value> {
+    if request.leverage == 0 {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "okx set_leverage requires leverage greater than zero".to_string(),
+        });
+    }
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "instId".to_string(),
+        Value::String(normalize_okx_symbol_for_market(
+            &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
+        )?),
+    );
+    body.insert(
+        "lever".to_string(),
+        Value::String(request.leverage.to_string()),
+    );
+    body.insert("mgnMode".to_string(), Value::String("cross".to_string()));
+    Ok(Value::Object(body))
+}
+
+fn okx_set_position_mode_body(request: &SetPositionModeRequest) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "posMode".to_string(),
+        Value::String(
+            if request.mode.is_hedge() {
+                "long_short_mode"
+            } else {
+                "net_mode"
+            }
+            .to_string(),
+        ),
+    );
+    Value::Object(body)
 }
 
 fn okx_cancel_order_body(request: &CancelOrderRequest) -> ExchangeApiResult<Value> {

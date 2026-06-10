@@ -288,8 +288,12 @@ impl ExchangeClient for BinanceGatewayAdapter {
         capabilities.supports_client_order_id = true;
         capabilities.supports_reduce_only = true;
         capabilities.supports_post_only = true;
-        capabilities.supports_time_in_force =
-            vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK];
+        capabilities.supports_time_in_force = vec![
+            TimeInForce::GTC,
+            TimeInForce::IOC,
+            TimeInForce::FOK,
+            TimeInForce::GTX,
+        ];
         capabilities.supports_order_types = vec![
             OrderType::Market,
             OrderType::Limit,

@@ -1,14 +1,16 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    AccountControlCapabilities, AmendOrderRequest, AmendOrderResponse, BalancesRequest,
+    BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
     ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    FundingRatesRequest, FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
+    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -159,6 +161,33 @@ impl GatewayAdapter for OkxGatewayAdapter {
             ),
         }
     }
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        let supports_derivative_controls =
+            self.config.private_rest_available() && self.exchange_id.as_str() == "okx";
+        AccountControlCapabilities {
+            exchange: self.exchange_id.clone(),
+            supports_symbol_account_config: false,
+            supports_leverage: supports_derivative_controls,
+            supports_position_mode_change: supports_derivative_controls,
+            supports_close_position: false,
+            supports_countdown_cancel_all: false,
+        }
+    }
+
+    async fn set_leverage(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        self.set_leverage_private_rest(request).await
+    }
+
+    async fn set_position_mode(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        self.set_position_mode_private_rest(request).await
+    }
 }
 
 #[async_trait]
@@ -186,6 +215,7 @@ impl ExchangeClient for OkxGatewayAdapter {
         capabilities.supports_balances = self.config.private_rest_available();
         capabilities.supports_positions = self.config.private_rest_available();
         capabilities.supports_fees = self.config.private_rest_available();
+        capabilities.supports_funding_rates = self.exchange_id.as_str() == "okx";
         capabilities.supports_place_order = self.config.private_rest_available();
         capabilities.supports_cancel_order = self.config.private_rest_available();
         capabilities.supports_query_order = self.config.private_rest_available();
@@ -250,6 +280,13 @@ impl ExchangeClient for OkxGatewayAdapter {
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         self.get_fees_private_rest(request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.get_funding_rates_public_rest(request).await
     }
 
     async fn place_order(

@@ -91,6 +91,33 @@ pub struct FeesResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingRatesRequest {
+    pub schema_version: u16,
+    pub context: RequestContext,
+    pub symbols: Vec<SymbolScope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingRateSnapshot {
+    pub schema_version: u16,
+    pub symbol: SymbolScope,
+    pub funding_rate: String,
+    pub predicted_funding_rate: Option<String>,
+    pub funding_time: Option<DateTime<Utc>>,
+    pub next_funding_time: Option<DateTime<Utc>>,
+    pub mark_price: Option<String>,
+    pub source: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingRatesResponse {
+    pub schema_version: u16,
+    pub metadata: ResponseMetadata,
+    pub rates: Vec<FundingRateSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BalancesRequest {
     pub schema_version: u16,
     pub context: RequestContext,

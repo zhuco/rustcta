@@ -3,14 +3,16 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, CancelAllOrdersRequest, CancelAllOrdersResponse,
-    CancelOrderRequest, CancelOrderResponse, CapabilitySupport, CredentialScope, ExchangeApiError,
-    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    HeartbeatDirection, HeartbeatPolicy, HistoryCapability, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookCapability, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AccountControlCapabilities, BalancesRequest, BalancesResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
+    CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
+    FundingRatesResponse, HeartbeatDirection, HeartbeatPolicy, HistoryCapability,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookCapability, OrderBookRequest,
+    OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SetLeverageRequest,
+    SetLeverageResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -224,6 +226,25 @@ impl GatewayAdapter for MexcGatewayAdapter {
             message: Some("mexc public REST gateway adapter".to_string()),
         }
     }
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        let private = self.config.private_rest_enabled();
+        AccountControlCapabilities {
+            exchange: self.exchange_id.clone(),
+            supports_symbol_account_config: false,
+            supports_leverage: private,
+            supports_position_mode_change: false,
+            supports_close_position: false,
+            supports_countdown_cancel_all: false,
+        }
+    }
+
+    async fn set_leverage(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        self.set_leverage_impl(request).await
+    }
 }
 
 #[async_trait]
@@ -244,6 +265,7 @@ impl ExchangeClient for MexcGatewayAdapter {
         capabilities.supports_balances = private;
         capabilities.supports_positions = private;
         capabilities.supports_fees = private;
+        capabilities.supports_funding_rates = true;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
         capabilities.supports_cancel_all_orders = private;
@@ -389,6 +411,13 @@ impl ExchangeClient for MexcGatewayAdapter {
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         self.get_fees_impl(request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.get_funding_rates_impl(request).await
     }
 
     async fn place_order(

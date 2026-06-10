@@ -114,6 +114,7 @@ pub fn coinex_capabilities_v2(private_enabled: bool) -> ExchangeClientCapabiliti
         } else {
             Vec::new()
         },
+        ..ExchangeClientCapabilitiesV2::default()
     }
 }
 

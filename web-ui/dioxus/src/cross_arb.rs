@@ -3,21 +3,21 @@ use serde_json::{json, Value};
 
 use crate::api::{
     delete_cross_arb_exchange_config, fetch_cross_arb_exchange_config,
-    fetch_cross_arb_instrument_data, fetch_cross_arb_market_snapshot_data,
-    fetch_cross_arb_settings, save_cross_arb_exchange_config, save_cross_arb_settings,
+    fetch_cross_arb_instrument_data, fetch_cross_arb_settings, request_cross_arb_position_close,
+    save_cross_arb_exchange_config, save_cross_arb_settings,
 };
 use crate::i18n::{s, t};
 use crate::storage::save_active_view;
 use crate::types::{
     ControlPanelView, CredentialAccountOption, CrossArbAccountRowData, CrossArbEventSummaryData,
     CrossArbExchangeConsoleRowData, CrossArbExchangeFormData, CrossArbExchangeStatusCardData,
-    CrossArbInstrumentRowData, CrossArbMarketSnapshotRowData, CrossArbOpenOrderRowData,
-    CrossArbOpportunityRowData, CrossArbPanelData, CrossArbPositionBundleRowData,
-    CrossArbReadinessData, CrossArbRepairTaskRowData, CrossArbResultRowData,
+    CrossArbInstrumentRowData, CrossArbOpportunityRowData, CrossArbPanelData,
+    CrossArbPositionBundleRowData, CrossArbReadinessData, CrossArbResultRowData,
     CrossArbSaveResultData, CrossArbSettingsFormData, CrossArbSourceData, Language,
-    StrategyLogPanelData, SystemResourcePanelData,
+    StrategyLogPanelData,
 };
-use crate::ui::{control_click, ControlActionTarget, LogPager, Metric, Pager, StatusPill};
+use crate::types::SystemResourcePanelData;
+use crate::ui::{LogPager, Metric, Pager, StatusPill};
 use crate::utils::*;
 
 #[component]
@@ -35,7 +35,7 @@ pub(crate) fn CrossArbPanel(
     mut api_key_account: Signal<String>,
     mut api_key_namespace: Signal<String>,
 ) -> Element {
-    let mut opp_page = use_signal(|| 0usize);
+    let _ = &processes;
     let mut hedge_page = use_signal(|| 0usize);
     let mut symbol_page = use_signal(|| 0usize);
     let mut console_tab = use_signal(|| "exchange".to_string());
@@ -58,6 +58,10 @@ pub(crate) fn CrossArbPanel(
     let mut close_profit = use_signal(|| initial_settings.close_profit.clone());
     let mut close_spread = use_signal(|| initial_settings.close_spread.clone());
     let mut execution_profile = use_signal(|| initial_settings.execution_profile.clone());
+    let live_trading_enabled = use_signal(|| cross_arb_live_trading_enabled(&settings));
+    let live_trading_pending = use_signal(|| false);
+    let mut exchange_config_loaded = use_signal(|| false);
+    let mut exchange_config_dirty = use_signal(|| false);
     let load_exchange_config_token = token.clone();
     let load_exchange_config_api_keys = api_keys.clone();
     let load_exchange_config_seed = source.exchanges.clone();
@@ -75,6 +79,8 @@ pub(crate) fn CrossArbPanel(
                         lang,
                     );
                     exchange_settings.set(form.exchanges);
+                    exchange_config_loaded.set(true);
+                    exchange_config_dirty.set(false);
                     if value
                         .get("cleaned_on_read")
                         .and_then(Value::as_bool)
@@ -96,23 +102,17 @@ pub(crate) fn CrossArbPanel(
         }
     });
     let opportunities = source.opportunities.clone();
-    let signals = source.signals.clone();
     let hedge_records = source.hedge_records.clone();
-    let repair_tasks = source.repair_tasks.clone();
-    let market_snapshots = source.market_snapshots.clone();
-    let mut market_snapshot_rows = use_signal(|| market_snapshots.clone());
     let private_events = source.private_events.clone();
     let risk_events = source.risk_events.clone();
     let instruments = source.instruments.clone();
     let mut instrument_rows = use_signal(|| instruments.clone());
     let mut instrument_feasibility = use_signal(|| source.instrument_feasibility.clone());
     let position_bundles = source.position_bundles.clone();
-    let open_orders = source.open_orders.clone();
     let arbitrage_results = source.arbitrage_results.clone();
     let profit_summary = source.profit_summary.clone();
     let account_console = source.account_console.clone();
     let account_readiness = source.account_readiness.clone();
-    let strategy_readiness = source.strategy_readiness.clone();
     let exchanges = source.exchanges.clone();
     let symbols = source.symbols.clone();
     let event_summary =
@@ -124,25 +124,37 @@ pub(crate) fn CrossArbPanel(
     };
     let account_rows = CrossArbAccountRowData::from_value_rows(&balance_rows, lang);
     let exchange_console_rows =
-        CrossArbExchangeConsoleRowData::from_exchanges(&exchanges, &private_events, lang);
+        CrossArbExchangeConsoleRowData::from_exchanges(&exchanges, &private_events);
     let exchange_status_cards = CrossArbExchangeStatusCardData::from_values(
         &exchanges,
         &source.exchange_status,
-        &market_snapshot_rows(),
         &exchange_console_rows,
+        &private_events,
         symbols.len(),
         lang,
     );
-    let opportunity_rows = CrossArbOpportunityRowData::from_value_rows(&opportunities, lang);
+    let mut opportunity_rows = CrossArbOpportunityRowData::from_value_rows(&opportunities, lang);
+    opportunity_rows.sort_by(|left, right| {
+        right
+            .raw_open_spread
+            .partial_cmp(&left.raw_open_spread)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut seen_opportunity_symbols = std::collections::BTreeSet::new();
+    opportunity_rows.retain(|row| seen_opportunity_symbols.insert(row.canonical_symbol.clone()));
+    opportunity_rows.truncate(5);
+    let mut sorted_position_bundles = position_bundles.clone();
+    sort_cross_arb_rows_by_opened_at_desc(&mut sorted_position_bundles);
     let position_bundle_rows =
-        CrossArbPositionBundleRowData::from_value_rows(&position_bundles, lang);
-    let open_order_rows = CrossArbOpenOrderRowData::from_value_rows(&open_orders, lang);
-    let arbitrage_result_rows = CrossArbResultRowData::from_value_rows(&arbitrage_results, lang);
-    let repair_task_rows = CrossArbRepairTaskRowData::from_value_rows(&repair_tasks, lang);
+        CrossArbPositionBundleRowData::from_value_rows(&sorted_position_bundles, lang);
+    let mut sorted_arbitrage_results = arbitrage_results.clone();
+    sort_cross_arb_rows_by_opened_at_desc(&mut sorted_arbitrage_results);
+    let arbitrage_result_rows =
+        CrossArbResultRowData::from_value_rows(&sorted_arbitrage_results, lang);
+    let strategy_logs_view = strategy_logs.clone();
     let strategy_log_rows =
-        strategy_log_rows_for_category(&strategy_logs, &strategy_log_tab(), lang);
-    let readiness =
-        CrossArbReadinessData::from_values(&account_readiness, &strategy_readiness, lang);
+        strategy_log_rows_for_category(&strategy_logs_view, &strategy_log_tab(), lang);
+    let readiness = CrossArbReadinessData::from_values(&account_readiness, lang);
     let panel_data = CrossArbPanelData::from_values(
         &cross_arb,
         &summary,
@@ -151,18 +163,14 @@ pub(crate) fn CrossArbPanel(
         &instrument_feasibility(),
         lang,
     );
-    let system_resources = SystemResourcePanelData::from_status(&status);
-    let runtime_text = cross_arb_runtime_text(&processes, &cross_arb);
-    let opp_page_size = 24usize;
+    let resource_data = SystemResourcePanelData::from_status(&status);
     let hedge_page_size = 18usize;
     let symbol_page_size = 40usize;
-    let strategy_log_panel_data = StrategyLogPanelData::from_value(&strategy_logs);
+    let strategy_log_panel_data = StrategyLogPanelData::from_value(&strategy_logs_view);
     let strategy_log_page_size = strategy_log_panel_data.page_size;
-    let opp_total_pages = page_count(opportunity_rows.len(), opp_page_size);
     let hedge_total_pages = page_count(position_bundle_rows.len(), hedge_page_size);
     let symbol_total_pages = page_count(symbols.len(), symbol_page_size);
     let strategy_log_total_pages = page_count(strategy_log_rows.len(), strategy_log_page_size);
-    let opp_start = page_start(opp_page(), opp_page_size, opportunity_rows.len());
     let hedge_start = page_start(hedge_page(), hedge_page_size, position_bundle_rows.len());
     let symbol_start = page_start(symbol_page(), symbol_page_size, symbols.len());
     let strategy_log_start = page_start(
@@ -170,15 +178,14 @@ pub(crate) fn CrossArbPanel(
         strategy_log_page_size,
         strategy_log_rows.len(),
     );
-    let strategy_log_source = strategy_log_source_text(&strategy_logs, lang);
+    let strategy_log_source = strategy_log_source_text(&strategy_logs_view, lang);
     let summary_execution_profile = initial_settings.execution_profile.clone();
     let summary_hedge_notional = initial_settings.target_notional.clone();
     let summary_max_positions = initial_settings.max_positions.clone();
-    let edit_form = initial_settings.clone();
     let load_settings_token = token.clone();
     let load_settings_api_keys = api_keys.clone();
     let load_settings_exchanges = exchanges.clone();
-    let load_settings = move |_| {
+    let _load_settings = move |_: Event<MouseData>| {
         let token_value = load_settings_token.clone();
         let api_keys_value = load_settings_api_keys.clone();
         let seed_exchanges = load_settings_exchanges.clone();
@@ -191,29 +198,101 @@ pub(crate) fn CrossArbPanel(
                         &seed_exchanges,
                         lang,
                     );
-                    exchange_settings.set(form.exchanges);
-                    symbol_text.set(form.symbols_text);
-                    hedge_notional.set(form.target_notional);
-                    max_hedge_notional.set(form.max_notional);
-                    max_positions.set(form.max_positions);
-                    min_open_spread.set(form.min_open_spread);
-                    min_net_edge.set(form.min_net_edge);
-                    close_profit.set(form.close_profit);
-                    close_spread.set(form.close_spread);
-                    execution_profile.set(form.execution_profile);
-                    if let Ok(exchange_value) = fetch_cross_arb_exchange_config(&token_value).await
-                    {
-                        let exchange_form = CrossArbSettingsFormData::from_settings(
-                            &exchange_value,
-                            &api_keys_value,
-                            &seed_exchanges,
-                            lang,
-                        );
-                        exchange_settings.set(exchange_form.exchanges);
+                    apply_cross_arb_settings_form(
+                        form,
+                        symbol_text,
+                        hedge_notional,
+                        max_hedge_notional,
+                        max_positions,
+                        min_open_spread,
+                        min_net_edge,
+                        close_profit,
+                        close_spread,
+                        execution_profile,
+                    );
+                    match fetch_cross_arb_exchange_config(&token_value).await {
+                        Ok(exchange_value) => {
+                            let exchange_form = CrossArbSettingsFormData::from_settings(
+                                &exchange_value,
+                                &api_keys_value,
+                                &seed_exchanges,
+                                lang,
+                            );
+                            exchange_settings.set(exchange_form.exchanges);
+                            exchange_config_loaded.set(true);
+                            exchange_config_dirty.set(false);
+                            message.set(t(lang, "config_loaded").to_string());
+                        }
+                        Err(error) => {
+                            exchange_config_loaded.set(false);
+                            if optional_exchange_config_error(&error) {
+                                message.set(t(lang, "exchange_config_not_loaded").to_string());
+                            } else {
+                                message.set(error);
+                            }
+                        }
                     }
-                    message.set(t(lang, "config_loaded").to_string());
                 }
                 Err(error) => message.set(error),
+            }
+        });
+    };
+    let open_settings_token = token.clone();
+    let open_settings_api_keys = api_keys.clone();
+    let open_settings_exchanges = exchanges.clone();
+    let _open_settings_dialog = move |_: Event<MouseData>| {
+        let token_value = open_settings_token.clone();
+        let api_keys_value = open_settings_api_keys.clone();
+        let seed_exchanges = open_settings_exchanges.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            match fetch_cross_arb_settings(&token_value).await {
+                Ok(value) => {
+                    let form = CrossArbSettingsFormData::from_settings(
+                        &value,
+                        &api_keys_value,
+                        &seed_exchanges,
+                        lang,
+                    );
+                    apply_cross_arb_settings_form(
+                        form,
+                        symbol_text,
+                        hedge_notional,
+                        max_hedge_notional,
+                        max_positions,
+                        min_open_spread,
+                        min_net_edge,
+                        close_profit,
+                        close_spread,
+                        execution_profile,
+                    );
+                }
+                Err(error) => {
+                    message.set(error);
+                    return;
+                }
+            }
+            match fetch_cross_arb_exchange_config(&token_value).await {
+                Ok(exchange_value) => {
+                    let exchange_form = CrossArbSettingsFormData::from_settings(
+                        &exchange_value,
+                        &api_keys_value,
+                        &seed_exchanges,
+                        lang,
+                    );
+                    exchange_settings.set(exchange_form.exchanges);
+                    exchange_config_loaded.set(true);
+                    exchange_config_dirty.set(false);
+                    settings_dialog_open.set(true);
+                    message.set(t(lang, "config_loaded").to_string());
+                }
+                Err(error) => {
+                    exchange_config_loaded.set(false);
+                    if optional_exchange_config_error(&error) {
+                        message.set(t(lang, "exchange_config_not_loaded").to_string());
+                    } else {
+                        message.set(error);
+                    }
+                }
             }
         });
     };
@@ -238,26 +317,6 @@ pub(crate) fn CrossArbPanel(
             }
         });
     };
-    let load_market_snapshots_token = token.clone();
-    let load_market_snapshots = move |_| {
-        let token_value = load_market_snapshots_token.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            match fetch_cross_arb_market_snapshot_data(&token_value).await {
-                Ok(value) => {
-                    let count = value.rows.len();
-                    let coverage_ok = value.coverage_ok;
-                    market_snapshot_rows.set(value.rows);
-                    message.set(format!(
-                        "{}: {} {}",
-                        t(lang, "market_snapshots_loaded"),
-                        count,
-                        if coverage_ok { "OK" } else { "CHECK" }
-                    ));
-                }
-                Err(error) => message.set(error),
-            }
-        });
-    };
     let save_settings_token = token.clone();
     let save_settings_api_keys = api_keys.clone();
     let save_settings_seed_exchanges = exchanges.clone();
@@ -270,11 +329,16 @@ pub(crate) fn CrossArbPanel(
         let max_notional =
             parse_number_or_default(&max_hedge_notional(), target_notional).max(target_notional);
         let max_positions_value = parse_usize_or_default(&max_positions(), 10);
-        let min_open_spread_value = parse_pct_or_default(&min_open_spread(), 1.0);
+        let min_open_spread_value = parse_pct_or_default(&min_open_spread(), 0.5);
         let min_net_edge_value = parse_pct_or_default(&min_net_edge(), 0.2);
         let close_profit_value = parse_pct_or_default(&close_profit(), 0.2);
         let close_spread_value = parse_pct_or_default(&close_spread(), 0.2);
         let exchange_rows = exchange_settings();
+        let save_exchange_config = exchange_config_dirty();
+        if save_exchange_config && !exchange_config_loaded() {
+            message.set(t(lang, "exchange_config_not_loaded").to_string());
+            return;
+        }
         let enabled_exchange_count = exchange_rows
             .iter()
             .filter(|row| row.enabled)
@@ -293,10 +357,13 @@ pub(crate) fn CrossArbPanel(
                 })
             })
             .collect::<Vec<_>>();
-        let exchange_body = json!({
-            "strategy_id": "cross_arb_live",
-            "apply": true,
-            "exchanges": exchange_payload,
+        let exchange_body = save_exchange_config.then(|| {
+            json!({
+                "strategy_id": "cross_arb_live",
+                "apply": true,
+                "replace": false,
+                "exchanges": exchange_payload,
+            })
         });
         let body = json!({
             "symbols": symbols,
@@ -324,73 +391,96 @@ pub(crate) fn CrossArbPanel(
             "execution_profile": execution_profile()
         });
         wasm_bindgen_futures::spawn_local(async move {
-            match save_cross_arb_exchange_config(&token_value, &exchange_body).await {
-                Ok(exchange_value) => {
-                    let exchange_form = CrossArbSettingsFormData::from_settings(
-                        &exchange_value,
+            if let Some(exchange_body) = exchange_body {
+                match save_cross_arb_exchange_config(&token_value, &exchange_body).await {
+                    Ok(exchange_value) => {
+                        let exchange_form = CrossArbSettingsFormData::from_settings(
+                            &exchange_value,
+                            &api_keys_value,
+                            &seed_exchanges,
+                            lang,
+                        );
+                        exchange_settings.set(exchange_form.exchanges);
+                        exchange_config_loaded.set(true);
+                        exchange_config_dirty.set(false);
+                    }
+                    Err(error) => {
+                        message.set(error);
+                        return;
+                    }
+                }
+            }
+            match save_cross_arb_settings(&token_value, &body).await {
+                Ok(value) => {
+                    let settings_value = value
+                        .get("settings")
+                        .cloned()
+                        .unwrap_or_else(|| value.clone());
+                    let form = CrossArbSettingsFormData::from_settings(
+                        &settings_value,
                         &api_keys_value,
                         &seed_exchanges,
                         lang,
                     );
-                    exchange_settings.set(exchange_form.exchanges);
-                    match save_cross_arb_settings(&token_value, &body).await {
-                        Ok(value) => {
-                            let settings_value = value
-                                .get("settings")
-                                .cloned()
-                                .unwrap_or_else(|| value.clone());
-                            let form = CrossArbSettingsFormData::from_settings(
-                                &settings_value,
-                                &api_keys_value,
-                                &seed_exchanges,
-                                lang,
-                            );
-                            symbol_text.set(form.symbols_text);
-                            hedge_notional.set(form.target_notional);
-                            max_hedge_notional.set(form.max_notional);
-                            max_positions.set(form.max_positions);
-                            min_open_spread.set(form.min_open_spread);
-                            min_net_edge.set(form.min_net_edge);
-                            close_profit.set(form.close_profit);
-                            close_spread.set(form.close_spread);
-                            execution_profile.set(form.execution_profile);
-                            settings_dialog_open.set(false);
-                            message.set(format!(
-                                "{} {}",
-                                t(lang, "exchange_config_saved"),
-                                cross_arb_save_result_message(&value, lang)
-                            ));
-                        }
-                        Err(error) => message.set(error),
-                    }
+                    apply_cross_arb_settings_form(
+                        form,
+                        symbol_text,
+                        hedge_notional,
+                        max_hedge_notional,
+                        max_positions,
+                        min_open_spread,
+                        min_net_edge,
+                        close_profit,
+                        close_spread,
+                        execution_profile,
+                    );
+                    settings_dialog_open.set(false);
+                    message.set(format!(
+                        "{} {}",
+                        t(lang, "exchange_config_saved"),
+                        cross_arb_save_result_message(&value, lang)
+                    ));
                 }
                 Err(error) => message.set(error),
             }
         });
     };
-    let pause_strategy = control_click(
-        ControlActionTarget::Global { command: "pause" },
-        token.clone(),
-        message,
-        lang,
-        "pause_strategy",
-    );
-    let resume_strategy = control_click(
-        ControlActionTarget::Global { command: "resume" },
-        token.clone(),
-        message,
-        lang,
-        "resume_strategy",
-    );
-    let kill_strategy = control_click(
-        ControlActionTarget::Global {
-            command: "kill_switch",
-        },
-        token.clone(),
-        message,
-        lang,
-        "kill_switch",
-    );
+    let set_live_trading_token = token.clone();
+    let toggle_live_trading = move |_| {
+        let token_value = set_live_trading_token.clone();
+        let next_enabled = !live_trading_enabled();
+        let mut live_trading_enabled_value = live_trading_enabled;
+        let mut live_trading_pending_value = live_trading_pending;
+        wasm_bindgen_futures::spawn_local(async move {
+            live_trading_pending_value.set(true);
+            let body = json!({
+                "strategy_id": "cross_arb_live",
+                "apply": true,
+                "trading_enabled": next_enabled,
+            });
+            match save_cross_arb_settings(&token_value, &body).await {
+                Ok(value) => {
+                    let confirmed_enabled = value
+                        .get("settings")
+                        .map(cross_arb_live_trading_enabled)
+                        .unwrap_or(next_enabled);
+                    live_trading_enabled_value.set(confirmed_enabled);
+                    let key = if next_enabled {
+                        "live_trading_enabled"
+                    } else {
+                        "live_trading_disabled"
+                    };
+                    message.set(format!(
+                        "{} {}",
+                        t(lang, key),
+                        cross_arb_save_result_message(&value, lang)
+                    ));
+                }
+                Err(error) => message.set(error),
+            }
+            live_trading_pending_value.set(false);
+        });
+    };
     rsx! {
         section { id: "cross-arb", class: "cross-arb",
             div { class: "section-title",
@@ -404,61 +494,29 @@ pub(crate) fn CrossArbPanel(
                 }
             }
             div { class: "spot-control-strip cross-control-strip",
-                button { class: "button", onclick: pause_strategy, {s(lang, "pause_strategy")} }
-                button { class: "button primary", onclick: resume_strategy, {s(lang, "resume_strategy")} }
-                button { class: "button danger", onclick: kill_strategy, {s(lang, "kill_switch")} }
-                span { class: panel_data.source_tone, "{panel_data.source_label}" }
-                span { class: "muted", "{s(lang, \"latest_event\")}: {panel_data.latest_event_at}" }
+                button {
+                    class: if live_trading_enabled() { "button danger" } else { "button primary" },
+                    disabled: live_trading_pending(),
+                    onclick: toggle_live_trading,
+                    {if live_trading_pending() {
+                        if live_trading_enabled() { s(lang, "live_trading_disabling") } else { s(lang, "live_trading_enabling") }
+                    } else if live_trading_enabled() { s(lang, "live_trading_disable") } else { s(lang, "live_trading_enable") }}
+                }
+                span { class: if live_trading_enabled() { "pill" } else { "pill warn" }, {if live_trading_enabled() { s(lang, "live_trading_on") } else { s(lang, "live_trading_off") }} }
             }
             div { class: "grid cross-metrics cross-ops-metrics",
                 Metric { label: s(lang, "monitored_pairs"), value: symbols.len().to_string() }
-                Metric { label: s(lang, "exchange"), value: exchanges.len().to_string() }
-                Metric { label: s(lang, "realtime_quotes"), value: market_snapshot_rows().len().to_string() }
-                Metric { label: s(lang, "running_time"), value: runtime_text.clone() }
-                Metric { label: s(lang, "server_cpu"), value: system_resources.cpu.clone() }
-                Metric { label: s(lang, "server_memory"), value: system_resources.memory.clone() }
-                Metric { label: s(lang, "process_cpu"), value: system_resources.process_cpu.clone() }
-                Metric { label: s(lang, "process_memory"), value: system_resources.process_memory.clone() }
-            }
-            div { class: "grid cross-metrics cross-detail-metrics",
-                Metric { label: s(lang, "data_source"), value: panel_data.data_source.clone() }
-                Metric { label: s(lang, "event_count"), value: panel_data.valid_events.clone() }
-                Metric { label: s(lang, "parse_errors"), value: panel_data.parse_errors.clone() }
-                Metric { label: s(lang, "opportunity_count"), value: format!("{} / {} / {}", panel_data.can_open_opportunities, panel_data.market_can_open_opportunities, opportunities.len()) }
-                Metric { label: s(lang, "signal_count"), value: format!("{} / {}", panel_data.open_signals, signals.len()) }
-                Metric { label: s(lang, "hedge_records"), value: hedge_records.len().to_string() }
-                Metric { label: s(lang, "repair_tasks"), value: repair_tasks.len().to_string() }
-                Metric { label: s(lang, "strategy_estimated_profit"), value: signed_usdt(panel_data.estimated_edge_usdt) }
-                Metric { label: s(lang, "open_orders"), value: open_orders.len().to_string() }
+                Metric { label: s(lang, "hedge_records"), value: panel_data.closed_arbitrages.clone() }
                 Metric { label: s(lang, "cumulative_profit"), value: signed_usdt(panel_data.realized_profit_usdt) }
-                Metric { label: s(lang, "strategy_readiness"), value: readiness.strategy_text.clone() }
-                Metric { label: s(lang, "credential_readiness"), value: readiness.account_text.clone() }
+                Metric { label: s(lang, "system_cpu"), value: resource_data.cpu.clone() }
+                Metric { label: s(lang, "system_memory"), value: resource_data.memory.clone() }
+                Metric { label: s(lang, "process_resource"), value: format!("{} / {}", resource_data.process_cpu, resource_data.process_memory) }
             }
             div { class: "panel cross-settings",
                 div { class: "panel-title-row",
                     div {
                         h2 { {s(lang, "strategy_parameters")} }
                         p { class: "muted", "{panel_data.settings_path} · {panel_data.settings_symbol_count} {s(lang, \"monitored_pairs\")}" }
-                    }
-                    div { class: "row-actions",
-                        span { class: readiness.strategy_class, "{readiness.strategy_label}" }
-                        button { class: "button", onclick: load_settings, {s(lang, "load_config")} }
-                        button {
-                            class: "button primary",
-                            onclick: move |_| {
-                                symbol_text.set(edit_form.symbols_text.clone());
-                                hedge_notional.set(edit_form.target_notional.clone());
-                                max_hedge_notional.set(edit_form.max_notional.clone());
-                                max_positions.set(edit_form.max_positions.clone());
-                                min_open_spread.set(edit_form.min_open_spread.clone());
-                                min_net_edge.set(edit_form.min_net_edge.clone());
-                                close_profit.set(edit_form.close_profit.clone());
-                                close_spread.set(edit_form.close_spread.clone());
-                                execution_profile.set(edit_form.execution_profile.clone());
-                                settings_dialog_open.set(true);
-                            },
-                            {s(lang, "edit_config")}
-                        }
                     }
                 }
                 div { class: "settings-summary-strip",
@@ -499,7 +557,10 @@ pub(crate) fn CrossArbPanel(
                                     h3 { {s(lang, "target_exchanges")} }
                                     button {
                                         class: "button",
-                                        onclick: move |_| append_exchange_config_row(exchange_settings),
+                                        onclick: move |_| {
+                                            append_exchange_config_row(exchange_settings);
+                                            exchange_config_dirty.set(true);
+                                        },
                                         {s(lang, "add_config_exchange")}
                                     }
                                 }
@@ -521,14 +582,20 @@ pub(crate) fn CrossArbPanel(
                                                     span { {s(lang, "exchange")} }
                                                     input {
                                                         value: "{row_exchange}",
-                                                        oninput: move |event| update_exchange_name(exchange_settings, index, event.value())
+                                                        oninput: move |event| {
+                                                            update_exchange_name(exchange_settings, index, event.value());
+                                                            exchange_config_dirty.set(true);
+                                                        }
                                                     }
                                                 }
                                                 label { class: "check-row",
                                                     input {
                                                         r#type: "checkbox",
                                                         checked: "{row_enabled}",
-                                                        onchange: move |event| update_exchange_enabled(exchange_settings, index, event.checked())
+                                                        onchange: move |event| {
+                                                            update_exchange_enabled(exchange_settings, index, event.checked());
+                                                            exchange_config_dirty.set(true);
+                                                        }
                                                     }
                                                     span { "{row_label}" }
                                                 }
@@ -539,6 +606,7 @@ pub(crate) fn CrossArbPanel(
                                                         options: account_options,
                                                         on_change: move |value: String| {
                                                             update_exchange_account(exchange_settings, index, value, &account_select_options);
+                                                            exchange_config_dirty.set(true);
                                                         }
                                                     }
                                                 }
@@ -546,7 +614,10 @@ pub(crate) fn CrossArbPanel(
                                                     span { {s(lang, "credential_namespace")} }
                                                     input {
                                                         value: "{row_env}",
-                                                        oninput: move |event| update_exchange_env(exchange_settings, index, event.value())
+                                                        oninput: move |event| {
+                                                            update_exchange_env(exchange_settings, index, event.value());
+                                                            exchange_config_dirty.set(true);
+                                                        }
                                                     }
                                                 }
                                                 div { class: "row-actions exchange-row-actions",
@@ -559,6 +630,8 @@ pub(crate) fn CrossArbPanel(
                                                                     delete_api_keys.clone(),
                                                                     delete_seed_exchanges.clone(),
                                                                     exchange_settings,
+                                                                    exchange_config_loaded,
+                                                                    exchange_config_dirty,
                                                                     message,
                                                                     lang,
                                                             );
@@ -623,10 +696,9 @@ pub(crate) fn CrossArbPanel(
                 }
             }
             div { class: "cross-arb-arbitrage-stack",
-                div { class: "panel",
+                    div { class: "panel",
                     div { class: "panel-title-row",
                         h2 { {s(lang, "contract_opportunities")} }
-                        Pager { page: opp_page(), total_pages: opp_total_pages, on_prev: move |_| opp_page.set(opp_page().saturating_sub(1)), on_next: move |_| opp_page.set((opp_page() + 1).min(opp_total_pages.saturating_sub(1))), lang }
                     }
                     div { class: "table-wrap compact-table fixed-opportunity-table",
                         table {
@@ -634,7 +706,7 @@ pub(crate) fn CrossArbPanel(
                                 th { {s(lang, "symbol")} } th { {s(lang, "route")} } th { {s(lang, "maker")} } th { {s(lang, "taker")} } th { {s(lang, "long_entry_price")} } th { {s(lang, "short_entry_price")} } th { {s(lang, "raw_book_prices")} } th { {s(lang, "raw_spread")} } th { {s(lang, "expected_edge")} } th { {s(lang, "target_notional")} } th { {s(lang, "executable_notional")} } th { {s(lang, "fees")} } th { {s(lang, "funding")} } th { {s(lang, "age_ms")} } th { {s(lang, "market_can_open")} } th { {s(lang, "can_open")} } th { {s(lang, "warnings")} }
                             } }
                             tbody {
-                                for row in opportunity_rows.iter().skip(opp_start).take(opp_page_size) {
+                                for row in opportunity_rows.iter() {
                                     tr {
                                         td { "{row.canonical_symbol}" }
                                         td { "{row.route}" }
@@ -666,23 +738,35 @@ pub(crate) fn CrossArbPanel(
                         div { span { {s(lang, "win_rate")} } strong { "{panel_data.win_rate}" } }
                         div { span { {s(lang, "cumulative_profit")} } strong { class: profit_class(panel_data.realized_profit_usdt), "{signed_usdt(panel_data.realized_profit_usdt)}" } }
                     }
-                    div { class: "table-wrap compact-table fixed-result-table",
+                    div { class: "table-wrap compact-table fixed-result-table no-wrap-table",
                         table {
                             thead { tr {
-                                th { "Bundle" } th { {s(lang, "status")} } th { {s(lang, "symbol")} } th { {s(lang, "route")} } th { {s(lang, "open_close_price")} } th { {s(lang, "target_notional")} } th { {s(lang, "realized_pnl")} } th { {s(lang, "cumulative_profit")} } th { {s(lang, "update_time")} }
+                                th { {s(lang, "symbol")} }
+                                th { {s(lang, "route")} }
+                                th { {s(lang, "status")} }
+                                th { {s(lang, "open_expected_spread")} }
+                                th { {s(lang, "open_actual_spread")} }
+                                th { {s(lang, "close_expected_spread")} }
+                                th { {s(lang, "close_actual_spread")} }
+                                th { "PnL" }
+                                th { {s(lang, "open_time")} }
+                                th { {s(lang, "close_time")} }
+                                th { {s(lang, "four_order_elapsed_ms")} }
                             } }
                             tbody {
                                 for row in arbitrage_result_rows.iter().take(40) {
                                     tr {
-                                        td { "{row.bundle_id}" }
-                                        td { "{row.lifecycle}" }
                                         td { "{row.symbol}" }
                                         td { "{row.route}" }
-                                        td { "{row.prices}" }
-                                        td { "{row.target_notional_usdt}" }
+                                        td { "{row.status}" }
+                                        td { class: profit_class(row.open_expected_spread_pct), "{row.open_expected_spread}" }
+                                        td { class: profit_class(row.open_actual_spread_pct), "{row.open_actual_spread}" }
+                                        td { class: profit_class(row.close_expected_spread_pct), "{row.close_expected_spread}" }
+                                        td { class: profit_class(row.close_actual_spread_pct), "{row.close_actual_spread}" }
                                         td { class: profit_class(row.realized_profit_usdt), "{row.realized_pnl}" }
-                                        td { class: profit_class(row.cumulative_profit_usdt), "{row.cumulative_profit}" }
-                                        td { "{row.updated_at}" }
+                                        td { "{row.opened_at}" }
+                                        td { "{row.closed_at}" }
+                                        td { "{row.four_order_elapsed_ms}" }
                                     }
                                 }
                             }
@@ -707,11 +791,7 @@ pub(crate) fn CrossArbPanel(
                                     }
                                     dl {
                                         div { dt { {s(lang, "subscriptions")} } dd { "{card.subscriptions}" } }
-                                        div { dt { {s(lang, "messages")} } dd { "{card.messages}" } }
-                                        div { dt { {s(lang, "latency")} } dd { "{card.latency}" } }
                                         div { dt { {s(lang, "server_offset")} } dd { "{card.server_offset}" } }
-                                        div { dt { {s(lang, "book_count")} } dd { "{card.book_count}" } }
-                                        div { dt { {s(lang, "last_update")} } dd { "{card.last_update}" } }
                                         div { dt { {s(lang, "reconnects")} } dd { "{card.reconnects}" } }
                                     }
                                 }
@@ -720,7 +800,7 @@ pub(crate) fn CrossArbPanel(
                         div { class: "table-wrap compact-table fixed-tab-table",
                             table {
                                 thead { tr {
-                                    th { {s(lang, "exchange")} } th { {s(lang, "status")} } th { {s(lang, "maker_volume")} } th { {s(lang, "taker_volume")} } th { {s(lang, "order_count")} } th { {s(lang, "taker_success_rate")} } th { {s(lang, "latency")} } th { {s(lang, "actions")} }
+                                    th { {s(lang, "exchange")} } th { {s(lang, "status")} } th { {s(lang, "maker_volume")} } th { {s(lang, "taker_volume")} } th { {s(lang, "order_count")} } th { {s(lang, "taker_success_rate")} }
                                 } }
                                 tbody {
                                     for row in exchange_console_rows.iter() {
@@ -731,13 +811,6 @@ pub(crate) fn CrossArbPanel(
                                             td { "{row.taker_volume}" }
                                             td { "{row.order_count}" }
                                             td { "{row.taker_success_rate}" }
-                                            td { "{row.latency}" }
-                                            td {
-                                                div { class: "row-actions",
-                                                    button { class: "mini-button", onclick: control_click(ControlActionTarget::Exchange { exchange: row.exchange.clone(), command: "pause" }, token.clone(), message, lang, "exchange_pause"), {s(lang, "stop")} }
-                                                    button { class: "mini-button primary", onclick: control_click(ControlActionTarget::Exchange { exchange: row.exchange.clone(), command: "resume" }, token.clone(), message, lang, "exchange_resume"), {s(lang, "enable")} }
-                                                }
-                                            }
                                         }
                                     }
                                 }
@@ -821,7 +894,7 @@ pub(crate) fn CrossArbPanel(
                         div { class: "table-wrap compact-table fixed-tab-table",
                             table {
                                 thead { tr {
-                                    th { {s(lang, "symbol")} } th { {s(lang, "status")} } th { {s(lang, "occupied_capital")} } th { {s(lang, "arb_exchanges")} } th { {s(lang, "trade_volume")} } th { {s(lang, "est_profit")} } th { {s(lang, "realized_pnl")} } th { {s(lang, "actions")} }
+                                    th { {s(lang, "symbol")} } th { {s(lang, "status")} } th { {s(lang, "occupied_capital")} } th { {s(lang, "arb_exchanges")} } th { {s(lang, "trade_volume")} } th { {s(lang, "realized_pnl")} }
                                 } }
                                 tbody {
                                     for symbol in symbols.iter().skip(symbol_start).take(symbol_page_size) {
@@ -831,14 +904,7 @@ pub(crate) fn CrossArbPanel(
                                             td { "{format_usdt(cross_arb_symbol_capital(&opportunities, symbol))}" }
                                             td { "{cross_arb_symbol_exchanges(&opportunities, symbol)}" }
                                             td { "{format_usdt(cross_arb_symbol_volume(&private_events, symbol))}" }
-                                            td { class: profit_class(cross_arb_symbol_est(&signals, symbol)), "{signed_usdt(cross_arb_symbol_est(&signals, symbol))}" }
                                             td { "{cross_arb_symbol_realized_pct(&hedge_records, symbol)}" }
-                                            td {
-                                                div { class: "row-actions",
-                                                    button { class: "mini-button", onclick: control_click(ControlActionTarget::Symbol { symbol: symbol.clone(), command: "pause" }, token.clone(), message, lang, "symbol_pause"), {s(lang, "pause")} }
-                                                    button { class: "mini-button primary", onclick: control_click(ControlActionTarget::Symbol { symbol: symbol.clone(), command: "resume" }, token.clone(), message, lang, "symbol_resume"), {s(lang, "start")} }
-                                                }
-                                            }
                                         }
                                     }
                                 }
@@ -850,9 +916,6 @@ pub(crate) fn CrossArbPanel(
             div { class: "panel tab-panel fixed-tab-panel cross-position-tabs",
                 div { class: "tab-bar",
                     button { class: if position_tab() == "positions" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("positions".to_string()), {s(lang, "positions")} }
-                    button { class: if position_tab() == "orders" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("orders".to_string()), {s(lang, "open_orders")} }
-                    button { class: if position_tab() == "repair" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("repair".to_string()), {s(lang, "repair_tasks_panel")} }
-                    button { class: if position_tab() == "market" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("market".to_string()), {s(lang, "market_snapshots")} }
                     button { class: if position_tab() == "rules" { "tab-button active" } else { "tab-button" }, onclick: move |_| position_tab.set("rules".to_string()), {s(lang, "contract_rules")} }
                 }
                 if position_tab() == "positions" {
@@ -863,10 +926,15 @@ pub(crate) fn CrossArbPanel(
                         div { class: "table-wrap compact-table fixed-tab-table",
                             table {
                                 thead { tr {
-                                    th { "Bundle" } th { {s(lang, "symbol")} } th { {s(lang, "long_exchange")} } th { {s(lang, "short_exchange")} } th { {s(lang, "status")} } th { {s(lang, "entry_price")} } th { {s(lang, "expected_edge")} } th { {s(lang, "close_price")} } th { {s(lang, "close_now")} } th { {s(lang, "close_threshold")} } th { {s(lang, "close_ready")} } th { {s(lang, "close_route")} } th { {s(lang, "update_time")} }
+                                    th { "Bundle" } th { {s(lang, "symbol")} } th { {s(lang, "long_exchange")} } th { {s(lang, "short_exchange")} } th { {s(lang, "status")} } th { {s(lang, "entry_price")} } th { {s(lang, "expected_edge")} } th { {s(lang, "close_price")} } th { {s(lang, "close_now")} } th { {s(lang, "close_threshold")} } th { {s(lang, "close_ready")} } th { {s(lang, "close_route")} } th { {s(lang, "update_time")} } th { {s(lang, "actions")} }
                                 } }
                                 tbody {
                                     for row in position_bundle_rows.iter().skip(hedge_start).take(hedge_page_size) {
+                                        {
+                                            let close_row = row.clone();
+                                            let close_token = token.clone();
+                                            let mut close_message = message;
+                                            rsx! {
                                         tr {
                                             td { "{row.bundle_id}" }
                                             td { "{row.symbol}" }
@@ -881,82 +949,45 @@ pub(crate) fn CrossArbPanel(
                                             td { StatusPill { value: row.closeable, lang } }
                                             td { "{row.close_route}" }
                                             td { "{row.updated_at}" }
+                                            td {
+                                                button {
+                                                    class: "mini-button danger",
+                                                    onclick: move |_| {
+                                                        let row = close_row.clone();
+                                                        let token_value = close_token.clone();
+                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                            let confirmed = web_sys::window()
+                                                                .and_then(|window| {
+                                                                    window
+                                                                        .confirm_with_message(&format!(
+                                                                            "Confirm market close {} on {} / {}?",
+                                                                            row.symbol, row.long_exchange, row.short_exchange
+                                                                        ))
+                                                                        .ok()
+                                                                })
+                                                                .unwrap_or(false);
+                                                            if !confirmed {
+                                                                return;
+                                                            }
+                                                            match request_cross_arb_position_close(
+                                                                &token_value,
+                                                                &row.bundle_id,
+                                                                &row.symbol,
+                                                                &row.long_exchange,
+                                                                &row.short_exchange,
+                                                            )
+                                                            .await
+                                                            {
+                                                                Ok(_) => close_message.set(t(lang, "manual_close_queued").to_string()),
+                                                                Err(error) => close_message.set(error),
+                                                            }
+                                                        });
+                                                    },
+                                                    {s(lang, "market_close")}
+                                                }
+                                            }
                                         }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if position_tab() == "orders" {
-                    div { class: "tab-content fixed-tab-content",
-                        div { class: "table-wrap compact-table fixed-tab-table",
-                            table {
-                                thead { tr {
-                                    th { {s(lang, "source")} } th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "side")} } th { {s(lang, "price")} } th { {s(lang, "remaining_qty")} } th { {s(lang, "notional")} } th { {s(lang, "status")} } th { {s(lang, "order_ref")} }
-                                } }
-                                tbody {
-                                    for row in open_order_rows.iter().take(40) {
-                                        tr {
-                                            td { "{row.source}" }
-                                            td { "{row.exchange}" }
-                                            td { "{row.symbol}" }
-                                            td { "{row.side}" }
-                                            td { "{row.price}" }
-                                            td { "{row.remaining_qty}" }
-                                            td { "{row.notional}" }
-                                            td { "{row.status}" }
-                                            td { "{row.order_ref}" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if position_tab() == "repair" {
-                    div { class: "tab-content fixed-tab-content",
-                        div { class: "table-wrap compact-table fixed-tab-table",
-                            table {
-                                thead { tr {
-                                    th { {s(lang, "status")} } th { {s(lang, "exchange")} } th { {s(lang, "side")} } th { {s(lang, "qty")} } th { {s(lang, "failures")} } th { {s(lang, "warnings")} }
-                                } }
-                                tbody {
-                                    for row in repair_task_rows.iter().take(40) {
-                                        tr {
-                                            td { "{row.status}" }
-                                            td { "{row.failed_exchange}" }
-                                            td { "{row.side}" }
-                                            td { "{row.quantity}" }
-                                            td { "{row.attempt_count}" }
-                                            td { class: "reason-cell", ReasonTags { text: row.last_error.clone(), lang } }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if position_tab() == "market" {
-                    div { class: "tab-content fixed-tab-content",
-                        div { class: "panel-title-row tab-title-row",
-                            button { class: "mini-button", onclick: load_market_snapshots, {s(lang, "load_market_snapshots")} }
-                        }
-                        div { class: "table-wrap compact-table fixed-tab-table",
-                            table {
-                                thead { tr {
-                                    th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "bid")} } th { {s(lang, "ask")} } th { {s(lang, "age_ms")} } th { {s(lang, "sequence")} } th { {s(lang, "recorded_at")} }
-                                } }
-                                tbody {
-                                    for row in CrossArbMarketSnapshotRowData::from_value_rows(&market_snapshot_rows(), lang).iter().take(120) {
-                                        tr {
-                                            td { "{row.exchange}" }
-                                            td { "{row.symbol}" }
-                                            td { "{row.best_bid}" }
-                                            td { "{row.best_ask}" }
-                                            td { "{row.book_age_ms}" }
-                                            td { "{row.sequence}" }
-                                            td { "{row.recorded_at}" }
+                                            }
                                         }
                                     }
                                 }
@@ -990,7 +1021,7 @@ pub(crate) fn CrossArbPanel(
                         div { class: "table-wrap compact-table fixed-tab-table",
                             table {
                                 thead { tr {
-                                    th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "exchange_symbol")} } th { {s(lang, "price_tick")} } th { {s(lang, "quantity_step")} } th { {s(lang, "min_qty")} } th { {s(lang, "min_notional")} } th { {s(lang, "required_notional")} } th { {s(lang, "headroom")} } th { {s(lang, "feasibility")} } th { {s(lang, "status")} }
+                                    th { {s(lang, "exchange")} } th { {s(lang, "symbol")} } th { {s(lang, "exchange_symbol")} } th { {s(lang, "price_precision")} } th { {s(lang, "quantity_precision")} } th { {s(lang, "min_order")} } th { {s(lang, "funding_rate")} } th { {s(lang, "status")} }
                                 } }
                                 tbody {
                                     for row in CrossArbInstrumentRowData::from_value_rows(&instrument_rows(), lang).iter().take(120) {
@@ -998,13 +1029,10 @@ pub(crate) fn CrossArbPanel(
                                             td { "{row.exchange}" }
                                             td { "{row.canonical_symbol}" }
                                             td { "{row.exchange_symbol}" }
-                                            td { "{row.price_tick}" }
-                                            td { "{row.quantity_step}" }
-                                            td { "{row.min_qty}" }
-                                            td { "{row.min_notional}" }
-                                            td { "{row.required_notional}" }
-                                            td { class: profit_class(row.headroom_value), "{row.headroom}" }
-                                            td { span { class: row.feasibility_class, "{row.feasibility_label}" } }
+                                            td { "{row.price_precision}" }
+                                            td { "{row.quantity_precision}" }
+                                            td { "{row.min_order}" }
+                                            td { "{row.funding_rate}" }
                                             td { "{row.status}" }
                                         }
                                     }
@@ -1059,7 +1087,7 @@ pub(crate) fn CrossArbPanel(
                                 strategy_log_tab.set(key.to_string());
                                 strategy_log_page.set(0);
                             },
-                            "{s(lang, label_key)} {strategy_log_count(&strategy_logs, key)}"
+                            "{s(lang, label_key)} {strategy_log_count(&strategy_logs_view, key)}"
                         }
                     }
                 }
@@ -1075,6 +1103,18 @@ pub(crate) fn CrossArbPanel(
             }
         }
     }
+}
+
+fn sort_cross_arb_rows_by_opened_at_desc(rows: &mut [Value]) {
+    rows.sort_by(|left, right| cross_arb_open_sort_key(right).cmp(&cross_arb_open_sort_key(left)));
+}
+
+fn cross_arb_open_sort_key(row: &Value) -> String {
+    ["opened_at", "open_time", "planned_at", "recorded_at"]
+        .iter()
+        .find_map(|key| row.get(*key).and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[component]
@@ -1205,6 +1245,8 @@ fn delete_exchange_config_row(
     api_keys: Value,
     seed_exchanges: Vec<String>,
     mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>,
+    mut exchange_config_loaded: Signal<bool>,
+    mut exchange_config_dirty: Signal<bool>,
     mut message: Signal<String>,
     lang: Language,
 ) {
@@ -1212,6 +1254,7 @@ fn delete_exchange_config_row(
         let mut rows = exchange_settings();
         rows.retain(|row| !row.exchange.trim().is_empty());
         exchange_settings.set(rows);
+        exchange_config_dirty.set(true);
         return;
     }
     wasm_bindgen_futures::spawn_local(async move {
@@ -1224,6 +1267,8 @@ fn delete_exchange_config_row(
                     lang,
                 );
                 exchange_settings.set(form.exchanges);
+                exchange_config_loaded.set(true);
+                exchange_config_dirty.set(false);
                 message.set(t(lang, "exchange_config_deleted").to_string());
             }
             Err(error) => message.set(error),
@@ -1471,6 +1516,36 @@ fn cross_arb_save_result_message(value: &Value, lang: Language) -> String {
         s(lang, "restart_status_unknown")
     };
     format!("{} {}", t(lang, "config_saved_restarting"), suffix)
+}
+
+fn apply_cross_arb_settings_form(
+    form: CrossArbSettingsFormData,
+    mut symbol_text: Signal<String>,
+    mut hedge_notional: Signal<String>,
+    mut max_hedge_notional: Signal<String>,
+    mut max_positions: Signal<String>,
+    mut min_open_spread: Signal<String>,
+    mut min_net_edge: Signal<String>,
+    mut close_profit: Signal<String>,
+    mut close_spread: Signal<String>,
+    mut execution_profile: Signal<String>,
+) {
+    symbol_text.set(form.symbols_text);
+    hedge_notional.set(form.target_notional);
+    max_hedge_notional.set(form.max_notional);
+    max_positions.set(form.max_positions);
+    min_open_spread.set(form.min_open_spread);
+    min_net_edge.set(form.min_net_edge);
+    close_profit.set(form.close_profit);
+    close_spread.set(form.close_spread);
+    execution_profile.set(form.execution_profile);
+}
+
+fn cross_arb_live_trading_enabled(settings: &Value) -> bool {
+    let execution = settings.get("execution").unwrap_or(&Value::Null);
+    bool_at(execution, "trading_enabled")
+        || bool_at(execution, "live_orders_enabled")
+        || bool_at(settings, "trading_enabled")
 }
 
 fn parse_number_or_default(value: &str, default: f64) -> f64 {

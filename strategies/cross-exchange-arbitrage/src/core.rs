@@ -75,6 +75,23 @@ pub enum MakerLegKind {
     ShortMakerSell,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrossArbExecutionModule {
+    #[default]
+    DualTaker,
+    SlippageCapture,
+}
+
+impl CrossArbExecutionModule {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DualTaker => "dual_taker",
+            Self::SlippageCapture => "slippage_capture",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FillInferenceType {
     RealTrade,
@@ -442,6 +459,7 @@ pub struct DualTakerArbitrageConfig {
     pub close_min_net_profit_pct: f64,
     pub expected_close_spread_pct: f64,
     pub top_of_book_capacity_ratio: f64,
+    pub enforce_top_depth_on_open: bool,
     pub orderbook_stale_ms: u64,
     pub min_orderbook_levels: usize,
     pub single_leg_timeout_ms: u64,
@@ -465,6 +483,7 @@ impl Default for DualTakerArbitrageConfig {
             close_min_net_profit_pct: 0.0005,
             expected_close_spread_pct: 0.001,
             top_of_book_capacity_ratio: 0.8,
+            enforce_top_depth_on_open: true,
             orderbook_stale_ms: 500,
             min_orderbook_levels: 1,
             single_leg_timeout_ms: 600,
@@ -475,6 +494,92 @@ impl Default for DualTakerArbitrageConfig {
             symbol_cooldown_secs: 300,
             max_hold_secs: 86_400,
             close_on_max_hold_requires_profit: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SlippageCaptureArbitrageConfig {
+    pub target_notional_usdt: f64,
+    pub min_open_spread_pct: f64,
+    pub min_open_net_profit_pct: f64,
+    pub max_open_spread_pct: f64,
+    pub startup_skip_spread_secs: i64,
+    pub max_signal_age_ms: u64,
+    pub maker_price_offset_pct: f64,
+    pub hedge_taker_slippage_pct: f64,
+    pub close_taker_slippage_pct: f64,
+    pub close_min_net_profit_pct: f64,
+    pub max_hold_secs: i64,
+    pub close_on_max_hold_requires_profit: bool,
+    pub maker_order_timeout_ms: u64,
+    pub max_concurrent_maker_orders: usize,
+    pub cancel_unfilled_maker: bool,
+    pub max_maker_top_depth_usdt: f64,
+    pub hedge_top_of_book_capacity_ratio: f64,
+    pub enforce_hedge_top_depth: bool,
+    pub orderbook_stale_ms: u64,
+    pub min_orderbook_levels: usize,
+    pub max_open_bundles: usize,
+    pub max_positions_per_exchange: usize,
+    pub max_active_bundles_per_symbol: usize,
+    pub symbol_cooldown_secs: i64,
+}
+
+impl Default for SlippageCaptureArbitrageConfig {
+    fn default() -> Self {
+        Self {
+            target_notional_usdt: 5.5,
+            min_open_spread_pct: 0.005,
+            min_open_net_profit_pct: 0.0,
+            max_open_spread_pct: 0.05,
+            startup_skip_spread_secs: 10,
+            max_signal_age_ms: 3_000,
+            maker_price_offset_pct: 0.0005,
+            hedge_taker_slippage_pct: 0.0005,
+            close_taker_slippage_pct: 0.0005,
+            close_min_net_profit_pct: 0.0005,
+            max_hold_secs: 86_400,
+            close_on_max_hold_requires_profit: false,
+            maker_order_timeout_ms: 1_000,
+            max_concurrent_maker_orders: 1,
+            cancel_unfilled_maker: true,
+            max_maker_top_depth_usdt: 25.0,
+            hedge_top_of_book_capacity_ratio: 0.8,
+            enforce_hedge_top_depth: true,
+            orderbook_stale_ms: 500,
+            min_orderbook_levels: 1,
+            max_open_bundles: 10,
+            max_positions_per_exchange: 10,
+            max_active_bundles_per_symbol: 1,
+            symbol_cooldown_secs: 300,
+        }
+    }
+}
+
+impl SlippageCaptureArbitrageConfig {
+    pub fn dual_taker_close_config(self) -> DualTakerArbitrageConfig {
+        DualTakerArbitrageConfig {
+            target_notional_usdt: self.target_notional_usdt,
+            min_open_spread_pct: self.min_open_spread_pct,
+            min_open_net_profit_pct: self.min_open_net_profit_pct,
+            max_open_spread_pct: self.max_open_spread_pct,
+            taker_slippage_pct: self.close_taker_slippage_pct,
+            close_min_net_profit_pct: self.close_min_net_profit_pct,
+            expected_close_spread_pct: 0.0,
+            top_of_book_capacity_ratio: self.hedge_top_of_book_capacity_ratio,
+            enforce_top_depth_on_open: self.enforce_hedge_top_depth,
+            orderbook_stale_ms: self.orderbook_stale_ms,
+            min_orderbook_levels: self.min_orderbook_levels,
+            single_leg_timeout_ms: self.maker_order_timeout_ms,
+            max_consecutive_single_leg_fills: 1,
+            max_open_bundles: self.max_open_bundles,
+            max_positions_per_exchange: self.max_positions_per_exchange,
+            max_active_bundles_per_symbol: self.max_active_bundles_per_symbol,
+            symbol_cooldown_secs: self.symbol_cooldown_secs,
+            max_hold_secs: self.max_hold_secs,
+            close_on_max_hold_requires_profit: self.close_on_max_hold_requires_profit,
         }
     }
 }
@@ -945,6 +1050,102 @@ impl TakerFillAudit {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlippageCaptureOrderRole {
+    OpenMakerLong,
+    OpenMakerShort,
+    HedgeTakerLong,
+    HedgeTakerShort,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlippageCaptureMakerOrderDraft {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub side: OrderSide,
+    pub base_quantity: f64,
+    pub quantity: f64,
+    pub quantity_unit: QuantityUnit,
+    pub contract_size: f64,
+    pub top_of_book_price: f64,
+    pub limit_price: f64,
+    pub reduce_only: bool,
+    pub post_only: bool,
+    pub auto_cancel_after_ms: u64,
+    pub role: SlippageCaptureOrderRole,
+}
+
+impl SlippageCaptureMakerOrderDraft {
+    pub fn planned_notional_usdt(&self) -> f64 {
+        self.base_quantity.abs() * self.limit_price
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlippageCaptureHedgePlan {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub side: OrderSide,
+    pub reference_price: f64,
+    pub filled_maker_base_quantity: f64,
+    pub order: TakerOrderDraft,
+    pub trigger: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlippageCaptureOpenOpportunity {
+    pub opportunity_id: String,
+    pub canonical_symbol: CanonicalSymbol,
+    pub maker_exchange: ExchangeId,
+    pub hedge_exchange: ExchangeId,
+    pub maker_leg_kind: MakerLegKind,
+    pub maker_top_price: f64,
+    pub maker_limit_price: f64,
+    pub hedge_reference_price: f64,
+    pub spread_pct: f64,
+    pub quantity: f64,
+    pub maker_notional_usdt: f64,
+    pub hedge_notional_usdt: f64,
+    pub maker_top_depth_usdt: f64,
+    pub hedge_top_depth_usdt: f64,
+    pub expected_open_fee_usdt: f64,
+    pub expected_round_trip_fee_usdt: f64,
+    pub expected_gross_pnl_usdt: f64,
+    pub expected_net_pnl_usdt: f64,
+    pub expected_net_profit_pct: f64,
+    pub maker_order: SlippageCaptureMakerOrderDraft,
+    pub hedge_after_fill: SlippageCaptureHedgePlan,
+    pub close_orders_are_dual_taker: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlippageCaptureStartupGate {
+    pub started_at: DateTime<Utc>,
+    pub now: DateTime<Utc>,
+    pub skip_until: DateTime<Utc>,
+    pub blocked: bool,
+    pub reason: Option<String>,
+}
+
+impl SlippageCaptureStartupGate {
+    pub fn evaluate(
+        started_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+        config: &SlippageCaptureArbitrageConfig,
+    ) -> Self {
+        let skip_until = started_at + chrono::Duration::seconds(config.startup_skip_spread_secs);
+        let blocked = now < skip_until;
+        Self {
+            started_at,
+            now,
+            skip_until,
+            blocked,
+            reason: blocked.then_some("startup_spread_warmup".to_string()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DualTakerFeeEstimate {
     pub open_long_fee_usdt: f64,
@@ -989,6 +1190,76 @@ pub struct DualTakerOpenOpportunity {
     pub expected_net_profit_pct: f64,
     pub submit_parallel: bool,
     pub orders: Vec<TakerOrderDraft>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenOpportunityDecision {
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenOpportunityRejectReason {
+    InvalidLongBook,
+    InvalidShortBook,
+    StaleLongBook,
+    StaleShortBook,
+    AboveMaxSpread,
+    InsufficientTopDepth,
+    BelowMinNetProfit,
+    StrategyHalted,
+    MaxOpenBundles,
+    SymbolAlreadyActive,
+    SymbolCoolingDown,
+    ExchangePositionLimit,
+}
+
+impl From<OpenBlockReason> for OpenOpportunityRejectReason {
+    fn from(reason: OpenBlockReason) -> Self {
+        match reason {
+            OpenBlockReason::StrategyHalted => Self::StrategyHalted,
+            OpenBlockReason::MaxOpenBundles => Self::MaxOpenBundles,
+            OpenBlockReason::SymbolAlreadyActive => Self::SymbolAlreadyActive,
+            OpenBlockReason::SymbolCoolingDown => Self::SymbolCoolingDown,
+            OpenBlockReason::ExchangePositionLimit => Self::ExchangePositionLimit,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenOpportunityAudit {
+    pub opportunity_id: String,
+    pub canonical_symbol: CanonicalSymbol,
+    pub long_exchange: ExchangeId,
+    pub short_exchange: ExchangeId,
+    pub decision: OpenOpportunityDecision,
+    pub reject_reason: Option<OpenOpportunityRejectReason>,
+    pub raw_spread_pct: f64,
+    pub configured_open_spread_pct: f64,
+    pub min_open_spread_pct: f64,
+    pub max_open_spread_pct: f64,
+    pub min_open_net_profit_pct: f64,
+    pub long_entry_price: f64,
+    pub short_entry_price: f64,
+    pub long_book_age_ms: i64,
+    pub short_book_age_ms: i64,
+    pub long_top_depth_usdt: f64,
+    pub short_top_depth_usdt: f64,
+    pub executable_top_depth_usdt: f64,
+    pub target_notional_usdt: f64,
+    pub quantity: Option<f64>,
+    pub expected_net_profit_pct: Option<f64>,
+    pub expected_net_pnl_usdt: Option<f64>,
+    pub estimated_round_trip_fee_usdt: Option<f64>,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OpenOpportunityAuditReport {
+    pub opportunities: Vec<DualTakerOpenOpportunity>,
+    pub audits: Vec<OpenOpportunityAudit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1052,17 +1323,25 @@ pub fn evaluate_dual_taker_open_opportunities(
     config: &DualTakerArbitrageConfig,
     now: DateTime<Utc>,
 ) -> Vec<DualTakerOpenOpportunity> {
-    let fresh_books: Vec<_> = books
-        .iter()
-        .filter(|book| {
-            book.is_valid(config.min_orderbook_levels)
-                && book.is_fresh(now, config.orderbook_stale_ms)
-        })
-        .collect();
-    let mut opportunities = Vec::new();
+    evaluate_dual_taker_open_opportunities_with_audit(
+        books, precisions, fee_model, config, None, now,
+    )
+    .opportunities
+}
 
-    for long_book in &fresh_books {
-        for short_book in &fresh_books {
+pub fn evaluate_dual_taker_open_opportunities_with_audit(
+    books: &[OrderBookTop],
+    precisions: &PrecisionRegistry,
+    fee_model: &FeeModel,
+    config: &DualTakerArbitrageConfig,
+    risk_state: Option<&ArbitrageRiskState>,
+    now: DateTime<Utc>,
+) -> OpenOpportunityAuditReport {
+    let mut opportunities = Vec::new();
+    let mut audits = Vec::new();
+
+    for long_book in books {
+        for short_book in books {
             if long_book.exchange == short_book.exchange
                 || long_book.canonical_symbol != short_book.canonical_symbol
             {
@@ -1074,24 +1353,87 @@ pub fn evaluate_dual_taker_open_opportunities(
 
             let spread_pct =
                 (short_book.best_bid_price - long_book.best_ask_price) / long_book.best_ask_price;
-            if spread_pct < config.min_open_spread_pct || spread_pct > config.max_open_spread_pct {
+            if spread_pct < config.min_open_spread_pct {
                 continue;
             }
-
+            let opportunity_id =
+                open_opportunity_id(long_book, short_book, &long_book.canonical_symbol);
             let long_precision = precisions.get(&long_book.exchange, &long_book.canonical_symbol);
             let short_precision =
                 precisions.get(&short_book.exchange, &short_book.canonical_symbol);
-            let Some(quantity_plan) = shared_open_quantity(
+            let long_top_depth_usdt = top_depth_usdt(long_book, long_precision, true);
+            let short_top_depth_usdt = top_depth_usdt(short_book, short_precision, false);
+            let mut audit = OpenOpportunityAudit {
+                opportunity_id: opportunity_id.clone(),
+                canonical_symbol: long_book.canonical_symbol.clone(),
+                long_exchange: long_book.exchange.clone(),
+                short_exchange: short_book.exchange.clone(),
+                decision: OpenOpportunityDecision::Rejected,
+                reject_reason: None,
+                raw_spread_pct: spread_pct,
+                configured_open_spread_pct: config.min_open_spread_pct,
+                min_open_spread_pct: config.min_open_spread_pct,
+                max_open_spread_pct: config.max_open_spread_pct,
+                min_open_net_profit_pct: config.min_open_net_profit_pct,
+                long_entry_price: long_book.best_ask_price,
+                short_entry_price: short_book.best_bid_price,
+                long_book_age_ms: long_book.age_ms(now),
+                short_book_age_ms: short_book.age_ms(now),
+                long_top_depth_usdt,
+                short_top_depth_usdt,
+                executable_top_depth_usdt: 0.0,
+                target_notional_usdt: config.target_notional_usdt,
+                quantity: None,
+                expected_net_profit_pct: None,
+                expected_net_pnl_usdt: None,
+                estimated_round_trip_fee_usdt: None,
+                observed_at: now,
+            };
+
+            if !long_book.is_valid(config.min_orderbook_levels) {
+                audit.reject_reason = Some(OpenOpportunityRejectReason::InvalidLongBook);
+                audits.push(audit);
+                continue;
+            }
+            if !short_book.is_valid(config.min_orderbook_levels) {
+                audit.reject_reason = Some(OpenOpportunityRejectReason::InvalidShortBook);
+                audits.push(audit);
+                continue;
+            }
+            if !long_book.is_fresh(now, config.orderbook_stale_ms) {
+                audit.reject_reason = Some(OpenOpportunityRejectReason::StaleLongBook);
+                audits.push(audit);
+                continue;
+            }
+            if !short_book.is_fresh(now, config.orderbook_stale_ms) {
+                audit.reject_reason = Some(OpenOpportunityRejectReason::StaleShortBook);
+                audits.push(audit);
+                continue;
+            }
+            if spread_pct > config.max_open_spread_pct {
+                audit.reject_reason = Some(OpenOpportunityRejectReason::AboveMaxSpread);
+                audits.push(audit);
+                continue;
+            }
+
+            let Some(quantity_plan) = shared_open_quantity_with_top_depth_policy(
                 long_book,
                 short_book,
                 long_precision,
                 short_precision,
                 config.target_notional_usdt,
                 config.top_of_book_capacity_ratio,
+                config.enforce_top_depth_on_open,
             ) else {
+                audit.executable_top_depth_usdt = long_top_depth_usdt.min(short_top_depth_usdt)
+                    * config.top_of_book_capacity_ratio;
+                audit.reject_reason = Some(OpenOpportunityRejectReason::InsufficientTopDepth);
+                audits.push(audit);
                 continue;
             };
             let quantity = quantity_plan.base_quantity;
+            audit.quantity = Some(quantity);
+            audit.executable_top_depth_usdt = quantity_plan.executable_depth_usdt;
 
             let long_notional_usdt = quantity * long_book.best_ask_price;
             let short_notional_usdt = quantity * short_book.best_bid_price;
@@ -1112,17 +1454,29 @@ pub fn evaluate_dual_taker_open_opportunities(
             let expected_net_pnl_usdt = expected_gross_pnl_usdt - estimated_round_trip_fee_usdt;
             let expected_net_profit_pct =
                 expected_net_pnl_usdt / long_notional_usdt.max(short_notional_usdt).max(1.0);
+            audit.expected_net_profit_pct = Some(expected_net_profit_pct);
+            audit.expected_net_pnl_usdt = Some(expected_net_pnl_usdt);
+            audit.estimated_round_trip_fee_usdt = Some(estimated_round_trip_fee_usdt);
+
+            if expected_net_profit_pct < config.min_open_net_profit_pct {
+                audit.reject_reason = Some(OpenOpportunityRejectReason::BelowMinNetProfit);
+                audits.push(audit);
+                continue;
+            }
+            if let Some(risk_state) = risk_state {
+                if let Err(reason) = risk_state.can_open(
+                    &long_book.canonical_symbol,
+                    &long_book.exchange,
+                    &short_book.exchange,
+                    config,
+                    now,
+                ) {
+                    audit.reject_reason = Some(reason.into());
+                    audits.push(audit);
+                    continue;
+                }
+            }
             let symbol = long_book.canonical_symbol.clone();
-            let opportunity_id = format!(
-                "{}:{}:{}:{}",
-                symbol.as_pair(),
-                long_book.exchange,
-                short_book.exchange,
-                long_book
-                    .received_at
-                    .timestamp_millis()
-                    .max(short_book.received_at.timestamp_millis())
-            );
             let orders = vec![
                 taker_order_draft(
                     long_book.exchange.clone(),
@@ -1148,6 +1502,8 @@ pub fn evaluate_dual_taker_open_opportunities(
                 ),
             ];
 
+            audit.decision = OpenOpportunityDecision::Accepted;
+            audits.push(audit);
             opportunities.push(DualTakerOpenOpportunity {
                 opportunity_id,
                 canonical_symbol: symbol,
@@ -1181,7 +1537,10 @@ pub fn evaluate_dual_taker_open_opportunities(
     });
     let mut seen_symbols = HashSet::new();
     opportunities.retain(|opportunity| seen_symbols.insert(opportunity.canonical_symbol.as_pair()));
-    opportunities
+    OpenOpportunityAuditReport {
+        opportunities,
+        audits,
+    }
 }
 
 pub fn evaluate_ready_dual_taker_open_opportunities(
@@ -1218,6 +1577,345 @@ pub fn filter_open_opportunities_by_risk(
                 .is_ok()
         })
         .collect()
+}
+
+pub fn evaluate_slippage_capture_open_opportunities(
+    startup_gate: Option<&SlippageCaptureStartupGate>,
+    books: &[OrderBookTop],
+    precisions: &PrecisionRegistry,
+    fee_model: &FeeModel,
+    config: &SlippageCaptureArbitrageConfig,
+    risk_state: Option<&ArbitrageRiskState>,
+    now: DateTime<Utc>,
+) -> Vec<SlippageCaptureOpenOpportunity> {
+    if startup_gate.is_some_and(|gate| gate.blocked) {
+        return Vec::new();
+    }
+
+    let mut opportunities = Vec::new();
+    for long_book in books {
+        for short_book in books {
+            if long_book.exchange == short_book.exchange
+                || long_book.canonical_symbol != short_book.canonical_symbol
+            {
+                continue;
+            }
+            if !long_book.is_valid(config.min_orderbook_levels)
+                || !short_book.is_valid(config.min_orderbook_levels)
+                || !long_book.is_fresh(now, config.orderbook_stale_ms)
+                || !short_book.is_fresh(now, config.orderbook_stale_ms)
+                || short_book.best_bid_price <= long_book.best_ask_price
+            {
+                continue;
+            }
+
+            let spread_pct =
+                (short_book.best_bid_price - long_book.best_ask_price) / long_book.best_ask_price;
+            if spread_pct < config.min_open_spread_pct || spread_pct > config.max_open_spread_pct {
+                continue;
+            }
+            if let Some(risk_state) = risk_state {
+                let close_config = config.dual_taker_close_config();
+                if risk_state
+                    .can_open(
+                        &long_book.canonical_symbol,
+                        &long_book.exchange,
+                        &short_book.exchange,
+                        &close_config,
+                        now,
+                    )
+                    .is_err()
+                {
+                    continue;
+                }
+            }
+
+            let long_precision = precisions.get(&long_book.exchange, &long_book.canonical_symbol);
+            let short_precision =
+                precisions.get(&short_book.exchange, &short_book.canonical_symbol);
+            let long_ask_depth_usdt = top_depth_usdt(long_book, long_precision, true);
+            let short_bid_depth_usdt = top_depth_usdt(short_book, short_precision, false);
+            let long_candidate = slippage_capture_candidate(
+                long_book,
+                short_book,
+                long_precision,
+                short_precision,
+                long_ask_depth_usdt,
+                short_bid_depth_usdt,
+                MakerLegKind::LongMakerBuy,
+                fee_model,
+                config,
+            );
+            let short_candidate = slippage_capture_candidate(
+                long_book,
+                short_book,
+                long_precision,
+                short_precision,
+                long_ask_depth_usdt,
+                short_bid_depth_usdt,
+                MakerLegKind::ShortMakerSell,
+                fee_model,
+                config,
+            );
+            match (long_candidate, short_candidate) {
+                (Some(left), Some(right)) => {
+                    if left.maker_top_depth_usdt <= right.maker_top_depth_usdt {
+                        opportunities.push(left);
+                    } else {
+                        opportunities.push(right);
+                    }
+                }
+                (Some(opportunity), None) | (None, Some(opportunity)) => {
+                    opportunities.push(opportunity);
+                }
+                (None, None) => {}
+            }
+        }
+    }
+
+    opportunities.sort_by(|left, right| {
+        right
+            .spread_pct
+            .partial_cmp(&left.spread_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                left.maker_top_depth_usdt
+                    .partial_cmp(&right.maker_top_depth_usdt)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+    let mut seen_symbols = HashSet::new();
+    opportunities.retain(|opportunity| seen_symbols.insert(opportunity.canonical_symbol.as_pair()));
+    opportunities
+}
+
+#[allow(clippy::too_many_arguments)]
+fn slippage_capture_candidate(
+    long_book: &OrderBookTop,
+    short_book: &OrderBookTop,
+    long_precision: SymbolPrecision,
+    short_precision: SymbolPrecision,
+    long_ask_depth_usdt: f64,
+    short_bid_depth_usdt: f64,
+    maker_leg_kind: MakerLegKind,
+    fee_model: &FeeModel,
+    config: &SlippageCaptureArbitrageConfig,
+) -> Option<SlippageCaptureOpenOpportunity> {
+    let (
+        maker_book,
+        hedge_book,
+        maker_precision,
+        hedge_precision,
+        maker_side,
+        hedge_side,
+        maker_top_price,
+        hedge_reference_price,
+        maker_top_depth_usdt,
+        hedge_top_depth_usdt,
+        maker_role,
+        hedge_role,
+    ) = match maker_leg_kind {
+        MakerLegKind::LongMakerBuy => (
+            long_book,
+            short_book,
+            long_precision,
+            short_precision,
+            OrderSide::Buy,
+            OrderSide::Sell,
+            long_book.best_ask_price,
+            short_book.best_bid_price,
+            long_ask_depth_usdt,
+            short_bid_depth_usdt,
+            SlippageCaptureOrderRole::OpenMakerLong,
+            TakerOrderRole::OpenShort,
+        ),
+        MakerLegKind::ShortMakerSell => (
+            short_book,
+            long_book,
+            short_precision,
+            long_precision,
+            OrderSide::Sell,
+            OrderSide::Buy,
+            short_book.best_bid_price,
+            long_book.best_ask_price,
+            short_bid_depth_usdt,
+            long_ask_depth_usdt,
+            SlippageCaptureOrderRole::OpenMakerShort,
+            TakerOrderRole::OpenLong,
+        ),
+    };
+    let quantity_plan = shared_open_quantity_with_capacity_and_policy(
+        long_book,
+        short_book,
+        long_precision,
+        short_precision,
+        config.target_notional_usdt,
+        config.hedge_top_of_book_capacity_ratio,
+        false,
+    )?;
+    let mut quantity = quantity_plan.base_quantity;
+    let maker_limit_price = slippage_capture_maker_price(
+        maker_side,
+        maker_top_price,
+        config.maker_price_offset_pct,
+        maker_precision,
+    );
+    let hedge_worst_acceptable_price = taker_limit_price(
+        hedge_side,
+        hedge_reference_price,
+        config.hedge_taker_slippage_pct,
+        hedge_precision,
+    );
+    let required_notional_usdt = config
+        .target_notional_usdt
+        .max(maker_precision.min_notional_usdt)
+        .max(hedge_precision.min_notional_usdt);
+    let required_by_maker = if maker_limit_price > 0.0 {
+        required_notional_usdt / maker_limit_price
+    } else {
+        0.0
+    };
+    let required_by_hedge_worst = if hedge_worst_acceptable_price > 0.0 {
+        required_notional_usdt / hedge_worst_acceptable_price
+    } else {
+        0.0
+    };
+    quantity = quantity.max(required_by_maker).max(required_by_hedge_worst);
+    quantity = normalize_shared_base_quantity_up(quantity, maker_precision, hedge_precision);
+    if config.enforce_hedge_top_depth {
+        let hedge_available_base = (hedge_top_depth_usdt / hedge_reference_price.max(1e-12))
+            * config.hedge_top_of_book_capacity_ratio.clamp(0.0, 1.0);
+        if hedge_available_base < quantity {
+            return None;
+        }
+    }
+    let maker_order_quantity = maker_precision.normalized_order_quantity_from_base(quantity);
+    let maker_base_quantity =
+        maker_precision.base_quantity_from_order_quantity(maker_order_quantity);
+    let hedge_order_quantity =
+        hedge_precision.normalized_order_quantity_from_base(maker_base_quantity);
+    let hedge_base_quantity =
+        hedge_precision.base_quantity_from_order_quantity(hedge_order_quantity);
+    let quantity = maker_base_quantity.min(hedge_base_quantity);
+    if quantity <= 0.0
+        || quantity < maker_precision.min_base_quantity()
+        || quantity < hedge_precision.min_base_quantity()
+    {
+        return None;
+    }
+
+    let maker_notional_usdt = quantity * maker_limit_price;
+    let hedge_notional_usdt = quantity * hedge_reference_price;
+    let hedge_worst_notional_usdt = quantity * hedge_worst_acceptable_price;
+    if maker_precision.min_notional_usdt > 0.0
+        && maker_notional_usdt < maker_precision.min_notional_usdt
+    {
+        return None;
+    }
+    if hedge_precision.min_notional_usdt > 0.0
+        && hedge_worst_notional_usdt < hedge_precision.min_notional_usdt
+    {
+        return None;
+    }
+
+    let spread_pct =
+        (short_book.best_bid_price - long_book.best_ask_price) / long_book.best_ask_price;
+    let expected_gross_pnl_usdt = match maker_leg_kind {
+        MakerLegKind::LongMakerBuy => quantity * (hedge_reference_price - maker_limit_price),
+        MakerLegKind::ShortMakerSell => quantity * (maker_limit_price - hedge_reference_price),
+    };
+    let expected_open_fee_usdt =
+        fee_model.fee_amount(&maker_book.exchange, FeeRole::Maker, maker_notional_usdt)
+            + fee_model.fee_amount(&hedge_book.exchange, FeeRole::Taker, hedge_notional_usdt);
+    let expected_round_trip_fee_usdt = expected_open_fee_usdt
+        + fee_model.fee_amount(
+            &long_book.exchange,
+            FeeRole::Taker,
+            quantity * long_book.best_bid_price,
+        )
+        + fee_model.fee_amount(
+            &short_book.exchange,
+            FeeRole::Taker,
+            quantity * short_book.best_ask_price,
+        );
+    let expected_net_pnl_usdt = expected_gross_pnl_usdt - expected_round_trip_fee_usdt;
+    let expected_net_profit_pct =
+        expected_net_pnl_usdt / maker_notional_usdt.max(hedge_notional_usdt).max(1.0);
+    if expected_net_profit_pct < config.min_open_net_profit_pct {
+        return None;
+    }
+
+    let symbol = maker_book.canonical_symbol.clone();
+    let maker_order = SlippageCaptureMakerOrderDraft {
+        exchange: maker_book.exchange.clone(),
+        canonical_symbol: symbol.clone(),
+        side: maker_side,
+        base_quantity: quantity,
+        quantity: maker_precision.normalized_order_quantity_from_base(quantity),
+        quantity_unit: maker_precision.quantity_unit,
+        contract_size: maker_precision.effective_contract_size(),
+        top_of_book_price: maker_top_price,
+        limit_price: maker_limit_price,
+        reduce_only: false,
+        post_only: true,
+        auto_cancel_after_ms: config.maker_order_timeout_ms,
+        role: maker_role,
+    };
+    let hedge_order = taker_order_draft(
+        hedge_book.exchange.clone(),
+        symbol.clone(),
+        hedge_side,
+        quantity,
+        hedge_reference_price,
+        false,
+        hedge_role,
+        config.hedge_taker_slippage_pct,
+        hedge_precision,
+    );
+    let hedge_after_fill = SlippageCaptureHedgePlan {
+        exchange: hedge_book.exchange.clone(),
+        canonical_symbol: symbol.clone(),
+        side: hedge_side,
+        reference_price: hedge_reference_price,
+        filled_maker_base_quantity: quantity,
+        order: hedge_order,
+        trigger: "on_maker_fill_private_stream_or_rest_fill_sync".to_string(),
+    };
+
+    Some(SlippageCaptureOpenOpportunity {
+        opportunity_id: format!(
+            "{}:{}:{}:{}:{:?}",
+            symbol.as_pair(),
+            long_book.exchange,
+            short_book.exchange,
+            long_book
+                .received_at
+                .timestamp_millis()
+                .max(short_book.received_at.timestamp_millis()),
+            maker_leg_kind
+        ),
+        canonical_symbol: symbol,
+        maker_exchange: maker_book.exchange.clone(),
+        hedge_exchange: hedge_book.exchange.clone(),
+        maker_leg_kind,
+        maker_top_price,
+        maker_limit_price,
+        hedge_reference_price,
+        spread_pct,
+        quantity,
+        maker_notional_usdt,
+        hedge_notional_usdt,
+        maker_top_depth_usdt,
+        hedge_top_depth_usdt,
+        expected_open_fee_usdt,
+        expected_round_trip_fee_usdt,
+        expected_gross_pnl_usdt,
+        expected_net_pnl_usdt,
+        expected_net_profit_pct,
+        maker_order,
+        hedge_after_fill,
+        close_orders_are_dual_taker: true,
+    })
 }
 
 pub fn evaluate_dual_taker_close(
@@ -1839,31 +2537,59 @@ struct SharedOpenQuantity {
     executable_depth_usdt: f64,
 }
 
-fn shared_open_quantity(
+fn shared_open_quantity_with_top_depth_policy(
     long_book: &OrderBookTop,
     short_book: &OrderBookTop,
     long_precision: SymbolPrecision,
     short_precision: SymbolPrecision,
     target_notional_usdt: f64,
     top_of_book_capacity_ratio: f64,
+    enforce_top_depth: bool,
 ) -> Option<SharedOpenQuantity> {
-    shared_open_quantity_with_capacity(
+    shared_open_quantity_with_capacity_and_policy(
         long_book,
         short_book,
         long_precision,
         short_precision,
         target_notional_usdt,
         top_of_book_capacity_ratio,
+        enforce_top_depth,
     )
 }
 
-fn shared_open_quantity_with_capacity(
+fn open_opportunity_id(
+    long_book: &OrderBookTop,
+    short_book: &OrderBookTop,
+    symbol: &CanonicalSymbol,
+) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        symbol.as_pair(),
+        long_book.exchange,
+        short_book.exchange,
+        long_book
+            .received_at
+            .timestamp_millis()
+            .max(short_book.received_at.timestamp_millis())
+    )
+}
+
+fn top_depth_usdt(book: &OrderBookTop, precision: SymbolPrecision, use_ask: bool) -> f64 {
+    if use_ask {
+        precision.base_quantity_from_order_quantity(book.best_ask_quantity) * book.best_ask_price
+    } else {
+        precision.base_quantity_from_order_quantity(book.best_bid_quantity) * book.best_bid_price
+    }
+}
+
+fn shared_open_quantity_with_capacity_and_policy(
     long_book: &OrderBookTop,
     short_book: &OrderBookTop,
     long_precision: SymbolPrecision,
     short_precision: SymbolPrecision,
     target_notional_usdt: f64,
     top_of_book_capacity_ratio: f64,
+    enforce_top_depth: bool,
 ) -> Option<SharedOpenQuantity> {
     if target_notional_usdt <= 0.0 || top_of_book_capacity_ratio <= 0.0 {
         return None;
@@ -1876,15 +2602,16 @@ fn shared_open_quantity_with_capacity(
     let long_top_depth_usdt = long_top_base_quantity * long_book.best_ask_price;
     let short_top_depth_usdt = short_top_base_quantity * short_book.best_bid_price;
     let executable_depth_usdt = long_top_depth_usdt.min(short_top_depth_usdt) * capacity_ratio;
-    if executable_depth_usdt < target_notional_usdt {
+    if enforce_top_depth && executable_depth_usdt < target_notional_usdt {
         return None;
     }
 
-    let long_available_base = long_top_base_quantity * capacity_ratio;
-    let short_available_base = short_top_base_quantity * capacity_ratio;
-    let mut quantity = (target_notional_usdt / long_book.best_ask_price)
-        .min(long_available_base)
-        .min(short_available_base);
+    let mut quantity = target_notional_usdt / long_book.best_ask_price;
+    if enforce_top_depth {
+        let long_available_base = long_top_base_quantity * capacity_ratio;
+        let short_available_base = short_top_base_quantity * capacity_ratio;
+        quantity = quantity.min(long_available_base).min(short_available_base);
+    }
     quantity = normalize_shared_base_quantity(quantity, long_precision, short_precision);
     if quantity <= 0.0
         || quantity < long_precision.min_base_quantity()
@@ -1918,6 +2645,30 @@ fn normalize_shared_base_quantity(
         let long_quantity = long_precision.normalized_base_quantity(quantity);
         let short_quantity = short_precision.normalized_base_quantity(quantity);
         let next_quantity = long_quantity.min(short_quantity);
+        if (next_quantity - quantity).abs() <= 1e-12 {
+            return next_quantity;
+        }
+        quantity = next_quantity;
+    }
+    quantity
+}
+
+fn normalize_shared_base_quantity_up(
+    base_quantity: f64,
+    long_precision: SymbolPrecision,
+    short_precision: SymbolPrecision,
+) -> f64 {
+    let mut quantity = base_quantity.max(0.0);
+    for _ in 0..3 {
+        let long_quantity = long_precision.base_quantity_from_order_quantity(ceil_to_step(
+            long_precision.order_quantity_from_base_quantity(quantity),
+            long_precision.quantity_step,
+        ));
+        let short_quantity = short_precision.base_quantity_from_order_quantity(ceil_to_step(
+            short_precision.order_quantity_from_base_quantity(quantity),
+            short_precision.quantity_step,
+        ));
+        let next_quantity = long_quantity.max(short_quantity);
         if (next_quantity - quantity).abs() <= 1e-12 {
             return next_quantity;
         }
@@ -1967,6 +2718,22 @@ fn taker_limit_price(
         }
         OrderSide::Sell => {
             floor_to_step(reference_price * (1.0 - slippage_pct), precision.price_tick)
+        }
+    }
+}
+
+fn slippage_capture_maker_price(
+    side: OrderSide,
+    top_of_book_price: f64,
+    offset_pct: f64,
+    precision: SymbolPrecision,
+) -> f64 {
+    match side {
+        OrderSide::Buy => {
+            floor_to_step(top_of_book_price * (1.0 - offset_pct), precision.price_tick)
+        }
+        OrderSide::Sell => {
+            ceil_to_step(top_of_book_price * (1.0 + offset_pct), precision.price_tick)
         }
     }
 }

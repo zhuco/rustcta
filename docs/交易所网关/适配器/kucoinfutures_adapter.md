@@ -21,7 +21,7 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/kucoinfu
 | Order book snapshot | `GET /api/v1/level2/snapshot` | Implemented |
 | Account balances | `GET /api/v1/account-overview` | Implemented |
 | Positions | `GET /api/v1/positions` | Implemented |
-| Funding history | `GET /api/v1/funding-history` | Mapped/audited; no shared gateway funding model yet |
+| Funding history | `GET /api/v1/funding-history` | Implemented through shared `get_funding_rates` |
 | Place/cancel/cancel-all | `POST /api/v1/orders`, `DELETE /api/v1/orders/{id}`, `DELETE /api/v1/orders` | Implemented |
 | Open orders/query/fills | `GET /api/v1/orders`, `GET /api/v1/orders/{id}`, `GET /api/v1/fills` | Implemented |
 | Public WS | `/contractMarket/ticker`, `/contractMarket/level2`, `/contractMarket/execution` | Subscription specs |
@@ -37,7 +37,9 @@ increment 是 real-time，5/50 档是 100ms；payload 有 `sequence` 或 `sequen
 
 交易所不支持现货：该 adapter/profile 只对应 KuCoin Futures API，现货仍由 `kucoin` adapter 承接。
 
-Spot remains in `kucoin`; this adapter advertises `MarketType::Perpetual` only. Gateway order quantity is sent to KuCoin Futures as contract `size`; callers must use contract-size semantics until a shared quantity conversion model exists. Quote-sized market orders, fiat funding operations, transfers, withdrawals, and unverified position/margin-mode mutations are not exposed.
+Spot remains in `kucoin`; this adapter advertises `MarketType::Perpetual` only. Gateway order quantity is sent to KuCoin Futures as contract `size`; callers must use contract-size semantics until a shared quantity conversion model exists. Quote-sized market orders, fiat funding operations, transfers, withdrawals, shared leverage mutation, and unverified position/margin-mode mutations are not exposed.
+
+Funding history is available through `ExchangeClient::get_funding_rates` and returns the latest public funding snapshots normalized into `FundingRateSnapshot`.
 
 Batch place/cancel is gateway-composed from sequential REST calls and is non-atomic. REST reconciliation fallback uses query order, open orders, recent fills, positions, and order book snapshots after ambiguous mutations or stream gaps.
 
@@ -45,6 +47,7 @@ Batch place/cancel is gateway-composed from sequential REST calls and is non-ato
 
 - `python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/kucoinfutures/endpoint_mapping.yaml`
 - `cargo test -p rustcta-exchange-gateway kucoinfutures --lib --message-format short`
+- `cargo test -p rustcta-exchange-gateway kucoinfutures_adapter_should_load_latest_funding_rate_from_public_rest -- --nocapture`
 - `cargo test -p rustcta-gateway kucoinfutures --message-format short`
 - `cargo check -p rustcta-exchange-gateway --lib --message-format short`
 

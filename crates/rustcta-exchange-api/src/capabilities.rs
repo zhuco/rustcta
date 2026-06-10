@@ -225,6 +225,8 @@ pub struct ExchangeClientCapabilitiesV2 {
     #[serde(default)]
     pub fills_history: HistoryCapability,
     #[serde(default)]
+    pub funding_rates: CapabilitySupport,
+    #[serde(default)]
     pub endpoints: Vec<EndpointCapability>,
     #[serde(default)]
     pub credential_scopes: Vec<CredentialScope>,
@@ -312,6 +314,8 @@ pub struct ExchangeClientCapabilities {
     pub supports_balances: bool,
     pub supports_positions: bool,
     pub supports_fees: bool,
+    #[serde(default)]
+    pub supports_funding_rates: bool,
     pub supports_place_order: bool,
     pub supports_cancel_order: bool,
     pub supports_query_order: bool,
@@ -357,6 +361,7 @@ impl ExchangeClientCapabilities {
             supports_balances: false,
             supports_positions: false,
             supports_fees: false,
+            supports_funding_rates: false,
             supports_place_order: false,
             supports_cancel_order: false,
             supports_query_order: false,
@@ -416,6 +421,10 @@ impl ExchangeClientCapabilities {
             self.max_recent_fill_limit,
             "legacy supports_recent_fills=false",
         );
+        self.capabilities_v2.funding_rates = support_from_bool(
+            self.supports_funding_rates,
+            "legacy supports_funding_rates=false",
+        );
         self.capabilities_v2.order_history = support_from_open_orders(
             self.supports_open_orders,
             "legacy supports_open_orders=false",
@@ -441,6 +450,7 @@ impl ExchangeClientCapabilities {
         self.supports_cancel_all_orders = self.capabilities_v2.cancel_all_orders.is_supported();
         self.supports_open_orders = self.capabilities_v2.order_history.support.is_supported();
         self.supports_recent_fills = self.capabilities_v2.fills_history.support.is_supported();
+        self.supports_funding_rates = self.capabilities_v2.funding_rates.is_supported();
         self.max_recent_fill_limit = self.capabilities_v2.fills_history.max_limit;
     }
 }

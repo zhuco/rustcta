@@ -449,6 +449,7 @@ fn krakenfutures_capabilities_v2(
         } else {
             Vec::new()
         },
+        ..rustcta_exchange_api::ExchangeClientCapabilitiesV2::default()
     }
 }
 

@@ -1,5 +1,5 @@
 use rustcta_exchange_api::{
-    CapabilitySupport, ExchangeClient, OrderBookRequest, PublicStreamKind,
+    CapabilitySupport, ExchangeClient, FundingRatesRequest, OrderBookRequest, PublicStreamKind,
     PublicStreamSubscription, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
@@ -82,6 +82,8 @@ async fn okx_adapter_should_declare_task9_toolchain_capabilities() {
         capabilities.capabilities_v2.fills_history.max_limit,
         Some(100)
     );
+    assert!(capabilities.supports_funding_rates);
+    assert!(capabilities.capabilities_v2.funding_rates.is_supported());
     assert!(capabilities
         .capabilities_v2
         .endpoints
@@ -417,4 +419,40 @@ async fn okx_adapter_should_load_depth_limited_order_book_from_public_rest() {
         Some("BTC-USDT")
     );
     assert_eq!(request.query.get("sz").map(String::as_str), Some("10"));
+}
+
+#[tokio::test]
+async fn okx_adapter_should_load_perpetual_funding_rate_from_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![fixture("funding.json")]).await;
+    let adapter = OkxGatewayAdapter::new(OkxGatewayConfig {
+        rest_base_url: base_url,
+        ..OkxGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = ExchangeClient::get_funding_rates(
+        &adapter,
+        FundingRatesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("funding"),
+            symbols: vec![perpetual_symbol_scope()],
+        },
+    )
+    .await
+    .expect("funding");
+
+    assert_eq!(response.rates.len(), 1);
+    assert_eq!(response.rates[0].funding_rate, "0.0001000000000000");
+    assert_eq!(
+        response.rates[0].predicted_funding_rate.as_deref(),
+        Some("0.0000800000000000")
+    );
+    assert!(response.rates[0].funding_time.is_some());
+    assert!(response.rates[0].next_funding_time.is_some());
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.path, "/api/v5/public/funding-rate");
+    assert_eq!(
+        request.query.get("instId").map(String::as_str),
+        Some("BTC-USDT-SWAP")
+    );
 }

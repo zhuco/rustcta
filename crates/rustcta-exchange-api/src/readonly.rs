@@ -12,13 +12,14 @@ use crate::{
     CancelOrderResponse, ClosePositionRequest, ClosePositionResponse, CountdownCancelAllRequest,
     CountdownCancelAllResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
     ExchangeClientCapabilities, ExchangeError, ExchangeId, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
-    OrderListResponse, PerpAccountControlProvider, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
-    SetPositionModeResponse, SymbolAccountConfigRequest, SymbolAccountConfigResponse,
-    SymbolRulesRequest, SymbolRulesResponse,
+    FundingRatesRequest, FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PerpAccountControlProvider, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
+    SymbolAccountConfigRequest, SymbolAccountConfigResponse, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 
 #[derive(Debug, Default)]
@@ -198,6 +199,13 @@ where
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         self.inner.get_fees(request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.inner.get_funding_rates(request).await
     }
 
     async fn place_order(

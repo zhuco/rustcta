@@ -1,0 +1,23 @@
+{
+  "exchange": "okx",
+  "operation": "set_leverage",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v5/account/set-leverage",
+  "auth": "signed",
+  "headers": {
+    "ok-access-key": { "match": "exact", "value": "key" },
+    "ok-access-sign": { "match": "non_empty" },
+    "ok-access-timestamp": { "match": "non_empty" },
+    "ok-access-passphrase": { "match": "exact", "value": "passphrase" },
+    "content-type": { "match": "exact", "value": "application/json" }
+  },
+  "body_contains": {
+    "instId": "BTC-USDT-SWAP",
+    "lever": "5",
+    "mgnMode": "cross"
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["secret"]
+}

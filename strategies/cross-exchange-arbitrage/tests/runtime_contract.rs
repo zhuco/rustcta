@@ -1,11 +1,16 @@
 use chrono::{TimeZone, Utc};
 use rustcta_strategy_cross_exchange_arbitrage::app_runtime::{
-    CrossArbAppRuntime, CrossArbDbPriceAuditEvent, CrossArbDbPriceAuditLeg, CrossArbRuntimeInput,
+    CrossArbAppRuntime, CrossArbAuthEvidence, CrossArbDbAuditEvent,
+    CrossArbDbOpenDecisionAuditEvent, CrossArbDbPriceAuditEvent, CrossArbDbPriceAuditLeg,
+    CrossArbRuntimeInput,
 };
 use rustcta_strategy_cross_exchange_arbitrage::runtime_contract::{
     build_runtime_contract, CrossArbExchangeReadinessRow,
 };
-use rustcta_strategy_cross_exchange_arbitrage::CrossExchangeArbitrageConfig;
+use rustcta_strategy_cross_exchange_arbitrage::{
+    CanonicalSymbol, CrossArbExecutionModule, CrossExchangeArbitrageConfig, ExchangeId,
+    OpenOpportunityAudit, OpenOpportunityDecision, OpenOpportunityRejectReason,
+};
 use serde_json::json;
 
 #[test]
@@ -21,6 +26,8 @@ fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution
     assert!(contract.async_db_writer.background_writer_required);
     assert!(contract.async_db_writer.records_planned_execution_prices);
     assert!(contract.async_db_writer.records_actual_fill_prices);
+    assert!(contract.async_db_writer.records_open_decision_reject_reason);
+    assert!(contract.async_db_writer.records_open_decision_auth_evidence);
     assert!(contract
         .async_db_writer
         .price_audit_fields
@@ -29,6 +36,14 @@ fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution
         .async_db_writer
         .price_audit_fields
         .contains(&"actual_fill_price"));
+    assert!(contract
+        .async_db_writer
+        .price_audit_fields
+        .contains(&"reject_reason"));
+    assert!(contract
+        .async_db_writer
+        .price_audit_fields
+        .contains(&"auth_evidence"));
 
     assert!(contract.position_takeover.required_before_new_open);
     assert_eq!(contract.position_takeover.quote_asset, "USDT");
@@ -53,6 +68,17 @@ fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution
             .execution_provider_contract
             .open_legs_concurrent_required
     );
+    assert!(contract.execution_provider_contract.taker_only);
+    assert!(
+        contract
+            .execution_provider_contract
+            .supports_slippage_capture_maker_open
+    );
+    assert!(
+        !contract
+            .execution_provider_contract
+            .maker_open_then_taker_hedge_required
+    );
     assert!(
         contract
             .execution_provider_contract
@@ -67,11 +93,14 @@ fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution
     for gate in [
         "async_db_writer",
         "position_takeover",
-        "startup_single_leg_resolution",
         "singleton_process_lock",
     ] {
         assert!(contract.readiness_gate.required_gates.contains(&gate));
     }
+    assert!(!contract
+        .readiness_gate
+        .required_gates
+        .contains(&"startup_single_leg_resolution"));
 
     for task_kind in [
         "acquire_singleton_process_lock",
@@ -80,6 +109,9 @@ fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution
         "resolve_startup_single_leg_positions",
         "submit_dual_taker_open_legs_concurrently",
         "submit_dual_taker_close_legs_concurrently",
+        "submit_slippage_capture_maker_open",
+        "cancel_unfilled_slippage_capture_maker_open",
+        "submit_slippage_capture_taker_hedge_after_fill",
         "persist_price_audit_events_from_async_queue",
     ] {
         assert!(
@@ -90,6 +122,58 @@ fn runtime_contract_should_expose_db_takeover_singleton_and_concurrent_execution
             "{task_kind} task should be advertised by the runtime contract"
         );
     }
+}
+
+#[test]
+fn runtime_contract_should_switch_execution_provider_for_slippage_capture_module() {
+    let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+        "execution_module": "slippage_capture",
+        "slippage_capture": {
+            "maker_order_timeout_ms": 750,
+            "maker_price_offset_pct": 0.002
+        }
+    }));
+    let contract = build_runtime_contract(&config, fixed_now());
+
+    assert_eq!(
+        contract.execution_module,
+        CrossArbExecutionModule::SlippageCapture
+    );
+    assert_eq!(
+        contract.dashboard_snapshot.execution_module,
+        CrossArbExecutionModule::SlippageCapture
+    );
+    assert!(!contract.execution_provider_contract.taker_only);
+    assert!(
+        !contract
+            .execution_provider_contract
+            .open_legs_concurrent_required
+    );
+    assert!(
+        contract
+            .execution_provider_contract
+            .maker_open_then_taker_hedge_required
+    );
+    assert!(
+        contract
+            .dashboard_snapshot
+            .slippage_capture
+            .enabled_when_selected
+    );
+    assert_eq!(
+        contract
+            .dashboard_snapshot
+            .slippage_capture
+            .maker_order_timeout_ms,
+        750
+    );
+    assert_eq!(
+        contract
+            .dashboard_snapshot
+            .slippage_capture
+            .maker_price_offset_pct,
+        "0.2"
+    );
 }
 
 #[test]
@@ -153,6 +237,58 @@ fn app_runtime_should_block_new_orders_until_all_startup_gates_are_complete() {
 }
 
 #[test]
+fn app_runtime_should_not_block_new_opens_on_unresolved_startup_single_leg_positions() {
+    let captured_at = fixed_now();
+    let mut runtime = CrossArbAppRuntime::default().with_live_orders_enabled(true);
+
+    let cycle = runtime.run_cycle(
+        CrossArbRuntimeInput {
+            execution_intents: 2,
+            exchange_readiness_rows: ready_exchanges(),
+            db_writer_ready: true,
+            position_takeover_complete: true,
+            startup_single_leg_positions_detected: 1,
+            startup_single_leg_positions_resolved: 0,
+            singleton_acquired: true,
+            ..Default::default()
+        },
+        captured_at,
+    );
+
+    assert_eq!(cycle.execution.requested_intents, 2);
+    assert_eq!(cycle.execution.submitted_intents, 2);
+    assert!(cycle.execution.startup_readiness_satisfied);
+    assert!(cycle.execution.new_opens_allowed);
+    assert!(!cycle.execution.blocked_by_startup_gate);
+    assert!(
+        cycle
+            .dashboard_snapshot
+            .readiness_gate
+            .ready_to_open_new_positions
+    );
+    assert!(
+        !cycle
+            .dashboard_snapshot
+            .readiness_gate
+            .startup_single_leg_positions_resolved
+    );
+    assert_eq!(
+        cycle
+            .dashboard_snapshot
+            .position_takeover
+            .single_leg_positions_detected,
+        1
+    );
+    assert_eq!(
+        cycle
+            .dashboard_snapshot
+            .position_takeover
+            .single_leg_positions_resolved,
+        0
+    );
+}
+
+#[test]
 fn app_runtime_should_enqueue_price_audit_events_without_blocking_strategy_cycle() {
     let captured_at = fixed_now();
     let mut runtime = CrossArbAppRuntime::default()
@@ -194,7 +330,51 @@ fn app_runtime_should_enqueue_price_audit_events_without_blocking_strategy_cycle
 
     let drained = runtime.drain_async_db_queue_batch(8);
     assert_eq!(drained.len(), 1);
+    assert!(matches!(drained[0], CrossArbDbAuditEvent::Price(_)));
     assert_eq!(runtime.async_db_queue_len(), 0);
+}
+
+#[test]
+fn app_runtime_should_enqueue_rejected_open_decision_with_auth_evidence() {
+    let captured_at = fixed_now();
+    let audit = open_decision_audit_event();
+    let mut runtime = CrossArbAppRuntime::default()
+        .with_live_orders_enabled(true)
+        .with_async_db_queue_capacity(8);
+
+    let cycle = runtime.run_cycle(
+        CrossArbRuntimeInput {
+            exchange_readiness_rows: ready_exchanges(),
+            db_writer_ready: true,
+            position_takeover_complete: true,
+            singleton_acquired: true,
+            open_decision_audit_events: vec![CrossArbDbAuditEvent::OpenDecision(audit)],
+            ..Default::default()
+        },
+        captured_at,
+    );
+
+    assert_eq!(cycle.async_db_queue.queued_events, 1);
+    assert_eq!(cycle.queued_db_audit_events.len(), 1);
+    assert!(cycle
+        .storage_events
+        .iter()
+        .any(|event| { event.event_kind == "open_decision_audit" && event.count == 1 }));
+
+    let CrossArbDbAuditEvent::OpenDecision(event) = &cycle.queued_db_audit_events[0] else {
+        panic!("open decision audit event should be queued");
+    };
+    assert!(!event.accepted);
+    assert_eq!(
+        event.reject_reason,
+        Some(OpenOpportunityRejectReason::SymbolAlreadyActive)
+    );
+    assert!(event.non_blocking_enqueue_required);
+    assert_eq!(
+        event.auth_evidence[0].account_key_ref.as_deref(),
+        Some("binance-prod")
+    );
+    assert!(!event.auth_evidence[0].trade_permission_confirmed);
 }
 
 #[test]
@@ -313,6 +493,52 @@ fn price_audit_event(
         actual_pnl_usdt: Some("0.008".to_string()),
         failure_reason: None,
     }
+}
+
+fn open_decision_audit_event() -> CrossArbDbOpenDecisionAuditEvent {
+    let audit = OpenOpportunityAudit {
+        opportunity_id: "EDGE/USDT:binance:gate:1780920000000".to_string(),
+        canonical_symbol: CanonicalSymbol::new("EDGE", "USDT"),
+        long_exchange: ExchangeId::new("binance"),
+        short_exchange: ExchangeId::new("gate"),
+        decision: OpenOpportunityDecision::Rejected,
+        reject_reason: Some(OpenOpportunityRejectReason::SymbolAlreadyActive),
+        raw_spread_pct: 0.012,
+        configured_open_spread_pct: 0.005,
+        min_open_spread_pct: 0.005,
+        max_open_spread_pct: 0.05,
+        min_open_net_profit_pct: 0.0,
+        long_entry_price: 100.0,
+        short_entry_price: 101.2,
+        long_book_age_ms: 12,
+        short_book_age_ms: 15,
+        long_top_depth_usdt: 500.0,
+        short_top_depth_usdt: 450.0,
+        executable_top_depth_usdt: 360.0,
+        target_notional_usdt: 50.0,
+        quantity: Some(0.5),
+        expected_net_profit_pct: Some(0.009),
+        expected_net_pnl_usdt: Some(0.45),
+        estimated_round_trip_fee_usdt: Some(0.1),
+        observed_at: fixed_now(),
+    };
+
+    CrossArbDbOpenDecisionAuditEvent::from_open_audit(
+        audit,
+        "live",
+        vec![CrossArbAuthEvidence {
+            exchange: "binance".to_string(),
+            account_id: Some("acct-main".to_string()),
+            account_key_ref: Some("binance-prod".to_string()),
+            auth_material_loaded: true,
+            trade_permission_confirmed: false,
+            private_stream_ready: true,
+            evidence_reason: Some(
+                "account key loaded but trade permission preflight failed".to_string(),
+            ),
+        }],
+        fixed_now(),
+    )
 }
 
 fn fixed_now() -> chrono::DateTime<Utc> {

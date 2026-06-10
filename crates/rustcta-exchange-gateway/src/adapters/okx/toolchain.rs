@@ -100,6 +100,13 @@ pub(super) fn apply_toolchain_capabilities(
         max_limit: Some(100),
         max_window_ms: None,
     };
+    capabilities.capabilities_v2.funding_rates = if exchange_id == "okx" {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported(format!(
+            "{label} funding rates require OKX derivatives market access"
+        ))
+    };
     capabilities.capabilities_v2.credential_scopes = if private_rest_enabled {
         vec![CredentialScope::ReadOnly, CredentialScope::Trade]
     } else {

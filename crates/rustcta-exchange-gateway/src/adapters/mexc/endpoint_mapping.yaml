@@ -172,6 +172,19 @@ endpoints:
     rate_limit_bucket: contract_public
     weight: 1
     request_spec_required: false
+  - operation: get_funding_rates
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/contract/funding_rate/{symbol}
+    auth: none
+    rate_limit_bucket: contract_public
+    weight: 1
+    request_spec_required: false
+    support: native
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/mexc/public_tests.rs
   - operation: get_balances
     transport: rest
     product: spot
@@ -353,6 +366,21 @@ endpoints:
     rate_limit_bucket: contract_private
     weight: 1
     request_spec_required: true
+  - operation: set_leverage
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v1/private/position/change_leverage
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/mexc/request_specs/set_leverage.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/mexc/private_tests.rs
+    notes: "Runtime maps shared SetLeverageRequest to cross-margin openType=2 and applies both long(positionType=1) and short(positionType=2)."
 streams:
   - operation: public_orderbook_bbo
     product: spot

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    Balance, ExchangeApiError, ExchangeApiResult, FeeRateSnapshot, OrderState, SymbolScope,
-    EXCHANGE_API_SCHEMA_VERSION,
+    Balance, ExchangeApiError, ExchangeApiResult, FeeRateSnapshot, FundingRateSnapshot, OrderState,
+    SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, AssetBalance, CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId,
@@ -239,6 +239,41 @@ pub fn parse_fills(
             )
         })
         .collect()
+}
+
+pub fn parse_funding_rate(
+    exchange_id: &ExchangeId,
+    fallback_symbol: SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<FundingRateSnapshot> {
+    let row = value
+        .as_array()
+        .and_then(|rows| rows.first())
+        .ok_or_else(|| parse_error(exchange_id.clone(), "OKX funding response is empty", value))?;
+    let funding_rate = string_or_number(row.get("fundingRate")).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "OKX funding response missing fundingRate",
+            row,
+        )
+    })?;
+    Ok(FundingRateSnapshot {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol: fallback_symbol,
+        funding_rate,
+        predicted_funding_rate: string_or_number(row.get("nextFundingRate")),
+        funding_time: row
+            .get("fundingTime")
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        next_funding_time: row
+            .get("nextFundingTime")
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        mark_price: None,
+        source: Some("okx.public.funding-rate".to_string()),
+        updated_at: Utc::now(),
+    })
 }
 
 fn parse_order_state(

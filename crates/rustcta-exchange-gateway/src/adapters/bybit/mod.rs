@@ -3,15 +3,17 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    AccountControlCapabilities, AmendOrderRequest, AmendOrderResponse, BalancesRequest,
+    BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
     CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
+    FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
+    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
+    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
+    SetPositionModeResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -182,6 +184,32 @@ impl GatewayAdapter for BybitGatewayAdapter {
             message: Some(self.config.status_message.clone()),
         }
     }
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        let private = self.config.private_rest_enabled();
+        AccountControlCapabilities {
+            exchange: self.exchange_id.clone(),
+            supports_symbol_account_config: false,
+            supports_leverage: private,
+            supports_position_mode_change: private,
+            supports_close_position: false,
+            supports_countdown_cancel_all: false,
+        }
+    }
+
+    async fn set_leverage(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        self.set_leverage_impl(request).await
+    }
+
+    async fn set_position_mode(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        self.set_position_mode_impl(request).await
+    }
 }
 
 #[async_trait]
@@ -204,6 +232,7 @@ impl ExchangeClient for BybitGatewayAdapter {
         capabilities.supports_balances = private;
         capabilities.supports_positions = private;
         capabilities.supports_fees = private;
+        capabilities.supports_funding_rates = true;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
         capabilities.supports_query_order = private;
@@ -259,6 +288,13 @@ impl ExchangeClient for BybitGatewayAdapter {
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         self.get_fees_impl(request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.get_funding_rates_impl(request).await
     }
 
     async fn place_order(
