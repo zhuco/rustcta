@@ -134,7 +134,7 @@ pub fn parse_open_orders(
 }
 
 pub fn parse_fees(
-    _exchange_id: &ExchangeId,
+    exchange_id: &ExchangeId,
     fallback_symbol: &SymbolScope,
     market_type: MarketType,
     value: &Value,
@@ -147,11 +147,25 @@ pub fn parse_fees(
         ),
         _ => ("maker_fee", "taker_fee", "gateio.spot.fee"),
     };
+    let maker_rate = string_or_number(value.get(maker_key)).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            &format!("Gate.io fee response missing {maker_key}"),
+            value,
+        )
+    })?;
+    let taker_rate = string_or_number(value.get(taker_key)).ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            &format!("Gate.io fee response missing {taker_key}"),
+            value,
+        )
+    })?;
     Ok(FeeRateSnapshot {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         symbol: fallback_symbol.clone(),
-        maker_rate: string_or_number(value.get(maker_key)).unwrap_or_else(|| "0".to_string()),
-        taker_rate: string_or_number(value.get(taker_key)).unwrap_or_else(|| "0".to_string()),
+        maker_rate,
+        taker_rate,
         source: Some(source.to_string()),
         updated_at: Utc::now(),
     })

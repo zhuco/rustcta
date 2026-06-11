@@ -10687,7 +10687,10 @@ fn apply_private_ws_event_to_leg(
             "n",
         ],
     ) {
-        leg.fee_usdt = fee.abs();
+        let fee_asset = text_field(event, &["fee_asset", "fee_currency", "fillFeeCoin", "N"]);
+        if fee_asset.is_none_or(|asset| asset.eq_ignore_ascii_case("USDT")) {
+            leg.fee_usdt = fee.abs();
+        }
     }
     leg.filled_at = datetime_any_field(event, &["observed_at"]).or(Some(Utc::now()));
     if let (Some(quantity), Some(price)) = (leg.actual_order_quantity, leg.actual_fill_price) {
@@ -13916,6 +13919,41 @@ mod tests {
         assert_eq!(leg.actual_order_quantity, None);
         assert_eq!(leg.actual_base_quantity, None);
         assert_eq!(leg.actual_fill_price, None);
+    }
+
+    #[test]
+    fn private_ws_fee_should_not_treat_non_usdt_asset_as_usdt() {
+        let symbol = StrategyCanonicalSymbol::new("BTC", "USDT");
+        let draft = TakerOrderDraft {
+            exchange: StrategyExchangeId::new("gateio"),
+            canonical_symbol: symbol,
+            side: StrategyOrderSide::Buy,
+            base_quantity: 1.0,
+            quantity: 1.0,
+            quantity_unit: QuantityUnit::Base,
+            contract_size: 1.0,
+            reference_price: 10_000.0,
+            worst_acceptable_price: 10_100.0,
+            reduce_only: false,
+            role: TakerOrderRole::OpenLong,
+        };
+        let mut leg = filled_leg("gateio", "open_long", "buy", "long", 10_000.0, 1.0);
+        leg.fee_usdt = 0.0;
+        let event = json!({
+            "exchange": "gateio",
+            "private_kind": "fill",
+            "client_order_id": "open_long-cid",
+            "exchange_order_id": "30784428",
+            "quantity": 1.0,
+            "price": 10_000.0,
+            "fee_amount": 0.002,
+            "fee_asset": "BTC",
+            "observed_at": Utc::now(),
+        });
+
+        apply_private_ws_event_to_leg(&mut leg, &draft, &event);
+
+        assert_eq!(leg.fee_usdt, 0.0);
     }
 
     #[tokio::test]

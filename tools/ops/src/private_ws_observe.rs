@@ -686,15 +686,14 @@ fn gateio_private_event_rows(
         .into_iter()
         .filter(|item| item.is_object())
         .map(|item| {
+            let is_user_trade = gateio_user_trade_channel(channel);
             private_event_row(
                 "gateio",
-                if channel == Some("futures.usertrades") {
-                    "fill"
-                } else {
-                    "order"
-                },
+                if is_user_trade { "fill" } else { "order" },
                 channel,
-                item.get("contract").and_then(Value::as_str),
+                item.get("contract")
+                    .or_else(|| item.get("currency_pair"))
+                    .and_then(Value::as_str),
                 item.get("text")
                     .and_then(Value::as_str)
                     .or_else(|| item.get("side").and_then(Value::as_str)),
@@ -706,12 +705,44 @@ fn gateio_private_event_rows(
             )
             .with_extra(json!({
                 "order_status": item.get("status").cloned().unwrap_or(Value::Null),
-                "exchange_order_id": item.get("id").or_else(|| item.get("order_id")).cloned().unwrap_or(Value::Null),
+                "exchange_order_id": item.get("order_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
                 "client_order_id": item.get("text").cloned().unwrap_or(Value::Null),
+                "fill_id": item.get("id").cloned().unwrap_or(Value::Null),
+                "fee_amount": gateio_fee_amount(item),
+                "fee_asset": gateio_fee_asset(item),
                 "latency_ms": latency_ms(now, millis_timestamp(value.get("time_ms").or_else(|| item.get("create_time_ms")))),
             }))
         })
         .collect()
+}
+
+fn gateio_user_trade_channel(channel: Option<&str>) -> bool {
+    matches!(channel, Some("spot.usertrades" | "futures.usertrades"))
+}
+
+fn gateio_fee_amount(item: &Value) -> Value {
+    number_like(item.get("fee"))
+        .map(|fee| json!(fee.abs()))
+        .unwrap_or(Value::Null)
+}
+
+fn gateio_fee_asset(item: &Value) -> Value {
+    item.get("fee_currency")
+        .cloned()
+        .or_else(|| {
+            item.get("contract")
+                .and_then(Value::as_str)
+                .and_then(gateio_contract_settle_asset)
+                .map(Value::String)
+        })
+        .unwrap_or(Value::Null)
+}
+
+fn gateio_contract_settle_asset(contract: &str) -> Option<String> {
+    contract
+        .rsplit_once('_')
+        .map(|(_, quote)| quote.to_ascii_uppercase())
+        .filter(|quote| !quote.is_empty())
 }
 
 fn private_event_row(
@@ -962,11 +993,45 @@ mod tests {
         let gate = json!({
             "channel": "futures.usertrades",
             "event": "update",
-            "result": [{"contract": "SOL_USDT", "size": "2", "price": "100"}]
+            "result": [{
+                "id": "3335259",
+                "contract": "SOL_USDT",
+                "order_id": "4872460",
+                "size": "2",
+                "price": "100",
+                "fee": 0.05
+            }]
         });
         let rows = gateio_private_event_rows(&sanitize_value(&gate), Some(&gate), Utc::now());
         assert_eq!(rows[0]["private_kind"], "fill");
         assert_eq!(rows[0]["canonical_symbol"], "SOL/USDT");
+        assert_eq!(rows[0]["exchange_order_id"], "4872460");
+        assert_eq!(rows[0]["fill_id"], "3335259");
+        assert_eq!(rows[0]["fee_amount"], 0.05);
+        assert_eq!(rows[0]["fee_asset"], "USDT");
+
+        let gate_spot = json!({
+            "channel": "spot.usertrades",
+            "event": "update",
+            "result": [{
+                "id": 5736713,
+                "order_id": "30784428",
+                "currency_pair": "BTC_USDT",
+                "side": "sell",
+                "amount": "1.0",
+                "price": "10000",
+                "fee": "0.002",
+                "fee_currency": "BTC",
+                "text": "t-gate-spot"
+            }]
+        });
+        let rows =
+            gateio_private_event_rows(&sanitize_value(&gate_spot), Some(&gate_spot), Utc::now());
+        assert_eq!(rows[0]["private_kind"], "fill");
+        assert_eq!(rows[0]["canonical_symbol"], "BTC/USDT");
+        assert_eq!(rows[0]["client_order_id"], "t-gate-spot");
+        assert_eq!(rows[0]["fee_amount"], 0.002);
+        assert_eq!(rows[0]["fee_asset"], "BTC");
     }
 
     #[test]

@@ -117,6 +117,84 @@ fn gateio_signing_should_match_known_hmac_vector() {
     );
 }
 
+#[tokio::test]
+async fn gateio_fees_should_fail_closed_when_exchange_response_omits_rates() {
+    let (base_url, _seen) = spawn_rest_server(vec![json!({"maker_fee": "0.001"})]).await;
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("gate-key".to_string()),
+        api_secret: Some("gate-secret".to_string()),
+        enabled_private_rest: true,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let error = adapter
+        .get_fees(FeesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("fees-missing-rate"),
+            symbols: vec![symbol_scope("BTC_USDT")],
+        })
+        .await
+        .expect_err("missing taker fee should not default to zero");
+
+    match error {
+        ExchangeApiError::Exchange(exchange_error) => {
+            assert_eq!(
+                exchange_error.class,
+                rustcta_types::ExchangeErrorClass::Decode
+            );
+            assert!(exchange_error
+                .message
+                .contains("Gate.io fee response missing taker_fee"));
+        }
+        other => panic!("expected decode exchange error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn gateio_perpetual_fees_should_route_signed_contract_readback_and_parse_rates() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "name": "BTC_USDT",
+        "maker_fee_rate": "-0.00025",
+        "taker_fee_rate": "0.00075"
+    })])
+    .await;
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("gate-key".to_string()),
+        api_secret: Some("gate-secret".to_string()),
+        enabled_private_rest: true,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let fees = adapter
+        .get_fees(FeesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-fees"),
+            symbols: vec![perpetual_symbol_scope("BTCUSDT")],
+        })
+        .await
+        .expect("perpetual fees");
+
+    assert_eq!(fees.fees.len(), 1);
+    assert_eq!(fees.fees[0].symbol.market_type, MarketType::Perpetual);
+    assert_eq!(fees.fees[0].maker_rate, "-0.00025");
+    assert_eq!(fees.fees[0].taker_rate, "0.00075");
+    assert_eq!(
+        fees.fees[0].source.as_deref(),
+        Some("gateio.futures.contract")
+    );
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_request(&requests[0], "/futures/usdt/contracts/BTC_USDT");
+    load_request_spec("perpetual_get_fees.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("perpetual get fees request spec");
+}
+
 fn load_request_spec(path: &str) -> RequestSpec {
     let path = format!(
         "{}/../../tests/fixtures/exchanges/gateio/request_specs/{path}",
