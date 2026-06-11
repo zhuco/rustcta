@@ -2326,6 +2326,10 @@ pub(crate) fn format_usdt(value: f64) -> String {
     }
 }
 
+pub(crate) fn format_usdt_precise(value: f64) -> String {
+    format!("${value:.6}")
+}
+
 pub(crate) fn signed_usdt(value: f64) -> String {
     if value > 0.0 {
         format!("+{}", format_usdt(value))
@@ -2333,6 +2337,16 @@ pub(crate) fn signed_usdt(value: f64) -> String {
         format!("-{}", format_usdt(value.abs()))
     } else {
         format_usdt(0.0)
+    }
+}
+
+pub(crate) fn signed_usdt_precise(value: f64) -> String {
+    if value > 0.0 {
+        format!("+{}", format_usdt_precise(value))
+    } else if value < 0.0 {
+        format!("-{}", format_usdt_precise(value.abs()))
+    } else {
+        format_usdt_precise(0.0)
     }
 }
 

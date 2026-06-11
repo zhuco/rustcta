@@ -2562,7 +2562,7 @@ impl CrossArbResultRowData {
                         }),
                         text_or_fallback(text_at(row, "short_exchange", lang), || "-".to_string())
                     ),
-                    status: localized_order_status_text(
+                    status: localized_arbitrage_result_status_text(
                         &text_or_fallback(text_at(row, "status", Language::En), || {
                             text_at(row, "lifecycle", Language::En)
                         }),
@@ -2577,7 +2577,7 @@ impl CrossArbResultRowData {
                     close_actual_spread_pct,
                     close_actual_spread: crate::utils::format_pct(close_actual_spread_pct),
                     realized_profit_usdt,
-                    realized_pnl: crate::utils::signed_usdt(realized_profit_usdt),
+                    realized_pnl: crate::utils::signed_usdt_precise(realized_profit_usdt),
                     opened_at: first_beijing_time_text(
                         row,
                         &["opened_at", "open_time", "planned_at"],
@@ -3026,9 +3026,11 @@ fn localized_order_status_text(status: &str, lang: Language) -> String {
     }
     let normalized = trimmed.to_ascii_lowercase().replace(['-', ' '], "_");
     let label = match normalized.as_str() {
+        "maker_cancel_accepted_unfilled" => ("挂单已撤未成交", "Maker cancelled unfilled"),
+        "not_submitted_maker_unfilled" => ("挂单未提交未成交", "Maker not submitted unfilled"),
         "accepted" => ("已受理", "Accepted"),
         "new" => ("已创建", "New"),
-        "open" => ("挂单中", "Open"),
+        "open" | "working" | "live" | "open_order" => ("挂单中", "Open"),
         "pending_cancel" => ("撤单中", "Pending cancel"),
         "partially_filled" | "partial_fill" | "partially_fill" => {
             ("部分成交", "Partially filled")
@@ -3055,6 +3057,35 @@ fn localized_order_status_text(status: &str, lang: Language) -> String {
         label.0.to_string()
     } else {
         label.1.to_string()
+    }
+}
+
+fn localized_arbitrage_result_status_text(status: &str, lang: Language) -> String {
+    let trimmed = status.trim();
+    let normalized = trimmed.to_ascii_lowercase().replace(['-', ' '], "_");
+    let label = match normalized.as_str() {
+        "open" => Some(("已开仓", "Opened")),
+        "close" | "manual_close" => Some(("已平仓", "Closed")),
+        "closed" => Some(("已结束", "Closed")),
+        "emergency_close_after_partial_close" => {
+            Some(("部分平仓后应急平仓", "Emergency close after partial close"))
+        }
+        "cross_arb_partial_close_anomaly" | "partial_close_single_leg_anomaly" => {
+            Some(("部分平仓异常", "Partial close anomaly"))
+        }
+        "partial_close_required_emergency_repair" => {
+            Some(("部分平仓需应急修复", "Partial close requires emergency repair"))
+        }
+        _ => None,
+    };
+    if let Some((zh, en)) = label {
+        if lang.is_zh() {
+            zh.to_string()
+        } else {
+            en.to_string()
+        }
+    } else {
+        localized_order_status_text(status, lang)
     }
 }
 

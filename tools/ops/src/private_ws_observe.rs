@@ -584,8 +584,10 @@ fn bitget_private_event_rows(
                 item.get("side").and_then(Value::as_str),
                 number_like(
                     item.get("fillSize")
-                        .or_else(|| item.get("size"))
-                        .or_else(|| item.get("baseVolume")),
+                        .or_else(|| item.get("accBaseVolume"))
+                        .or_else(|| item.get("baseVolume"))
+                        .or_else(|| item.get("filledSize"))
+                        .or_else(|| item.get("size")),
                 ),
                 number_like(item.get("fillPrice").or_else(|| item.get("price"))),
                 "Bitget private order/fill event",
@@ -596,10 +598,47 @@ fn bitget_private_event_rows(
                 "order_status": item.get("status").cloned().unwrap_or(Value::Null),
                 "exchange_order_id": item.get("orderId").cloned().unwrap_or(Value::Null),
                 "client_order_id": item.get("clientOid").cloned().unwrap_or(Value::Null),
+                "fee_amount": bitget_fee_amount(item),
+                "fee_asset": bitget_fee_asset(item),
                 "latency_ms": latency_ms(now, millis_timestamp(item.get("uTime").or_else(|| item.get("cTime")))),
             }))
         })
         .collect()
+}
+
+fn bitget_fee_amount(item: &Value) -> Value {
+    number_like(
+        item.get("fillFee")
+            .or_else(|| item.get("fee"))
+            .or_else(|| item.get("feeAmount"))
+            .or_else(|| {
+                item.get("feeDetail")
+                    .and_then(Value::as_array)
+                    .and_then(|items| items.first())
+                    .and_then(|detail| {
+                        detail
+                            .get("totalFee")
+                            .or_else(|| detail.get("fee"))
+                            .or_else(|| detail.get("totalDeductionFee"))
+                    })
+            }),
+    )
+    .map(|fee| json!(fee.abs()))
+    .unwrap_or(Value::Null)
+}
+
+fn bitget_fee_asset(item: &Value) -> Value {
+    item.get("fillFeeCoin")
+        .or_else(|| item.get("feeCoin"))
+        .or_else(|| item.get("feeCcy"))
+        .or_else(|| {
+            item.get("feeDetail")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|detail| detail.get("feeCoin").or_else(|| detail.get("feeCcy")))
+        })
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn gateio_private_event_rows(
@@ -885,11 +924,40 @@ mod tests {
 
         let bitget = json!({
             "arg": {"channel": "fill"},
-            "data": [{"instId": "ETHUSDT", "fillSize": "0.2", "fillPrice": "3000"}]
+            "data": [{
+                "instId": "ETHUSDT",
+                "fillSize": "0.2",
+                "fillPrice": "3000",
+                "fillFee": "-0.3",
+                "fillFeeCoin": "USDT"
+            }]
         });
         let rows = bitget_private_event_rows(&sanitize_value(&bitget), Some(&bitget), Utc::now());
         assert_eq!(rows[0]["private_kind"], "fill");
         assert_eq!(rows[0]["quote_quantity"], 600.0);
+        assert_eq!(rows[0]["fee_amount"], 0.3);
+        assert_eq!(rows[0]["fee_asset"], "USDT");
+
+        let bitget_cancelled_order = json!({
+            "arg": {"channel": "orders"},
+            "data": [{
+                "instId": "AIOUSDT",
+                "clientOid": "ca-cl-bitget",
+                "status": "canceled",
+                "accBaseVolume": "0",
+                "size": "26",
+                "price": "0.20496"
+            }]
+        });
+        let rows = bitget_private_event_rows(
+            &sanitize_value(&bitget_cancelled_order),
+            Some(&bitget_cancelled_order),
+            Utc::now(),
+        );
+        assert_eq!(rows[0]["private_kind"], "order");
+        assert_eq!(rows[0]["order_status"], "canceled");
+        assert_eq!(rows[0]["quantity"], 0.0);
+        assert_eq!(rows[0]["quote_quantity"], 0.0);
 
         let gate = json!({
             "channel": "futures.usertrades",

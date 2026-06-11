@@ -764,7 +764,15 @@ impl PrivateWsObserveState {
                 || status.is_some_and(|status| {
                     matches!(
                         status.to_ascii_lowercase().as_str(),
-                        "filled" | "full_fill" | "full-fill" | "closed"
+                        "filled"
+                            | "full_fill"
+                            | "full-fill"
+                            | "closed"
+                            | "cancelled"
+                            | "canceled"
+                            | "expired"
+                            | "rejected"
+                            | "reject"
                     )
                 })
             {
@@ -8913,6 +8921,52 @@ fn unfilled_open_leg_json(execution: &PairExecution) -> Value {
     )
 }
 
+#[derive(Clone, Copy, Debug)]
+struct WeightedClosePrice {
+    price: f64,
+    quantity: f64,
+}
+
+fn weighted_close_price<'a>(
+    legs: impl IntoIterator<Item = &'a ReconciledOrderLeg>,
+) -> Option<WeightedClosePrice> {
+    let mut quantity_sum = 0.0;
+    let mut notional_sum = 0.0;
+    for leg in legs {
+        let Some(price) = leg.actual_fill_price else {
+            continue;
+        };
+        let Some(quantity) = leg.actual_base_quantity else {
+            continue;
+        };
+        if price <= 0.0 || quantity <= 0.0 {
+            continue;
+        }
+        quantity_sum += quantity;
+        notional_sum += price * quantity;
+    }
+    (quantity_sum > 0.0).then_some(WeightedClosePrice {
+        price: notional_sum / quantity_sum,
+        quantity: quantity_sum,
+    })
+}
+
+fn combined_close_prices_after_partial_close(
+    close_execution: &PairExecution,
+    final_close_leg: Option<&ReconciledOrderLeg>,
+) -> (Option<WeightedClosePrice>, Option<WeightedClosePrice>) {
+    let normal_close_long = leg_for_role(close_execution, TakerOrderRole::CloseLong);
+    let normal_close_short = leg_for_role(close_execution, TakerOrderRole::CloseShort);
+    let emergency_close_long =
+        final_close_leg.filter(|leg| leg.role == role_name(TakerOrderRole::EmergencyCloseLong));
+    let emergency_close_short =
+        final_close_leg.filter(|leg| leg.role == role_name(TakerOrderRole::EmergencyCloseShort));
+    (
+        weighted_close_price(normal_close_long.into_iter().chain(emergency_close_long)),
+        weighted_close_price(normal_close_short.into_iter().chain(emergency_close_short)),
+    )
+}
+
 fn emergency_close_after_partial_close_event(
     bundle: &LiveOpenBundle,
     close_execution: &PairExecution,
@@ -8922,6 +8976,15 @@ fn emergency_close_after_partial_close_event(
     failure_reason: Option<String>,
 ) -> Value {
     let final_close_leg = emergency_close_fallback_leg.or(emergency_close_leg);
+    let (combined_long_close, combined_short_close) =
+        combined_close_prices_after_partial_close(close_execution, final_close_leg);
+    let close_actual_long_price = combined_long_close.map(|weighted| weighted.price);
+    let close_actual_short_price = combined_short_close.map(|weighted| weighted.price);
+    let long_close_quantity = combined_long_close.map(|weighted| weighted.quantity);
+    let short_close_quantity = combined_short_close.map(|weighted| weighted.quantity);
+    let close_actual_spread_pct = close_actual_long_price
+        .zip(close_actual_short_price)
+        .map(|(long, short)| close_spread_pct(long, short));
     let emergency_close_pnl_usdt =
         final_close_leg.and_then(|close_leg| emergency_close_pnl(open_leg, close_leg));
     let normal_close_long_pnl_usdt = leg_for_role(close_execution, TakerOrderRole::CloseLong)
@@ -8981,6 +9044,13 @@ fn emergency_close_after_partial_close_event(
         "quantity": actual_base_quantity,
         "open_price": open_price,
         "close_price": close_price,
+        "close_actual_long_price": close_actual_long_price,
+        "close_actual_short_price": close_actual_short_price,
+        "close_actual_spread_pct": close_actual_spread_pct,
+        "long_close_price": close_actual_long_price,
+        "short_close_price": close_actual_short_price,
+        "long_close_quantity": long_close_quantity,
+        "short_close_quantity": short_close_quantity,
         "actual_pnl_usdt": pnl_json(actual_pnl_usdt),
         "realized_profit_usdt": pnl_json(actual_pnl_usdt),
         "normal_close_pnl_usdt": pnl_json(normal_close_pnl_usdt),
@@ -9402,7 +9472,10 @@ async fn refresh_order_leg_from_rest(
     match query {
         Ok(response) => {
             if let Some(order) = response.order.as_ref() {
-                leg.status = format!("{:?}", order.status).to_ascii_lowercase();
+                let next_status = format!("{:?}", order.status).to_ascii_lowercase();
+                if !(next_status == "unknown" && is_terminal_order_status(&leg.status)) {
+                    leg.status = next_status;
+                }
                 leg.exchange_order_id = order
                     .exchange_order_id
                     .clone()
@@ -9780,7 +9853,7 @@ fn sum_optional_pnls<const N: usize>(values: [Option<f64>; N]) -> Option<f64> {
         seen = true;
         total += value;
     }
-    seen.then_some(round_pnl_6(total))
+    seen.then_some(total)
 }
 
 fn round_pnl_6(value: f64) -> f64 {
@@ -10493,6 +10566,31 @@ fn is_terminal_filled_order_status(status: &str) -> bool {
     )
 }
 
+fn is_terminal_unfilled_order_status(status: &str) -> bool {
+    matches!(
+        status
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', ' '], "_")
+            .as_str(),
+        "cancelled"
+            | "canceled"
+            | "cancel"
+            | "ioc_cancelled"
+            | "ioc_canceled"
+            | "expired"
+            | "expire"
+            | "expired_in_match"
+            | "rejected"
+            | "reject"
+            | "submit_failed"
+    )
+}
+
+fn is_terminal_order_status(status: &str) -> bool {
+    is_terminal_filled_order_status(status) || is_terminal_unfilled_order_status(status)
+}
+
 fn order_quantity_matches_planned(actual: f64, planned: f64) -> bool {
     let tolerance = (planned.abs() * 1e-9).max(1e-9);
     (actual - planned).abs() <= tolerance
@@ -10509,6 +10607,7 @@ fn apply_private_ws_event_to_leg(
     let private_kind = event.get("private_kind").and_then(Value::as_str);
     let status_text = event.get("order_status").and_then(Value::as_str);
     let terminal_status = status_text.is_some_and(is_terminal_filled_order_status);
+    let terminal_unfilled_status = status_text.is_some_and(is_terminal_unfilled_order_status);
     let cumulative_quantity = f64_field(
         event,
         &[
@@ -10544,6 +10643,14 @@ fn apply_private_ws_event_to_leg(
         "private_ws_confirmed".to_string()
     };
     leg.status = status;
+    if terminal_unfilled_status {
+        leg.actual_order_quantity = None;
+        leg.actual_fill_price = None;
+        leg.actual_base_quantity = None;
+        leg.actual_notional_usdt = None;
+        leg.filled_at = datetime_any_field(event, &["observed_at"]).or(Some(Utc::now()));
+        return;
+    }
     let event_quantity = cumulative_quantity.or_else(|| {
         if terminal_status {
             Some(draft.quantity)
@@ -10568,6 +10675,19 @@ fn apply_private_ws_event_to_leg(
     .or_else(|| f64_field(event, &["price", "fillPrice", "execPrice", "px"]));
     if leg.actual_order_quantity.is_some() {
         leg.actual_fill_price = event_fill_price;
+    }
+    if let Some(fee) = f64_field(
+        event,
+        &[
+            "fee_amount",
+            "fee",
+            "fillFee",
+            "commission",
+            "commission_amount",
+            "n",
+        ],
+    ) {
+        leg.fee_usdt = fee.abs();
     }
     leg.filled_at = datetime_any_field(event, &["observed_at"]).or(Some(Utc::now()));
     if let (Some(quantity), Some(price)) = (leg.actual_order_quantity, leg.actual_fill_price) {
@@ -13725,6 +13845,7 @@ mod tests {
             "exchange_order_id": "123456",
             "filledSize": "66",
             "priceAvg": "0.08399",
+            "fee_amount": 0.00320736,
             "observed_at": Utc::now(),
         });
 
@@ -13735,6 +13856,66 @@ mod tests {
         assert_eq!(leg.actual_order_quantity, Some(66.0));
         assert_eq!(leg.actual_base_quantity, Some(66.0));
         assert_eq!(leg.actual_fill_price, Some(0.08399));
+        assert_eq!(leg.fee_usdt, 0.00320736);
+    }
+
+    #[test]
+    fn private_ws_bitget_cancelled_order_should_not_set_fill_details() {
+        let symbol = StrategyCanonicalSymbol::new("AIO", "USDT");
+        let draft = TakerOrderDraft {
+            exchange: StrategyExchangeId::new("bitget"),
+            canonical_symbol: symbol.clone(),
+            side: StrategyOrderSide::Sell,
+            base_quantity: 26.0,
+            quantity: 26.0,
+            quantity_unit: QuantityUnit::Base,
+            contract_size: 1.0,
+            reference_price: 0.206,
+            worst_acceptable_price: 0.20496,
+            reduce_only: true,
+            role: TakerOrderRole::CloseLong,
+        };
+        let mut leg = ReconciledOrderLeg {
+            exchange: "bitget".to_string(),
+            symbol: symbol.to_string(),
+            role: "close_long".to_string(),
+            side: "sell".to_string(),
+            position_side: "long".to_string(),
+            client_order_id: Some("ca-cl-bitget".to_string()),
+            exchange_order_id: None,
+            accepted: true,
+            status: "accepted".to_string(),
+            planned_price: 0.206,
+            planned_base_quantity: 26.0,
+            planned_order_quantity: 26.0,
+            actual_fill_price: None,
+            actual_base_quantity: None,
+            actual_order_quantity: None,
+            actual_notional_usdt: None,
+            fee_usdt: 0.0,
+            submitted_at: None,
+            acked_at: None,
+            filled_at: None,
+            error: None,
+        };
+        let event = json!({
+            "exchange": "bitget",
+            "private_kind": "order",
+            "order_status": "canceled",
+            "client_order_id": "ca-cl-bitget",
+            "exchange_order_id": "1448787737019301889",
+            "quantity": 26.0,
+            "price": 0.20496,
+            "observed_at": Utc::now(),
+        });
+
+        apply_private_ws_event_to_leg(&mut leg, &draft, &event);
+
+        assert_eq!(leg.status, "canceled");
+        assert!(!leg.filled());
+        assert_eq!(leg.actual_order_quantity, None);
+        assert_eq!(leg.actual_base_quantity, None);
+        assert_eq!(leg.actual_fill_price, None);
     }
 
     #[tokio::test]
@@ -14381,6 +14562,90 @@ mod tests {
         assert!((emergency_pnl - 0.14279).abs() < 1e-12);
         assert!((actual_pnl - (-0.00545)).abs() < 1e-12);
         assert!(event["close_net_profit_pct"].as_f64().unwrap() < 0.0);
+        assert!((event["close_actual_long_price"].as_f64().unwrap() - 0.4898).abs() < 1e-12);
+        assert!((event["close_actual_short_price"].as_f64().unwrap() - 0.4936).abs() < 1e-12);
+        assert_eq!(event["long_close_quantity"], json!(10.9));
+        assert_eq!(event["short_close_quantity"], json!(10.9));
+        let spread = event["close_actual_spread_pct"].as_f64().unwrap();
+        assert!((spread - close_spread_pct(0.4898, 0.4936)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn partial_close_emergency_event_should_include_residual_leg_fees_in_pnl() {
+        let symbol = StrategyCanonicalSymbol::new("AIO", "USDT");
+        let opened_at = Utc::now() - ChronoDuration::seconds(60);
+        let mut open_long = filled_leg("bitget", "open_long", "buy", "long", 0.2056, 26.0);
+        let mut open_short = filled_leg("binance", "open_short", "sell", "short", 0.20827, 26.0);
+        let mut failed_close_long =
+            filled_leg("bitget", "close_long", "sell", "long", 0.20496, 26.0);
+        let mut normal_close_short =
+            filled_leg("binance", "close_short", "buy", "short", 0.20561, 26.0);
+        let mut emergency_close_long = filled_leg(
+            "bitget",
+            "emergency_close_long",
+            "sell",
+            "long",
+            0.20405,
+            26.0,
+        );
+        open_long.fee_usdt = 0.00320736;
+        open_short.fee_usdt = 0.001083;
+        normal_close_short.fee_usdt = 0.00267293;
+        emergency_close_long.fee_usdt = 0.00318318;
+        failed_close_long.status = "canceled".to_string();
+        failed_close_long.actual_fill_price = None;
+        failed_close_long.actual_base_quantity = None;
+        failed_close_long.actual_order_quantity = None;
+        failed_close_long.actual_notional_usdt = None;
+
+        let bundle = LiveOpenBundle {
+            bundle_id: "server-live-AIO-USDT-binance-bitget-sc-1781143823931".to_string(),
+            position: OpenArbitragePosition {
+                bundle_id: "server-live-AIO-USDT-binance-bitget-sc-1781143823931".to_string(),
+                canonical_symbol: symbol,
+                long_exchange: StrategyExchangeId::new("bitget"),
+                short_exchange: StrategyExchangeId::new("binance"),
+                quantity: 26.0,
+                long_entry_price: 0.2056,
+                short_entry_price: 0.20827,
+                opened_at,
+            },
+            open_long,
+            open_short,
+            opened_at,
+            open_fee_usdt: 0.00429036,
+        };
+        let close_execution = PairExecution {
+            requested_at: Utc::now(),
+            first: failed_close_long,
+            second: normal_close_short,
+        };
+
+        let event = emergency_close_after_partial_close_event(
+            &bundle,
+            &close_execution,
+            &bundle.open_long,
+            Some(&emergency_close_long),
+            None,
+            None,
+        );
+
+        assert_eq!(event["normal_close_short_pnl_usdt"], json!(0.065404));
+        assert_eq!(event["emergency_close_pnl_usdt"], json!(-0.046691));
+        assert_eq!(event["actual_pnl_usdt"], json!(0.018714));
+        assert!((event["close_actual_long_price"].as_f64().unwrap() - 0.20405).abs() < 1e-12);
+        assert!((event["close_actual_short_price"].as_f64().unwrap() - 0.20561).abs() < 1e-12);
+    }
+
+    #[test]
+    fn weighted_close_price_should_average_multiple_fill_prices() {
+        let first = filled_leg("bitget", "close_long", "sell", "long", 10.0, 2.0);
+        let second = filled_leg("bitget", "emergency_close_long", "sell", "long", 12.0, 3.0);
+
+        let weighted = weighted_close_price([&first, &second]).expect("weighted price");
+
+        assert_eq!(weighted.quantity, 5.0);
+        assert!((weighted.price - 11.2).abs() < 1e-12);
     }
 
     #[test]
