@@ -1,5 +1,6 @@
 use rustcta_exchange_api::{
-    ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeClient, FundingRatesRequest, OrderBookRequest, SymbolRulesRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
 use serde_json::json;
@@ -197,4 +198,54 @@ async fn bitget_adapter_should_load_depth_limited_order_book_from_public_rest() 
     );
     assert_eq!(request.query.get("type").map(String::as_str), Some("step0"));
     assert_eq!(request.query.get("limit").map(String::as_str), Some("15"));
+}
+
+#[tokio::test]
+async fn bitget_adapter_should_load_funding_rates_from_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "00000",
+        "data": [
+            {
+                "symbol": "BTCUSDT",
+                "fundingRate": "0.00011",
+                "nextFundingRate": "0.00009",
+                "fundingTime": "1743062400000",
+                "markPrice": "65002.1"
+            }
+        ]
+    })])
+    .await;
+    let adapter = BitgetGatewayAdapter::new(BitgetGatewayConfig {
+        rest_base_url: base_url,
+        ..BitgetGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    assert!(adapter.capabilities().supports_funding_rates);
+    let response = adapter
+        .get_funding_rates(FundingRatesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("funding"),
+            symbols: vec![perpetual_symbol_scope()],
+        })
+        .await
+        .expect("funding");
+
+    assert_eq!(response.rates.len(), 1);
+    assert_eq!(response.rates[0].funding_rate, "0.00011");
+    assert_eq!(
+        response.rates[0].predicted_funding_rate.as_deref(),
+        Some("0.00009")
+    );
+    assert!(response.rates[0].next_funding_time.is_some());
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.path, "/api/v2/mix/market/current-fund-rate");
+    assert_eq!(
+        request.query.get("productType").map(String::as_str),
+        Some("USDT-FUTURES")
+    );
+    assert_eq!(
+        request.query.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
+    );
 }

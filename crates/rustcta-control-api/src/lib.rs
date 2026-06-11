@@ -1808,6 +1808,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn extra_strategy_snapshot_path_should_append_typed_runtime_snapshot() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-extra-strategy-snapshot-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let legacy_path = temp_dir.join("dashboard_snapshot.json");
+        let extra_path = temp_dir.join("spot_futures_snapshot.json");
+        std::fs::write(
+            &legacy_path,
+            serde_json::json!({
+                "status": "running",
+                "cross_arb_dashboard": {
+                    "summary": {"active": true}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &extra_path,
+            serde_json::json!({
+                "schema_version": 1,
+                "strategy_id": "spot_futures_arb_live",
+                "strategy_kind": "spot_futures_arbitrage",
+                "run_id": "server-live",
+                "status": null,
+                "generated_at": "2026-06-10T16:00:00Z",
+                "source": "typed_runtime_snapshot",
+                "detail": {
+                    "active_symbols": ["ORDI/USDT"],
+                    "settings": {"enable_live_trading": false}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let app = router(
+            ControlApiState::empty_local()
+                .with_legacy_dashboard_snapshot_path(&legacy_path)
+                .with_extra_strategy_snapshot_path(&extra_path),
+        );
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategy-snapshots")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|snapshot| snapshot["strategy_kind"] == "cross_exchange_arbitrage"));
+        let spot_futures = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|snapshot| snapshot["strategy_kind"] == "spot_futures_arbitrage")
+            .unwrap();
+        assert_eq!(spot_futures["strategy_id"], "spot_futures_arb_live");
+        assert_eq!(spot_futures["source"], "typed_runtime_snapshot");
+        assert_eq!(
+            spot_futures["detail"]["active_symbols"][0],
+            serde_json::json!("ORDI/USDT")
+        );
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
     async fn cross_arb_dashboard_should_use_runner_dashboard_snapshot() {
         let legacy = serde_json::json!({
             "generated_at": "2026-06-08T10:00:00Z",

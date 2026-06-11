@@ -1,5 +1,6 @@
 use rustcta_exchange_api::{
-    ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeClient, FundingRatesRequest, OrderBookRequest, SymbolRulesRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
 use serde_json::json;
@@ -195,5 +196,46 @@ async fn gateio_adapter_should_load_perpetual_rules_and_order_book_from_public_r
     assert_eq!(
         requests[1].query.get("with_id").map(String::as_str),
         Some("true")
+    );
+}
+
+#[tokio::test]
+async fn gateio_adapter_should_load_funding_rates_from_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!(
+        {
+            "contract": "BTC_USDT",
+            "funding_rate": "0.0001",
+            "funding_rate_indicative": "0.00008",
+            "funding_next_apply": 1743062400,
+            "mark_price": "65001.2"
+        }
+    )])
+    .await;
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        rest_base_url: base_url,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    assert!(adapter.capabilities().supports_funding_rates);
+    let response = adapter
+        .get_funding_rates(FundingRatesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("funding"),
+            symbols: vec![perpetual_symbol_scope("BTCUSDT")],
+        })
+        .await
+        .expect("funding");
+
+    assert_eq!(response.rates.len(), 1);
+    assert_eq!(response.rates[0].funding_rate, "0.0001");
+    assert_eq!(
+        response.rates[0].predicted_funding_rate.as_deref(),
+        Some("0.00008")
+    );
+    assert!(response.rates[0].next_funding_time.is_some());
+    assert_eq!(
+        seen.lock().unwrap()[0].path,
+        "/futures/usdt/contracts/BTC_USDT".to_string()
     );
 }

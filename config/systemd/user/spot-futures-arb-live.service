@@ -1,0 +1,21 @@
+[Unit]
+Description=RustCTA Spot Futures Arbitrage Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cta/rustcta
+Environment=RUST_LOG=warn,rustcta_strategy_spot_futures_arbitrage=info
+EnvironmentFile=-/home/cta/rustcta/.env
+ExecStartPre=/usr/bin/mkdir -p /home/cta/rustcta/logs/spot_futures_arbitrage
+ExecStart=/home/cta/rustcta/target/release/spot-futures-arbitrage-runtime --config /home/cta/rustcta/config/spot_futures_arbitrage_usdt.yml --strategy-id spot_futures_arb_live --run-id server-live --tenant-id server --account-id spot_futures_arb --execution-mode router-dry-run --dashboard-snapshot-path /home/cta/rustcta/logs/spot_futures_arbitrage/dashboard_snapshot.json --quiet-stdout
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=append:/home/cta/rustcta/logs/spot_futures_arbitrage/spot-futures-arb-live.service.log
+StandardError=append:/home/cta/rustcta/logs/spot_futures_arbitrage/spot-futures-arb-live.service.log
+
+[Install]
+WantedBy=default.target

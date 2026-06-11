@@ -6,12 +6,12 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
     CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, HeartbeatDirection, HeartbeatPolicy,
-    HistoryCapability, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
-    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
+    FundingRatesResponse, HeartbeatDirection, HeartbeatPolicy, HistoryCapability,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -238,6 +238,7 @@ impl ExchangeClient for GateIoGatewayAdapter {
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
+        capabilities.supports_funding_rates = true;
         capabilities.supports_balances = private;
         capabilities.supports_positions = private;
         capabilities.supports_fees = private;
@@ -429,6 +430,13 @@ impl ExchangeClient for GateIoGatewayAdapter {
 
     async fn get_fees(&self, request: FeesRequest) -> ExchangeApiResult<FeesResponse> {
         self.get_fees_impl(request).await
+    }
+
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.get_funding_rates_impl(request).await
     }
 
     async fn place_order(

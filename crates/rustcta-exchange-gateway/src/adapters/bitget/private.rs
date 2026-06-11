@@ -9,7 +9,9 @@ use rustcta_exchange_api::{
     PositionsResponse, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
     RecentFillsRequest, RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
+use rustcta_types::{
+    ExchangeErrorClass, MarketType, OrderSide, OrderStatus, OrderType, PositionSide,
+};
 use serde_json::{json, Value};
 
 use super::parser::normalize_bitget_symbol;
@@ -371,47 +373,71 @@ impl BitgetGatewayAdapter {
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
         self.ensure_private_rest("bitget.query_order")?;
-        let mut params = HashMap::new();
-        params.insert(
+        let mut base_params = HashMap::new();
+        base_params.insert(
             "symbol".to_string(),
             normalize_bitget_symbol(&request.symbol.exchange_symbol.symbol)?,
         );
         if request.symbol.market_type == MarketType::Perpetual {
-            params.insert(
+            base_params.insert(
                 "productType".to_string(),
                 BITGET_PERP_PRODUCT_TYPE.to_string(),
             );
         }
-        match (&request.exchange_order_id, &request.client_order_id) {
-            (Some(exchange_order_id), _) => {
-                params.insert("orderId".to_string(), exchange_order_id.clone());
-            }
-            (None, Some(client_order_id)) => {
-                params.insert("clientOid".to_string(), client_order_id.clone());
-            }
-            (None, None) => {
-                return Err(ExchangeApiError::InvalidRequest {
-                    message: "bitget.query_order requires exchange_order_id or client_order_id"
-                        .to_string(),
-                });
-            }
+        let mut attempts = Vec::new();
+        if let Some(exchange_order_id) = request.exchange_order_id.as_deref() {
+            attempts.push(bitget_order_query_params(
+                &base_params,
+                "orderId",
+                exchange_order_id,
+            ));
+        }
+        if let Some(client_order_id) = request.client_order_id.as_deref() {
+            attempts.push(bitget_order_query_params(
+                &base_params,
+                "clientOid",
+                client_order_id,
+            ));
+        }
+        if attempts.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "bitget.query_order requires exchange_order_id or client_order_id"
+                    .to_string(),
+            });
         }
         let endpoint = query_endpoint(request.symbol.market_type);
-        let value = self
-            .rest
-            .send_signed_get("bitget.query_order", endpoint, &params)
-            .await?;
-        let order = parse_order(
-            &self.exchange_id,
-            Some(&request.symbol),
-            request.symbol.market_type,
-            &value,
-        )?;
-        Ok(QueryOrderResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
-            order,
-        })
+        let attempt_count = attempts.len();
+        for (index, params) in attempts.into_iter().enumerate() {
+            match self
+                .rest
+                .send_signed_get("bitget.query_order", endpoint, &params)
+                .await
+            {
+                Ok(value) => {
+                    let order = parse_order(
+                        &self.exchange_id,
+                        Some(&request.symbol),
+                        request.symbol.market_type,
+                        &value,
+                    )?;
+                    if order.is_some() || index + 1 == attempt_count {
+                        return Ok(QueryOrderResponse {
+                            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                            metadata: response_metadata(
+                                self.exchange_id.clone(),
+                                request.context.request_id,
+                            ),
+                            order,
+                        });
+                    }
+                }
+                Err(error) if index + 1 < attempt_count && is_order_lookup_retryable(&error) => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("bitget query_order has at least one lookup attempt")
     }
 
     pub(super) async fn get_open_orders_impl(
@@ -621,6 +647,24 @@ fn bitget_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Val
         body["clientOid"] = Value::String(non_empty("client_order_id", client_order_id)?);
     }
     Ok(body)
+}
+
+fn bitget_order_query_params(
+    base_params: &HashMap<String, String>,
+    id_field: &str,
+    id_value: &str,
+) -> HashMap<String, String> {
+    let mut params = base_params.clone();
+    params.insert(id_field.to_string(), id_value.to_string());
+    params
+}
+
+fn is_order_lookup_retryable(error: &ExchangeApiError) -> bool {
+    matches!(
+        error,
+        ExchangeApiError::Exchange(exchange_error)
+            if exchange_error.class == ExchangeErrorClass::OrderNotFound
+    )
 }
 
 fn bitget_quote_market_order_body(request: &QuoteMarketOrderRequest) -> ExchangeApiResult<Value> {

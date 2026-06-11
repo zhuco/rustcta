@@ -11,6 +11,7 @@ use crate::exchange_latency::ExchangeLatencyPanel;
 use crate::funding_arb::FundingArbPanel;
 use crate::i18n::{command_label, s, t};
 use crate::spot_arb::SpotArbPanel;
+use crate::spot_futures_arb::SpotFuturesArbPanel;
 use crate::storage::{load_active_view, load_language, save_active_view, save_language};
 use crate::types::{ControlPanelView, DashboardData, Language};
 use crate::ui::ControlActionPanel;
@@ -251,6 +252,19 @@ fn render_active_view(
                 ControlActionPanel { lang }
             }
         }
+        ControlPanelView::SpotFuturesArb => {
+            let snapshot = data();
+            rsx! {
+                SpotFuturesArbPanel {
+                    spot_futures_arb: snapshot.spot_futures_arb,
+                    processes: snapshot.processes,
+                    token,
+                    message,
+                    lang
+                }
+                ControlActionPanel { lang }
+            }
+        }
         ControlPanelView::FundingArb => {
             let snapshot = data();
             rsx! {
@@ -368,6 +382,7 @@ fn apply_strategy_live_fetch(
     let StrategyLiveFetch {
         spot_arb,
         cross_arb,
+        spot_futures_arb,
         strategy_logs,
         updated,
         errors,
@@ -376,6 +391,7 @@ fn apply_strategy_live_fetch(
         let mut next = data();
         next.spot_arb = spot_arb;
         next.cross_arb = cross_arb;
+        next.spot_futures_arb = spot_futures_arb;
         next.strategy_logs = strategy_logs;
         data.set(next);
     }

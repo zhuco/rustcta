@@ -1034,7 +1034,8 @@ mod tests {
 
     #[test]
     fn migrated_core_should_preserve_orderable_wide_defaults() {
-        let config = FundingCoreConfig::default();
+        let mut config = FundingCoreConfig::default();
+        config.mode = "observe".to_string();
         let now = Utc::now();
         let mut candidate =
             candidate_from_snapshot(funding_snapshot_for_test(now), &config, now).unwrap();
@@ -1051,6 +1052,32 @@ mod tests {
         candidate.mark_price = Some(10.0);
         let mut restrictive = funding_instrument_for_test();
         restrictive.min_qty = 100.0;
+        assert!(!candidate_orderable(&candidate, &[restrictive], &config));
+    }
+
+    #[test]
+    fn migrated_core_should_reject_unorderable_live_candidates() {
+        let mut config = FundingCoreConfig::default();
+        config.mode = "live".to_string();
+        config.execution.notional_usdt = 10.0;
+        let now = Utc::now();
+        let mut candidate =
+            candidate_from_snapshot(funding_snapshot_for_test(now), &config, now).unwrap();
+
+        assert!(!candidate_orderable(&candidate, &[], &config));
+
+        candidate.mark_price = None;
+        candidate.index_price = None;
+        assert!(!candidate_orderable(
+            &candidate,
+            &[funding_instrument_for_test()],
+            &config
+        ));
+
+        candidate.mark_price = Some(100.0);
+        let mut restrictive = funding_instrument_for_test();
+        restrictive.min_qty = 1.0;
+        assert_eq!(planned_quantity(10.0, 100.0, &restrictive), None);
         assert!(!candidate_orderable(&candidate, &[restrictive], &config));
     }
 

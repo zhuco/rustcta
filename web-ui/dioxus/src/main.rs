@@ -10,6 +10,7 @@ mod funding_arb;
 mod i18n;
 mod overview;
 mod spot_arb;
+mod spot_futures_arb;
 mod storage;
 mod types;
 mod ui;

@@ -10515,6 +10515,16 @@ fn apply_private_ws_event_to_leg(
             "cumulative_quantity",
             "cumulative_filled_quantity",
             "filled_quantity",
+            "filledSize",
+            "accBaseVolume",
+            "baseVolume",
+            "fillSz",
+            "fillSize",
+            "filledQty",
+            "fillQuantity",
+            "filledAmount",
+            "execQty",
+            "executedQty",
             "cum_qty",
             "cumQty",
             "z",
@@ -10544,8 +10554,18 @@ fn apply_private_ws_event_to_leg(
         }
     });
     leg.actual_order_quantity = event_quantity;
-    let event_fill_price = f64_field(event, &["average_fill_price", "avg_price", "avgPrice"])
-        .or_else(|| f64_field(event, &["price"]));
+    let event_fill_price = f64_field(
+        event,
+        &[
+            "average_fill_price",
+            "avg_price",
+            "avgPrice",
+            "averagePrice",
+            "priceAvg",
+            "avgPx",
+        ],
+    )
+    .or_else(|| f64_field(event, &["price", "fillPrice", "execPrice", "px"]));
     if leg.actual_order_quantity.is_some() {
         leg.actual_fill_price = event_fill_price;
     }
@@ -13656,6 +13676,65 @@ mod tests {
         assert_eq!(leg.actual_order_quantity, Some(62.0));
         assert_eq!(leg.actual_base_quantity, Some(62.0));
         assert_eq!(leg.actual_fill_price, Some(0.0887));
+    }
+
+    #[test]
+    fn private_ws_bitget_fill_fields_should_confirm_completed_order() {
+        let symbol = StrategyCanonicalSymbol::new("ESPORTS", "USDT");
+        let draft = TakerOrderDraft {
+            exchange: StrategyExchangeId::new("bitget"),
+            canonical_symbol: symbol.clone(),
+            side: StrategyOrderSide::Sell,
+            base_quantity: 66.0,
+            quantity: 66.0,
+            quantity_unit: QuantityUnit::Base,
+            contract_size: 1.0,
+            reference_price: 0.08399,
+            worst_acceptable_price: 0.08231,
+            reduce_only: false,
+            role: TakerOrderRole::OpenShort,
+        };
+        let mut leg = ReconciledOrderLeg {
+            exchange: "bitget".to_string(),
+            symbol: symbol.to_string(),
+            role: "open_short".to_string(),
+            side: "sell".to_string(),
+            position_side: "short".to_string(),
+            client_order_id: Some("ca-os-bitget".to_string()),
+            exchange_order_id: None,
+            accepted: true,
+            status: "accepted".to_string(),
+            planned_price: 0.08399,
+            planned_base_quantity: 66.0,
+            planned_order_quantity: 66.0,
+            actual_fill_price: None,
+            actual_base_quantity: None,
+            actual_order_quantity: None,
+            actual_notional_usdt: None,
+            fee_usdt: 0.0,
+            submitted_at: None,
+            acked_at: None,
+            filled_at: None,
+            error: None,
+        };
+        let event = json!({
+            "exchange": "bitget",
+            "private_kind": "order",
+            "order_status": "full-fill",
+            "client_order_id": "ca-os-bitget",
+            "exchange_order_id": "123456",
+            "filledSize": "66",
+            "priceAvg": "0.08399",
+            "observed_at": Utc::now(),
+        });
+
+        apply_private_ws_event_to_leg(&mut leg, &draft, &event);
+
+        assert_eq!(leg.status, "full-fill");
+        assert!(leg.filled());
+        assert_eq!(leg.actual_order_quantity, Some(66.0));
+        assert_eq!(leg.actual_base_quantity, Some(66.0));
+        assert_eq!(leg.actual_fill_price, Some(0.08399));
     }
 
     #[tokio::test]

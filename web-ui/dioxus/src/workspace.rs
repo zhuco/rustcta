@@ -358,6 +358,13 @@ impl StrategyCreatePreset {
         log_path: "logs/control_panel/funding-arb-local.log",
     };
 
+    const SPOT_FUTURES_ARB: Self = Self {
+        kind: "spot_futures_arbitrage",
+        strategy_id: "spot-futures-arb-local",
+        config_path: "config/spot_futures_arbitrage_usdt.yml",
+        log_path: "logs/control_panel/spot-futures-arb-local.log",
+    };
+
     const CUSTOM: Self = Self {
         kind: "custom",
         strategy_id: "custom-local",
@@ -365,9 +372,10 @@ impl StrategyCreatePreset {
         log_path: "logs/custom-local.log",
     };
 
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::SPOT_ARB,
         Self::CROSS_ARB,
+        Self::SPOT_FUTURES_ARB,
         Self::FUNDING_ARB,
         Self::CUSTOM,
     ];

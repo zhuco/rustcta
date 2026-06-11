@@ -51,6 +51,7 @@ pub(crate) struct DashboardFetch {
 pub(crate) struct StrategyLiveFetch {
     pub(crate) spot_arb: Value,
     pub(crate) cross_arb: Value,
+    pub(crate) spot_futures_arb: Value,
     pub(crate) strategy_logs: Value,
     pub(crate) updated: usize,
     pub(crate) errors: Vec<String>,
@@ -186,6 +187,11 @@ pub(crate) async fn fetch_strategy_live_data(
             &strategy_snapshots,
             "cross_exchange_arbitrage",
             previous.cross_arb,
+        ),
+        spot_futures_arb: strategy_snapshot_detail(
+            &strategy_snapshots,
+            "spot_futures_arbitrage",
+            previous.spot_futures_arb,
         ),
         strategy_logs: fetch_or_previous(
             API_STRATEGY_LOGS,
@@ -428,6 +434,11 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
                 &strategy_snapshots,
                 "cross_exchange_arbitrage",
                 previous.cross_arb,
+            ),
+            spot_futures_arb: strategy_snapshot_detail(
+                &strategy_snapshots,
+                "spot_futures_arbitrage",
+                previous.spot_futures_arb,
             ),
             api_keys,
             strategy_logs: fetch_or_previous(

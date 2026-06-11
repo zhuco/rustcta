@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRateSnapshot, SymbolRules,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
@@ -210,6 +211,46 @@ pub fn parse_orderbook_snapshot(
         .or_else(|| value.get("t"))
         .and_then(gateio_timestamp);
     Ok(snapshot)
+}
+
+pub fn parse_funding_rate_snapshot(
+    exchange_id: &ExchangeId,
+    symbol: rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<FundingRateSnapshot> {
+    let data = value
+        .as_array()
+        .and_then(|items| items.first())
+        .unwrap_or(value);
+    let funding_rate = string_or_number(
+        data.get("funding_rate")
+            .or_else(|| data.get("funding_rate_indicative"))
+            .or_else(|| data.get("fundingRate")),
+    )
+    .ok_or_else(|| parse_error(exchange_id.clone(), "missing funding_rate", data))?;
+    Ok(FundingRateSnapshot {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol,
+        funding_rate,
+        predicted_funding_rate: string_or_number(
+            data.get("funding_rate_indicative")
+                .or_else(|| data.get("predicted_funding_rate"))
+                .or_else(|| data.get("predictedFundingRate")),
+        ),
+        funding_time: data
+            .get("funding_next_apply")
+            .or_else(|| data.get("funding_time"))
+            .or_else(|| data.get("fundingTime"))
+            .and_then(gateio_timestamp),
+        next_funding_time: data
+            .get("funding_next_apply")
+            .or_else(|| data.get("next_funding_time"))
+            .or_else(|| data.get("nextFundingTime"))
+            .and_then(gateio_timestamp),
+        mark_price: string_or_number(data.get("mark_price").or_else(|| data.get("markPrice"))),
+        source: Some("gateio_public_futures_tickers".to_string()),
+        updated_at: Utc::now(),
+    })
 }
 
 pub fn normalize_gateio_symbol(symbol: &str) -> ExchangeApiResult<String> {

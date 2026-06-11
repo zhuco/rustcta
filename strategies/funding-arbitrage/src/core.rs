@@ -482,10 +482,10 @@ pub fn candidate_orderable(
                 .map(|symbol| instrument.exchange_symbol == *symbol)
                 .unwrap_or(true)
     }) else {
-        return true;
+        return !config.is_live_mode();
     };
     let Some(price) = candidate.mark_price.or(candidate.index_price) else {
-        return true;
+        return !config.is_live_mode();
     };
     planned_quantity(config.execution.notional_usdt, price, instrument).is_some()
 }
@@ -515,7 +515,17 @@ pub fn planned_quantity(notional: f64, price: f64, instrument: &FundingInstrumen
     let steps = (raw_quantity / quantity_step).ceil().max(1.0);
     let quantity = steps * quantity_step;
     let planned_notional = quantity * price * contract_size;
-    (planned_notional <= notional * 1.2).then_some(quantity)
+    let epsilon = quantity_step.abs().max(1.0) * 1e-9;
+    if quantity + epsilon < instrument.min_qty {
+        return None;
+    }
+    if instrument.min_notional > 0.0 && planned_notional + epsilon < instrument.min_notional {
+        return None;
+    }
+    if planned_notional > notional * 1.2 {
+        return None;
+    }
+    Some(quantity)
 }
 
 pub fn eligible_symbols(

@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
-    SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRatesRequest, FundingRatesResponse,
+    OrderBookRequest, OrderBookResponse, SymbolRulesRequest, SymbolRulesResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::MarketType;
 
 use super::parser::{
-    normalize_depth, normalize_gateio_symbol, parse_orderbook_snapshot,
-    parse_perpetual_symbol_rules, parse_symbol_rules,
+    normalize_depth, normalize_gateio_symbol, parse_funding_rate_snapshot,
+    parse_orderbook_snapshot, parse_perpetual_symbol_rules, parse_symbol_rules,
 };
 use super::GateIoGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -119,6 +121,46 @@ impl GateIoGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
             order_book,
+        })
+    }
+
+    pub(super) async fn get_funding_rates_impl(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        if request.symbols.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "gateio.get_funding_rates requires at least one symbol".to_string(),
+            });
+        }
+        let mut rates = Vec::with_capacity(request.symbols.len());
+        for symbol in request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            self.ensure_supported_market(symbol.market_type)?;
+            if symbol.market_type != MarketType::Perpetual {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "gateio.get_funding_rates_spot_unsupported",
+                });
+            }
+            let contract = normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?;
+            let value = self
+                .rest
+                .send_public_request(
+                    &format!("/futures/usdt/contracts/{contract}"),
+                    &HashMap::new(),
+                )
+                .await?;
+            rates.push(parse_funding_rate_snapshot(
+                &self.exchange_id,
+                symbol,
+                &value,
+            )?);
+        }
+        Ok(FundingRatesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            rates,
         })
     }
 }

@@ -12,7 +12,9 @@ use rustcta_exchange_api::{
     RecentFillsRequest, RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy,
     TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{ExchangeError, MarketType, OrderSide, OrderType, PositionSide};
+use rustcta_types::{
+    ExchangeError, ExchangeErrorClass, MarketType, OrderSide, OrderType, PositionSide,
+};
 use serde_json::Value;
 
 use super::parser::normalize_binance_symbol;
@@ -490,18 +492,19 @@ impl BinanceGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market(request.symbol.market_type)?;
-        let mut params = HashMap::new();
-        params.insert(
-            "symbol".to_string(),
-            normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
-        );
+        let symbol = normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?;
+        let mut attempts = Vec::new();
         if let Some(order_id) = request.exchange_order_id.as_deref() {
-            params.insert("orderId".to_string(), order_id.to_string());
+            attempts.push(binance_order_query_params(&symbol, "orderId", order_id));
         }
         if let Some(client_order_id) = request.client_order_id.as_deref() {
-            params.insert("origClientOrderId".to_string(), client_order_id.to_string());
+            attempts.push(binance_order_query_params(
+                &symbol,
+                "origClientOrderId",
+                client_order_id,
+            ));
         }
-        if !params.contains_key("orderId") && !params.contains_key("origClientOrderId") {
+        if attempts.is_empty() {
             return Err(ExchangeApiError::InvalidRequest {
                 message: "binance query_order requires exchange_order_id or client_order_id"
                     .to_string(),
@@ -512,20 +515,36 @@ impl BinanceGatewayAdapter {
             MarketType::Perpetual => "/fapi/v1/order",
             _ => unreachable!("checked by ensure_supported_market"),
         };
-        let value = self
-            .send_signed_get_for_market(
-                "binance.query_order",
-                request.symbol.market_type,
-                endpoint,
-                &params,
-            )
-            .await?;
-        let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
-        Ok(QueryOrderResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
-            order: Some(order),
-        })
+        let attempt_count = attempts.len();
+        for (index, params) in attempts.into_iter().enumerate() {
+            match self
+                .send_signed_get_for_market(
+                    "binance.query_order",
+                    request.symbol.market_type,
+                    endpoint,
+                    &params,
+                )
+                .await
+            {
+                Ok(value) => {
+                    let order =
+                        parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+                    return Ok(QueryOrderResponse {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        metadata: response_metadata(
+                            request.symbol.exchange,
+                            request.context.request_id,
+                        ),
+                        order: Some(order),
+                    });
+                }
+                Err(error) if index + 1 < attempt_count && is_order_lookup_retryable(&error) => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("binance query_order has at least one lookup attempt")
     }
 
     pub(super) async fn get_open_orders_impl(
@@ -704,6 +723,25 @@ fn binance_batch_order_params(
         normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
     );
     Ok(params)
+}
+
+fn binance_order_query_params(
+    symbol: &str,
+    id_field: &str,
+    id_value: &str,
+) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+    params.insert("symbol".to_string(), symbol.to_string());
+    params.insert(id_field.to_string(), id_value.to_string());
+    params
+}
+
+fn is_order_lookup_retryable(error: &ExchangeApiError) -> bool {
+    matches!(
+        error,
+        ExchangeApiError::Exchange(exchange_error)
+            if exchange_error.class == ExchangeErrorClass::OrderNotFound
+    )
 }
 
 fn is_binance_hedge_side(position_side: Option<PositionSide>) -> bool {

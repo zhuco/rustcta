@@ -304,11 +304,23 @@ fn parse_order_state(
                 .get("filledSize")
                 .or_else(|| value.get("accBaseVolume"))
                 .or_else(|| value.get("baseVolume"))
-                .or_else(|| value.get("fillSz")),
+                .or_else(|| value.get("fillSz"))
+                .or_else(|| value.get("fillSize"))
+                .or_else(|| value.get("filledQty"))
+                .or_else(|| value.get("fillQuantity"))
+                .or_else(|| value.get("filledAmount"))
+                .or_else(|| value.get("execQty"))
+                .or_else(|| value.get("executedQty")),
         )
         .unwrap_or_else(|| "0".to_string()),
         average_fill_price: string_or_number(
-            value.get("priceAvg").or_else(|| value.get("avgPrice")),
+            value
+                .get("priceAvg")
+                .or_else(|| value.get("avgPrice"))
+                .or_else(|| value.get("averagePrice"))
+                .or_else(|| value.get("average_fill_price"))
+                .or_else(|| value.get("fillPrice"))
+                .or_else(|| value.get("avgPx")),
         )
         .filter(|value| !is_zero_decimal(value)),
         reduce_only: is_reduce_only(value),
@@ -338,13 +350,22 @@ fn parse_fill(
             .ok_or_else(|| ExchangeApiError::InvalidRequest {
                 message: "bitget fill requires canonical_symbol".to_string(),
             })?;
-    let price =
-        decimal_as_f64(value.get("price").or_else(|| value.get("fillPrice"))).unwrap_or(0.0);
+    let price = decimal_as_f64(
+        value
+            .get("price")
+            .or_else(|| value.get("fillPrice"))
+            .or_else(|| value.get("execPrice"))
+            .or_else(|| value.get("px")),
+    )
+    .unwrap_or(0.0);
     let quantity = decimal_as_f64(
         value
             .get("size")
             .or_else(|| value.get("fillSize"))
-            .or_else(|| value.get("baseVolume")),
+            .or_else(|| value.get("baseVolume"))
+            .or_else(|| value.get("fillSz"))
+            .or_else(|| value.get("qty"))
+            .or_else(|| value.get("execQty")),
     )
     .unwrap_or(0.0);
     let quote_quantity = (price > 0.0 && quantity > 0.0).then_some(price * quantity);
@@ -456,12 +477,22 @@ fn parse_time_in_force(force: Option<&str>) -> Option<TimeInForce> {
 }
 
 fn map_bitget_order_status(status: &str) -> OrderStatus {
-    match status.to_ascii_lowercase().as_str() {
-        "live" | "new" | "open" => OrderStatus::New,
-        "partially_filled" | "partial-fill" => OrderStatus::PartiallyFilled,
-        "filled" | "full-fill" => OrderStatus::Filled,
-        "cancelled" | "canceled" => OrderStatus::Cancelled,
-        "rejected" => OrderStatus::Rejected,
+    match status
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', ' '], "_")
+        .as_str()
+    {
+        "live" | "new" | "open" | "init" | "not_trigger" | "not_triggered" => OrderStatus::New,
+        "partially_filled" | "partial_fill" | "partially_fill" => OrderStatus::PartiallyFilled,
+        "filled" | "full_fill" | "fullfilled" | "complete" | "completed" | "done" | "success" => {
+            OrderStatus::Filled
+        }
+        "cancelled" | "canceled" | "cancel" | "partial_cancelled" | "partial_canceled" => {
+            OrderStatus::Cancelled
+        }
+        "rejected" | "reject" | "failed" | "fail" => OrderStatus::Rejected,
+        "expired" | "expire" => OrderStatus::Expired,
         _ => OrderStatus::Unknown,
     }
 }
@@ -592,4 +623,64 @@ fn parse_error(exchange_id: ExchangeId, message: &str, value: &Value) -> Exchang
         raw: Some(value.clone()),
         occurred_at: Utc::now(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustcta_exchange_api::SymbolScope;
+    use serde_json::json;
+
+    #[test]
+    fn bitget_order_status_aliases_should_map_to_terminal_states() {
+        assert_eq!(
+            map_bitget_order_status("partial-fill"),
+            OrderStatus::PartiallyFilled
+        );
+        assert_eq!(
+            map_bitget_order_status("partial_fill"),
+            OrderStatus::PartiallyFilled
+        );
+        assert_eq!(map_bitget_order_status("full-fill"), OrderStatus::Filled);
+        assert_eq!(map_bitget_order_status("completed"), OrderStatus::Filled);
+        assert_eq!(map_bitget_order_status("expired"), OrderStatus::Expired);
+    }
+
+    #[test]
+    fn bitget_order_parser_should_read_alternate_fill_fields() {
+        let exchange_id = ExchangeId::new("bitget").expect("exchange id");
+        let symbol = SymbolScope {
+            exchange: exchange_id.clone(),
+            market_type: MarketType::Perpetual,
+            canonical_symbol: Some(CanonicalSymbol::new("ESPORTS", "USDT").expect("symbol")),
+            exchange_symbol: ExchangeSymbol::new(
+                exchange_id.clone(),
+                MarketType::Perpetual,
+                "ESPORTSUSDT",
+            )
+            .expect("exchange symbol"),
+        };
+        let order = parse_order_state(
+            &exchange_id,
+            Some(&symbol),
+            MarketType::Perpetual,
+            &json!({
+                "symbol": "ESPORTSUSDT",
+                "side": "sell",
+                "orderType": "limit",
+                "force": "gtc",
+                "status": "full-fill",
+                "size": "66",
+                "filledQty": "66",
+                "priceAvg": "0.08399",
+                "clientOid": "ca-os-bitget",
+                "orderId": "123456",
+            }),
+        )
+        .expect("order state");
+
+        assert_eq!(order.status, OrderStatus::Filled);
+        assert_eq!(order.filled_quantity, "66");
+        assert_eq!(order.average_fill_price.as_deref(), Some("0.08399"));
+    }
 }

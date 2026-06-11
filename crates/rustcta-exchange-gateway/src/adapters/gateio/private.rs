@@ -734,6 +734,12 @@ fn gateio_signed_size(side: OrderSide, quantity: &str) -> ExchangeApiResult<Stri
 }
 
 fn gateio_futures_tif(request: &PlaceOrderRequest) -> &'static str {
+    if request.order_type == OrderType::Market {
+        return match request.time_in_force {
+            Some(TimeInForce::FOK) => "fok",
+            _ => "ioc",
+        };
+    }
     if request.post_only || request.order_type == OrderType::PostOnly {
         return "poc";
     }
@@ -770,7 +776,8 @@ fn non_empty(field: &str, value: &str) -> ExchangeApiResult<String> {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use rustcta_types::{ExchangeError, ExchangeId};
+    use rustcta_exchange_api::{RequestContext, SymbolScope};
+    use rustcta_types::{CanonicalSymbol, ExchangeError, ExchangeId, ExchangeSymbol, PositionSide};
     use serde_json::json;
 
     #[test]
@@ -787,5 +794,46 @@ mod tests {
         assert!(is_gateio_position_not_found(&ExchangeApiError::Exchange(
             exchange_error
         )));
+    }
+
+    #[test]
+    fn gateio_futures_market_order_should_always_use_ioc_or_fok() {
+        let mut request = gateio_futures_market_request(None);
+        let body = gateio_futures_order_body(&request).expect("market body");
+        assert_eq!(body["price"], "0");
+        assert_eq!(body["tif"], "ioc");
+
+        request.time_in_force = Some(TimeInForce::GTC);
+        let body = gateio_futures_order_body(&request).expect("market body");
+        assert_eq!(body["tif"], "ioc");
+
+        request.time_in_force = Some(TimeInForce::FOK);
+        let body = gateio_futures_order_body(&request).expect("market body");
+        assert_eq!(body["tif"], "fok");
+    }
+
+    fn gateio_futures_market_request(time_in_force: Option<TimeInForce>) -> PlaceOrderRequest {
+        let exchange = ExchangeId::new("gateio").expect("exchange id");
+        PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: RequestContext::new(Utc::now()),
+            symbol: SymbolScope {
+                exchange: exchange.clone(),
+                market_type: MarketType::Perpetual,
+                canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").expect("symbol")),
+                exchange_symbol: ExchangeSymbol::new(exchange, MarketType::Perpetual, "BTC_USDT")
+                    .expect("exchange symbol"),
+            },
+            client_order_id: Some("cid-gateio-market".to_string()),
+            side: OrderSide::Buy,
+            position_side: Some(PositionSide::Long),
+            order_type: OrderType::Market,
+            time_in_force,
+            quantity: "1".to_string(),
+            price: None,
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        }
     }
 }

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRateSnapshot, SymbolRules,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
@@ -169,6 +170,46 @@ pub fn parse_orderbook_snapshot(
     Ok(snapshot)
 }
 
+pub fn parse_funding_rate_snapshot(
+    exchange_id: &ExchangeId,
+    symbol: rustcta_exchange_api::SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<FundingRateSnapshot> {
+    let data = value.get("data").unwrap_or(value);
+    let data = data
+        .as_array()
+        .and_then(|items| items.first())
+        .unwrap_or(data);
+    let funding_rate = string_or_number(
+        data.get("fundingRate")
+            .or_else(|| data.get("funding_rate"))
+            .or_else(|| data.get("fundRate")),
+    )
+    .ok_or_else(|| parse_error(exchange_id.clone(), "missing fundingRate", data))?;
+    Ok(FundingRateSnapshot {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol,
+        funding_rate,
+        predicted_funding_rate: string_or_number(
+            data.get("nextFundingRate")
+                .or_else(|| data.get("predictedFundingRate"))
+                .or_else(|| data.get("predicted_funding_rate")),
+        ),
+        funding_time: data
+            .get("fundingTime")
+            .or_else(|| data.get("funding_time"))
+            .and_then(bitget_timestamp),
+        next_funding_time: data
+            .get("nextUpdate")
+            .or_else(|| data.get("nextFundingTime"))
+            .or_else(|| data.get("fundingTime"))
+            .and_then(bitget_timestamp),
+        mark_price: string_or_number(data.get("markPrice").or_else(|| data.get("mark_price"))),
+        source: Some("bitget_public_current_fund_rate".to_string()),
+        updated_at: Utc::now(),
+    })
+}
+
 pub fn normalize_bitget_symbol(symbol: &str) -> ExchangeApiResult<String> {
     let normalized = symbol
         .trim()
@@ -290,6 +331,15 @@ fn value_as_i64(value: &Value) -> Option<i64> {
 
 fn value_as_u64(value: &Value) -> Option<u64> {
     value.as_u64().or_else(|| value.as_str()?.parse().ok())
+}
+
+fn bitget_timestamp(value: &Value) -> Option<DateTime<Utc>> {
+    let timestamp = value_as_i64(value)?;
+    if timestamp > 10_000_000_000 {
+        DateTime::<Utc>::from_timestamp_millis(timestamp)
+    } else {
+        DateTime::<Utc>::from_timestamp(timestamp, 0)
+    }
 }
 
 fn increment_from_precision(precision: u32) -> String {

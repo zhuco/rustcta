@@ -39,6 +39,7 @@ pub struct ControlApiAppConfig {
     pub local_agent: Option<LocalAgentConfig>,
     pub local_side_effects: Option<LocalSideEffectConfig>,
     pub legacy_snapshot_path: Option<PathBuf>,
+    pub extra_strategy_snapshot_paths: Vec<PathBuf>,
     pub supervisor_registry_path: Option<PathBuf>,
     pub audit_ledger_path: Option<PathBuf>,
     pub strategy_log_path: Option<PathBuf>,
@@ -91,6 +92,10 @@ impl ControlApiAppConfig {
             local_agent,
             local_side_effects,
             legacy_snapshot_path: path_value(&vars, "RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH"),
+            extra_strategy_snapshot_paths: path_list_value(
+                &vars,
+                "RUSTCTA_CONTROL_API_EXTRA_STRATEGY_SNAPSHOT_PATHS",
+            ),
             supervisor_registry_path: path_value(
                 &vars,
                 "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
@@ -121,6 +126,8 @@ impl ControlApiAppConfig {
         if let Some(path) = &self.legacy_snapshot_path {
             state = state.with_legacy_dashboard_snapshot_path(path.clone());
         }
+        state =
+            state.with_extra_strategy_snapshot_paths(self.extra_strategy_snapshot_paths.clone());
 
         if let Some(agent) = &self.local_agent {
             state = state.with_local_agent(
@@ -4529,6 +4536,15 @@ fn path_value(vars: &std::collections::BTreeMap<String, String>, name: &str) -> 
     non_empty_value(vars, name).map(PathBuf::from)
 }
 
+fn path_list_value(vars: &std::collections::BTreeMap<String, String>, name: &str) -> Vec<PathBuf> {
+    non_empty_value(vars, name)
+        .and_then(|value| parse_csv(&value))
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
 fn usize_value(vars: &std::collections::BTreeMap<String, String>, name: &str) -> Option<usize> {
     non_empty_value(vars, name).and_then(|value| value.parse::<usize>().ok())
 }
@@ -4641,6 +4657,10 @@ mod tests {
                 "/tmp/dashboard_snapshot.json",
             ),
             (
+                "RUSTCTA_CONTROL_API_EXTRA_STRATEGY_SNAPSHOT_PATHS",
+                "/tmp/spot_futures.json,/tmp/funding.json",
+            ),
+            (
                 "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
                 "/tmp/registry.json",
             ),
@@ -4668,6 +4688,13 @@ mod tests {
         assert_eq!(
             config.legacy_snapshot_path,
             Some(PathBuf::from("/tmp/dashboard_snapshot.json"))
+        );
+        assert_eq!(
+            config.extra_strategy_snapshot_paths,
+            vec![
+                PathBuf::from("/tmp/spot_futures.json"),
+                PathBuf::from("/tmp/funding.json")
+            ]
         );
         assert_eq!(
             config.supervisor_registry_path,
@@ -4701,6 +4728,7 @@ mod tests {
         assert_eq!(config.bind_addr, DEFAULT_BIND_ADDR);
         assert!(config.local_agent.is_none());
         assert!(config.local_side_effects.is_none());
+        assert!(config.extra_strategy_snapshot_paths.is_empty());
         assert!(config.static_dir.is_none());
         assert!(config.strategy_log_tail_lines.is_none());
         assert_eq!(

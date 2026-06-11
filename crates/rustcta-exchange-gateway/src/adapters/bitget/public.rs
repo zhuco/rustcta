@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
-    SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRatesRequest, FundingRatesResponse,
+    OrderBookRequest, OrderBookResponse, SymbolRulesRequest, SymbolRulesResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::MarketType;
 
 use super::parser::{
-    normalize_bitget_symbol, normalize_depth, parse_orderbook_snapshot, parse_symbol_rules,
+    normalize_bitget_symbol, normalize_depth, parse_funding_rate_snapshot,
+    parse_orderbook_snapshot, parse_symbol_rules,
 };
 use super::{BitgetGatewayAdapter, BITGET_PERP_PRODUCT_TYPE};
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -117,6 +119,51 @@ impl BitgetGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
             order_book,
+        })
+    }
+
+    pub(super) async fn get_funding_rates_impl(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        if request.symbols.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "bitget.get_funding_rates requires at least one symbol".to_string(),
+            });
+        }
+        let mut rates = Vec::with_capacity(request.symbols.len());
+        for symbol in request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            self.ensure_supported_market_type(symbol.market_type)?;
+            if symbol.market_type != MarketType::Perpetual {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "bitget.get_funding_rates_spot_unsupported",
+                });
+            }
+            let mut params = HashMap::new();
+            params.insert(
+                "symbol".to_string(),
+                normalize_bitget_symbol(&symbol.exchange_symbol.symbol)?,
+            );
+            params.insert(
+                "productType".to_string(),
+                BITGET_PERP_PRODUCT_TYPE.to_string(),
+            );
+            let value = self
+                .rest
+                .send_public_request("/api/v2/mix/market/current-fund-rate", &params)
+                .await?;
+            rates.push(parse_funding_rate_snapshot(
+                &self.exchange_id,
+                symbol,
+                &value,
+            )?);
+        }
+        Ok(FundingRatesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            rates,
         })
     }
 }

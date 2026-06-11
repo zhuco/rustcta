@@ -1,6 +1,6 @@
 use crate::{
     read_models, AgentConnectionStatus, AgentSummary, ControlApiStateSnapshot, LogEventView,
-    LogLevel, StrategyLogTailView, CONTROL_API_SCHEMA_VERSION,
+    LogLevel, StrategyLogTailView, StrategySnapshotEnvelope, CONTROL_API_SCHEMA_VERSION,
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rustcta_event_ledger::{
@@ -31,6 +31,7 @@ pub struct ControlApiState {
     commands: Arc<RwLock<Vec<LifecycleCommandRecord>>>,
     audit_ledger: Option<Arc<dyn LedgerStore>>,
     legacy_dashboard_snapshot_path: Option<Arc<PathBuf>>,
+    extra_strategy_snapshot_paths: Vec<Arc<PathBuf>>,
     supervisor_registry_path: Option<Arc<PathBuf>>,
     strategy_log_path: Option<Arc<PathBuf>>,
     local_agents: Vec<AgentSummary>,
@@ -47,6 +48,7 @@ impl ControlApiState {
             commands: Arc::new(RwLock::new(Vec::new())),
             audit_ledger: None,
             legacy_dashboard_snapshot_path: None,
+            extra_strategy_snapshot_paths: Vec::new(),
             supervisor_registry_path: None,
             strategy_log_path: None,
             local_agents: Vec::new(),
@@ -68,6 +70,23 @@ impl ControlApiState {
 
     pub fn with_legacy_dashboard_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.legacy_dashboard_snapshot_path = Some(Arc::new(path.into()));
+        self
+    }
+
+    pub fn with_extra_strategy_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.extra_strategy_snapshot_paths
+            .push(Arc::new(path.into()));
+        self
+    }
+
+    pub fn with_extra_strategy_snapshot_paths(
+        mut self,
+        paths: impl IntoIterator<Item = impl Into<PathBuf>>,
+    ) -> Self {
+        for path in paths {
+            self.extra_strategy_snapshot_paths
+                .push(Arc::new(path.into()));
+        }
         self
     }
 
@@ -181,7 +200,14 @@ impl ControlApiState {
         if let Some(path) = &self.legacy_dashboard_snapshot_path {
             if let Ok(raw) = tokio::fs::read_to_string(path.as_ref()).await {
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    return read_models::apply_runtime_or_legacy_snapshot(snapshot, &value);
+                    snapshot = read_models::apply_runtime_or_legacy_snapshot(snapshot, &value);
+                }
+            }
+        }
+        for path in &self.extra_strategy_snapshot_paths {
+            if let Ok(raw) = tokio::fs::read_to_string(path.as_ref()).await {
+                if let Ok(strategy_snapshots) = strategy_snapshots_from_extra_file(&raw) {
+                    merge_strategy_snapshots(&mut snapshot.strategy_snapshots, strategy_snapshots);
                 }
             }
         }
@@ -452,6 +478,40 @@ impl ControlApiState {
         }
 
         view
+    }
+}
+
+fn strategy_snapshots_from_extra_file(
+    raw: &str,
+) -> Result<Vec<StrategySnapshotEnvelope>, serde_json::Error> {
+    let value = serde_json::from_str::<serde_json::Value>(raw)?;
+    if let Ok(envelope) = serde_json::from_value::<StrategySnapshotEnvelope>(value.clone()) {
+        return Ok(vec![envelope]);
+    }
+    if let Ok(envelopes) = serde_json::from_value::<Vec<StrategySnapshotEnvelope>>(value.clone()) {
+        return Ok(envelopes);
+    }
+    if let Some(snapshot) = value.get("strategy_snapshot") {
+        if let Ok(envelope) = serde_json::from_value::<StrategySnapshotEnvelope>(snapshot.clone()) {
+            return Ok(vec![envelope]);
+        }
+    }
+    Ok(Vec::new())
+}
+
+fn merge_strategy_snapshots(
+    snapshots: &mut Vec<StrategySnapshotEnvelope>,
+    incoming: Vec<StrategySnapshotEnvelope>,
+) {
+    for strategy_snapshot in incoming {
+        if let Some(existing) = snapshots.iter_mut().find(|snapshot| {
+            snapshot.strategy_id == strategy_snapshot.strategy_id
+                || snapshot.strategy_kind == strategy_snapshot.strategy_kind
+        }) {
+            *existing = strategy_snapshot;
+        } else {
+            snapshots.push(strategy_snapshot);
+        }
     }
 }
 

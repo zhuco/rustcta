@@ -13,6 +13,7 @@ Environment=RUSTCTA_CONTROL_API_AGENT_ID=server-agent
 Environment=RUSTCTA_CONTROL_API_TENANT_ID=server
 Environment=RUSTCTA_CONTROL_API_AGENT_CAPABILITIES=control-api,supervisor-reader,logs
 Environment=RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=/home/cta/rustcta/logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json
+Environment=RUSTCTA_CONTROL_API_EXTRA_STRATEGY_SNAPSHOT_PATHS=/home/cta/rustcta/logs/spot_futures_arbitrage/dashboard_snapshot.json
 Environment=RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=/home/cta/rustcta/run/supervisor/registry.json
 Environment=RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=/home/cta/rustcta/data/control_api/audit.jsonl
 Environment=RUSTCTA_CONTROL_API_STRATEGY_LOG_PATH=/home/cta/rustcta/logs/cross_exchange_arbitrage/cross-arb-live.service.log

@@ -32,16 +32,18 @@ pub(crate) enum ControlPanelView {
     Workspace,
     SpotArb,
     CrossArb,
+    SpotFuturesArb,
     ExchangeLatency,
     FundingArb,
     ApiKeys,
 }
 
 impl ControlPanelView {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Workspace,
         Self::SpotArb,
         Self::CrossArb,
+        Self::SpotFuturesArb,
         Self::ApiKeys,
         Self::ExchangeLatency,
         Self::FundingArb,
@@ -52,6 +54,7 @@ impl ControlPanelView {
             Self::Workspace => "nav_workspace",
             Self::SpotArb => "nav_spot_arb",
             Self::CrossArb => "nav_cross_arb",
+            Self::SpotFuturesArb => "nav_spot_futures_arb",
             Self::ExchangeLatency => "nav_exchange_latency",
             Self::FundingArb => "nav_funding_arb",
             Self::ApiKeys => "nav_api_keys",
@@ -63,6 +66,7 @@ impl ControlPanelView {
             Self::Workspace => "workspace",
             Self::SpotArb => "spot-arb",
             Self::CrossArb => "cross-arb",
+            Self::SpotFuturesArb => "spot-futures-arb",
             Self::ExchangeLatency => "exchange-latency",
             Self::FundingArb => "funding-arb",
             Self::ApiKeys => "api-keys",
@@ -74,6 +78,9 @@ impl ControlPanelView {
             "workspace" => Some(Self::Workspace),
             "spot-arb" | "spot_arb" => Some(Self::SpotArb),
             "cross-arb" | "cross_arb" => Some(Self::CrossArb),
+            "spot-futures-arb" | "spot_futures_arb" | "spot-futures" | "spot_futures" => {
+                Some(Self::SpotFuturesArb)
+            }
             "exchange-latency" | "exchange_latency" => Some(Self::ExchangeLatency),
             "funding-arb" | "funding_arb" => Some(Self::FundingArb),
             "api-keys" | "api_keys" => Some(Self::ApiKeys),
@@ -106,6 +113,7 @@ pub(crate) struct DashboardData {
     pub(crate) control_audit: Value,
     pub(crate) spot_arb: Value,
     pub(crate) cross_arb: Value,
+    pub(crate) spot_futures_arb: Value,
     pub(crate) api_keys: Value,
     pub(crate) strategy_logs: Value,
     pub(crate) balance_history: Value,
@@ -2368,7 +2376,7 @@ impl CrossArbInstrumentRowData {
                         .and_then(Value::as_f64)
                         .map(crate::utils::format_pct)
                         .unwrap_or_else(|| text_at(row, "funding_rate", lang)),
-                    status: text_at(row, "status", lang),
+                    status: localized_order_status_text(&text_at(row, "status", Language::En), lang),
                 }
             })
             .collect()
@@ -2418,7 +2426,12 @@ impl CrossArbPositionBundleRowData {
                     }),
                     long_exchange: text_at(row, "long_exchange", lang),
                     short_exchange: text_at(row, "short_exchange", lang),
-                    status: text_or_fallback(text_at(row, "status", lang), || "open".to_string()),
+                    status: localized_order_status_text(
+                        &text_or_fallback(text_at(row, "status", Language::En), || {
+                            "open".to_string()
+                        }),
+                        lang,
+                    ),
                     entry_prices: format!(
                         "{} / {}",
                         first_price_text(row, &["long_entry_price"]),
@@ -2474,7 +2487,7 @@ impl CrossArbOpenOrderRowData {
                     text_at(row, "remaining_quantity", lang)
                 }),
                 notional: crate::utils::money_text(row, "notional"),
-                status: text_at(row, "status", lang),
+                status: localized_order_status_text(&text_at(row, "status", Language::En), lang),
                 order_ref: text_or_fallback(text_at(row, "client_order_id", lang), || {
                     text_at(row, "order_id", lang)
                 }),
@@ -2549,9 +2562,12 @@ impl CrossArbResultRowData {
                         }),
                         text_or_fallback(text_at(row, "short_exchange", lang), || "-".to_string())
                     ),
-                    status: text_or_fallback(text_at(row, "status", lang), || {
-                        text_at(row, "lifecycle", lang)
-                    }),
+                    status: localized_order_status_text(
+                        &text_or_fallback(text_at(row, "status", Language::En), || {
+                            text_at(row, "lifecycle", Language::En)
+                        }),
+                        lang,
+                    ),
                     open_expected_spread_pct,
                     open_expected_spread: crate::utils::format_pct(open_expected_spread_pct),
                     open_actual_spread_pct,
@@ -2591,7 +2607,7 @@ impl CrossArbRepairTaskRowData {
     pub(crate) fn from_value_rows(rows: &[Value], lang: Language) -> Vec<Self> {
         rows.iter()
             .map(|row| Self {
-                status: text_at(row, "status", lang),
+                status: localized_order_status_text(&text_at(row, "status", Language::En), lang),
                 failed_exchange: text_at(row, "failed_exchange", lang),
                 side: format!(
                     "{} {}",
@@ -3001,6 +3017,45 @@ fn first_nonempty_text(value: &Value, keys: &[&str], lang: Language) -> String {
             !trimmed.is_empty() && trimmed != "-"
         })
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn localized_order_status_text(status: &str, lang: Language) -> String {
+    let trimmed = status.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        return "-".to_string();
+    }
+    let normalized = trimmed.to_ascii_lowercase().replace(['-', ' '], "_");
+    let label = match normalized.as_str() {
+        "accepted" => ("已受理", "Accepted"),
+        "new" => ("已创建", "New"),
+        "open" => ("挂单中", "Open"),
+        "pending_cancel" => ("撤单中", "Pending cancel"),
+        "partially_filled" | "partial_fill" | "partially_fill" => {
+            ("部分成交", "Partially filled")
+        }
+        "filled" | "full_fill" | "closed" | "private_ws_confirmed" => ("已成交", "Filled"),
+        "cancelled" | "canceled" | "cancel" | "ioc_cancelled" | "ioc_canceled" => {
+            ("已取消", "Cancelled")
+        }
+        "expired" | "expire" | "expired_in_match" => ("已过期", "Expired"),
+        "rejected" | "reject" => ("已拒绝", "Rejected"),
+        "submit_failed" => ("提交失败", "Submit failed"),
+        "private_ws_confirmation_timeout" => ("确认超时", "Confirmation timeout"),
+        "unknown" | "unknown_order_state" => ("未知状态", "Unknown"),
+        "emergency_close" | "emergency_closed" => ("紧急平仓", "Emergency close"),
+        _ => {
+            return if lang.is_zh() {
+                trimmed.replace('_', " ")
+            } else {
+                trimmed.to_string()
+            };
+        }
+    };
+    if lang.is_zh() {
+        label.0.to_string()
+    } else {
+        label.1.to_string()
+    }
 }
 
 fn first_numeric(value: &Value, keys: &[&str]) -> f64 {
