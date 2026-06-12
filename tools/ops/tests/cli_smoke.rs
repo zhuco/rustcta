@@ -94,6 +94,14 @@ fn migrated_command_help_should_not_drift() {
             "Usage: rustcta-tools-ops probe ws-proxy",
         ),
         (
+            &["probe", "private-ws-observe", "--help"][..],
+            "Usage: rustcta-tools-ops probe private-ws-observe",
+        ),
+        (
+            &["probe", "contract-readonly-canary", "--help"][..],
+            "Usage: rustcta-tools-ops probe contract-readonly-canary",
+        ),
+        (
             &["probe", "hyperliquid-self-test", "--help"][..],
             "Usage: rustcta-tools-ops probe hyperliquid-self-test",
         ),
@@ -154,7 +162,24 @@ fn ws_proxy_probe_help_should_include_region_dimension() {
 
 #[test]
 fn live_canary_safety_plan_should_remain_non_mutating() {
-    let output = run_tools_ops(&["canary", "exchange-order"]);
+    let config_path = std::env::temp_dir().join(format!(
+        "rustcta-tools-ops-cli-canary-test-{}.yml",
+        std::process::id()
+    ));
+    std::fs::write(
+        &config_path,
+        r#"
+execution:
+  trading_enabled: false
+  dry_run: true
+universe:
+  enabled_exchanges:
+    - bitget
+"#,
+    )
+    .expect("write cli canary test config");
+    let config_arg = config_path.display().to_string();
+    let output = run_tools_ops(&["canary", "exchange-order", "--config", &config_arg]);
     assert_success(&output, "canary exchange-order");
 
     let report: Value =
@@ -170,6 +195,7 @@ fn live_canary_safety_plan_should_remain_non_mutating() {
         .expect("fields array")
         .iter()
         .any(|field| field == "open_ack"));
+    let _ = std::fs::remove_file(config_path);
 }
 
 #[test]

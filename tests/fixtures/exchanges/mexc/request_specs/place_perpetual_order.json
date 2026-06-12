@@ -1,0 +1,27 @@
+{
+  "exchange": "mexc",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/private/order/create",
+  "auth": "signed",
+  "headers": {
+    "apikey": { "match": "exact", "value": "key" },
+    "request-time": { "match": "non_empty" },
+    "recv-window": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" },
+    "content-type": { "match": "exact", "value": "application/json" }
+  },
+  "body_contains": {
+    "symbol": "BTC_USDT",
+    "side": 4,
+    "type": 1,
+    "vol": "2",
+    "price": "65000",
+    "externalOid": "PERP1"
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "mexc/place_perpetual_order_limit_reduce_only"
+}

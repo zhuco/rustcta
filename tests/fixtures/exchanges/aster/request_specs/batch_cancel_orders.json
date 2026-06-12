@@ -1,0 +1,19 @@
+{
+  "exchange": "aster",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/fapi/v3/batchOrders",
+  "auth": "signed",
+  "form_contains": {
+    "symbol": "BTCUSDT",
+    "orderIdList": ["2001", "2002"],
+    "recvWindow": "5000"
+  },
+  "form_signature_fields": ["user", "signer", "nonce", "signature"],
+  "forbid_form_values_containing": ["test-secret"],
+  "runtime_status": "runtime_enabled",
+  "atomicity": "partial",
+  "max_items": 10
+}

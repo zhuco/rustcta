@@ -1,13 +1,19 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, CancelAllOrdersRequest, CancelAllOrdersResponse,
-    CancelOrderRequest, CancelOrderResponse, ExchangeApiError, ExchangeApiResult, FeesRequest,
-    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
-    RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchItemResult, BatchOperationReport,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
+    ExchangeApiResult, FeesRequest, FeesResponse, MarginMode, OpenOrdersRequest,
+    OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, PositionMode, PositionsRequest,
+    PositionsResponse, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
+    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
+    SetPositionModeResponse, SymbolAccountConfig, SymbolAccountConfigRequest,
+    SymbolAccountConfigResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderType};
+use rustcta_types::{ExchangeError, ExchangeErrorClass, MarketType, OrderSide, OrderType};
+use serde_json::Value;
 
 use super::parser::normalize_aster_symbol;
 use super::private_parser::{
@@ -103,6 +109,187 @@ impl AsterGatewayAdapter {
             metadata: response_metadata(request.exchange, request.context.request_id),
             orders,
             cancelled_count,
+        })
+    }
+
+    pub(super) async fn amend_order_impl(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_perpetual(request.symbol.market_type)?;
+        if request.new_client_order_id.is_some() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "aster amend_order does not support changing client_order_id".to_string(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_aster_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        insert_order_identifier(
+            &mut params,
+            request.exchange_order_id.as_deref(),
+            request.client_order_id.as_deref(),
+            "amend_order",
+        )?;
+        insert_non_empty(&mut params, "quantity", &request.new_quantity)?;
+        let value = self
+            .send_signed_put("aster.amend_order", "/fapi/v3/order", &params)
+            .await?;
+        let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(AmendOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
+    pub(super) async fn batch_place_orders_impl(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.orders.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "aster batch_place_orders requires at least one order".to_string(),
+            });
+        }
+        if request.orders.len() > 5 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "aster batch_place_orders supports at most 5 orders".to_string(),
+            });
+        }
+        let mut batch_orders = Vec::with_capacity(request.orders.len());
+        for order in &request.orders {
+            ensure_exchange_api_schema(order.schema_version)?;
+            self.ensure_exchange(&order.symbol.exchange)?;
+            self.ensure_perpetual(order.symbol.market_type)?;
+            let mut params = aster_place_order_params(order)?;
+            params.insert(
+                "symbol".to_string(),
+                normalize_aster_symbol(&order.symbol.exchange_symbol.symbol)?,
+            );
+            batch_orders.push(hashmap_to_json_object(params));
+        }
+        let mut params = HashMap::new();
+        params.insert(
+            "batchOrders".to_string(),
+            serde_json::to_string(&batch_orders).map_err(|error| {
+                ExchangeApiError::InvalidRequest {
+                    message: format!("aster batch_place_orders serialize failed: {error}"),
+                }
+            })?,
+        );
+        let value = self
+            .send_signed_post("aster.batch_place_orders", "/fapi/v3/batchOrders", &params)
+            .await?;
+        let (orders, report) =
+            parse_aster_batch_place_response(&self.exchange_id, &request, &value);
+        Ok(BatchPlaceOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            report: Some(report),
+        })
+    }
+
+    pub(super) async fn batch_cancel_orders_impl(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.cancels.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "aster batch_cancel_orders requires at least one cancel".to_string(),
+            });
+        }
+        if request.cancels.len() > 10 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "aster batch_cancel_orders supports at most 10 cancels".to_string(),
+            });
+        }
+        let first_symbol = &request.cancels[0].symbol;
+        self.ensure_exchange(&first_symbol.exchange)?;
+        self.ensure_perpetual(first_symbol.market_type)?;
+        let mut order_ids = Vec::new();
+        let mut client_order_ids = Vec::new();
+        for cancel in &request.cancels {
+            ensure_exchange_api_schema(cancel.schema_version)?;
+            self.ensure_exchange(&cancel.symbol.exchange)?;
+            self.ensure_perpetual(cancel.symbol.market_type)?;
+            if cancel.symbol.exchange_symbol.symbol != first_symbol.exchange_symbol.symbol {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "aster batch_cancel_orders requires one symbol".to_string(),
+                });
+            }
+            match (
+                cancel.exchange_order_id.as_deref(),
+                cancel.client_order_id.as_deref(),
+            ) {
+                (Some(order_id), _) if !order_id.trim().is_empty() => {
+                    order_ids.push(order_id.trim().to_string())
+                }
+                (_, Some(client_order_id)) if !client_order_id.trim().is_empty() => {
+                    client_order_ids.push(client_order_id.trim().to_string())
+                }
+                _ => return Err(ExchangeApiError::InvalidRequest {
+                    message:
+                        "aster batch_cancel_orders requires exchange_order_id or client_order_id"
+                            .to_string(),
+                }),
+            }
+        }
+        if !order_ids.is_empty() && !client_order_ids.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message:
+                    "aster batch_cancel_orders cannot mix orderIdList and origClientOrderIdList"
+                        .to_string(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_aster_symbol(&first_symbol.exchange_symbol.symbol)?,
+        );
+        if !order_ids.is_empty() {
+            params.insert(
+                "orderIdList".to_string(),
+                serde_json::to_string(&order_ids).map_err(|error| {
+                    ExchangeApiError::InvalidRequest {
+                        message: format!(
+                            "aster batch_cancel_orders serialize order ids failed: {error}"
+                        ),
+                    }
+                })?,
+            );
+        } else {
+            params.insert(
+                "origClientOrderIdList".to_string(),
+                serde_json::to_string(&client_order_ids).map_err(|error| {
+                    ExchangeApiError::InvalidRequest {
+                        message: format!(
+                            "aster batch_cancel_orders serialize client order ids failed: {error}"
+                        ),
+                    }
+                })?,
+            );
+        }
+        let value = self
+            .send_signed_delete("aster.batch_cancel_orders", "/fapi/v3/batchOrders", &params)
+            .await?;
+        let (orders, report) =
+            parse_aster_batch_cancel_response(&self.exchange_id, &request, &value);
+        Ok(BatchCancelOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            cancelled_count: orders.len() as u32,
+            orders,
+            report: Some(report),
         })
     }
 
@@ -333,6 +520,107 @@ impl AsterGatewayAdapter {
             fills,
         })
     }
+
+    pub(super) async fn get_symbol_account_config_impl(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_perpetual(request.symbol.market_type)?;
+        let value = self
+            .send_signed_get(
+                "aster.get_position_mode",
+                "/fapi/v3/positionSide/dual",
+                &HashMap::new(),
+            )
+            .await?;
+        Ok(SymbolAccountConfigResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            config: SymbolAccountConfig {
+                symbol: request.symbol,
+                position_mode: Some(parse_aster_position_mode(&value)?),
+                margin_mode: Some(MarginMode::Unknown),
+                leverage: None,
+                max_leverage: None,
+                updated_at: chrono::Utc::now(),
+            },
+        })
+    }
+
+    pub(super) async fn set_leverage_impl(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_perpetual(request.symbol.market_type)?;
+        if request.leverage == 0 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "aster set_leverage requires leverage greater than zero".to_string(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_aster_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        params.insert("leverage".to_string(), request.leverage.to_string());
+        let value = self
+            .send_signed_post("aster.set_leverage", "/fapi/v3/leverage", &params)
+            .await?;
+        let accepted_leverage = value
+            .get("leverage")
+            .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(request.leverage);
+        Ok(SetLeverageResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            symbol: request.symbol,
+            leverage: accepted_leverage,
+            accepted: true,
+            message: None,
+        })
+    }
+
+    pub(super) async fn set_position_mode_impl(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "dualSidePosition".to_string(),
+            if request.mode.is_hedge() {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
+        );
+        self.send_signed_post(
+            "aster.set_position_mode",
+            "/fapi/v3/positionSide/dual",
+            &params,
+        )
+        .await?;
+        Ok(SetPositionModeResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            mode: request.mode,
+            accepted: true,
+            message: None,
+        })
+    }
 }
 
 fn aster_place_order_params(
@@ -379,6 +667,149 @@ fn aster_place_order_params(
         );
     }
     Ok(params)
+}
+
+fn hashmap_to_json_object(params: HashMap<String, String>) -> Value {
+    Value::Object(
+        params
+            .into_iter()
+            .map(|(key, value)| (key, Value::String(value)))
+            .collect(),
+    )
+}
+
+fn parse_aster_batch_place_response(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &BatchPlaceOrdersRequest,
+    value: &Value,
+) -> (Vec<rustcta_exchange_api::OrderState>, BatchOperationReport) {
+    let rows = value.as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let mut orders = Vec::new();
+    let mut results = Vec::new();
+    for (index, order_request) in request.orders.iter().enumerate() {
+        let row = rows.get(index).unwrap_or(&Value::Null);
+        if let Some(error) = aster_batch_item_error(exchange_id, row) {
+            results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                error,
+                None,
+            ));
+            continue;
+        }
+        match parse_order_state(exchange_id, Some(&order_request.symbol), row) {
+            Ok(order) => {
+                orders.push(order.clone());
+                results.push(BatchItemResult::success(index, order));
+            }
+            Err(error) => results.push(BatchItemResult::failed(
+                index,
+                order_request.client_order_id.clone(),
+                None,
+                aster_decode_batch_error(exchange_id, row, error),
+                None,
+            )),
+        }
+    }
+    (
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.orders.len(),
+            results,
+        },
+    )
+}
+
+fn parse_aster_batch_cancel_response(
+    exchange_id: &rustcta_types::ExchangeId,
+    request: &BatchCancelOrdersRequest,
+    value: &Value,
+) -> (Vec<rustcta_exchange_api::OrderState>, BatchOperationReport) {
+    let rows = value.as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let mut orders = Vec::new();
+    let mut results = Vec::new();
+    for (index, cancel_request) in request.cancels.iter().enumerate() {
+        let row = rows.get(index).unwrap_or(&Value::Null);
+        if let Some(error) = aster_batch_item_error(exchange_id, row) {
+            results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                error,
+                None,
+            ));
+            continue;
+        }
+        match parse_order_state(exchange_id, Some(&cancel_request.symbol), row) {
+            Ok(order) => {
+                orders.push(order.clone());
+                results.push(BatchItemResult::success(index, order));
+            }
+            Err(error) => results.push(BatchItemResult::failed(
+                index,
+                cancel_request.client_order_id.clone(),
+                cancel_request.exchange_order_id.clone(),
+                aster_decode_batch_error(exchange_id, row, error),
+                None,
+            )),
+        }
+    }
+    (
+        orders,
+        BatchOperationReport {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            exchange: exchange_id.clone(),
+            total_items: request.cancels.len(),
+            results,
+        },
+    )
+}
+
+fn aster_batch_item_error(
+    exchange_id: &rustcta_types::ExchangeId,
+    value: &Value,
+) -> Option<ExchangeError> {
+    let code = value.get("code").and_then(|value| {
+        value
+            .as_i64()
+            .map(|code| code.to_string())
+            .or_else(|| value.as_str().map(str::to_string))
+    })?;
+    if code == "0" {
+        return None;
+    }
+    let message = value
+        .get("msg")
+        .or_else(|| value.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("Aster batch item failed");
+    let mut error = ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::OrderRejected,
+        message,
+        chrono::Utc::now(),
+    );
+    error.code = Some(code);
+    error.raw = Some(value.clone());
+    Some(error)
+}
+
+fn aster_decode_batch_error(
+    exchange_id: &rustcta_types::ExchangeId,
+    value: &Value,
+    error: ExchangeApiError,
+) -> ExchangeError {
+    let mut exchange_error = ExchangeError::new(
+        exchange_id.clone(),
+        ExchangeErrorClass::Decode,
+        format!("Aster batch item could not be decoded: {error}"),
+        chrono::Utc::now(),
+    );
+    exchange_error.raw = Some(value.clone());
+    exchange_error
 }
 
 fn insert_order_identifier(
@@ -468,4 +899,25 @@ fn aster_position_side(side: rustcta_types::PositionSide) -> &'static str {
         rustcta_types::PositionSide::Short => "SHORT",
         rustcta_types::PositionSide::Net | rustcta_types::PositionSide::None => "BOTH",
     }
+}
+
+pub(super) fn parse_aster_position_mode(
+    value: &serde_json::Value,
+) -> ExchangeApiResult<PositionMode> {
+    let dual = value
+        .get("dualSidePosition")
+        .or_else(|| value.get("dual"))
+        .and_then(|value| {
+            value
+                .as_bool()
+                .or_else(|| value.as_str().map(|text| text.eq_ignore_ascii_case("true")))
+        })
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: format!("aster positionSide/dual response missing dualSidePosition: {value}"),
+        })?;
+    Ok(if dual {
+        PositionMode::Hedge
+    } else {
+        PositionMode::OneWay
+    })
 }

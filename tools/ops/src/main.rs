@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
 use anyhow::{bail, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use rustcta_tools_ops::{
@@ -9,11 +12,13 @@ use rustcta_tools_ops::{
     run_gateio_bitget_spot_symbols, run_trend_report, smart_money_binance_collector_summary,
     smart_money_hyperliquid_wallet_ingestion_summary, smart_money_portfolio_service_summary,
     AccountPositionRenderArgs, BitgetPerpOrderCanarySafetyArgs, BitgetSpotOrderCanarySafetyArgs,
-    CrossArbAccountAuditSafetyArgs, CrossArbFeeAuditSafetyArgs, CrossArbOrderAdminSafetyArgs,
-    CrossArbWsOpportunityProbeSafetyArgs, ExchangeOrderCanarySafetyArgs,
-    FundingArbObserveSafetyArgs, GateioBitgetSpotSymbolsArgs, HyperliquidSelfTestPlanArgs,
-    PrivateWsProbeArgs, TrendReportArgs, WsConfigProbeArgs, WsProxyProbeArgs,
+    ContractReadonlyCanaryArgs, CrossArbAccountAuditSafetyArgs, CrossArbFeeAuditSafetyArgs,
+    CrossArbOrderAdminSafetyArgs, CrossArbWsOpportunityProbeSafetyArgs,
+    ExchangeOrderCanarySafetyArgs, FundingArbObserveSafetyArgs, GateioBitgetSpotSymbolsArgs,
+    HyperliquidSelfTestPlanArgs, PrivateWsObserveConfig, PrivateWsObserveEvent, PrivateWsProbeArgs,
+    TrendReportArgs, WsConfigProbeArgs, WsProxyProbeArgs,
 };
+use serde_json::{json, Value};
 
 #[derive(Debug, Parser)]
 #[command(name = "rustcta-tools-ops")]
@@ -85,6 +90,8 @@ enum ProbeCommand {
     WsProxy(WsProxyProbeArgs),
     WsConfig(WsConfigProbeArgs),
     PrivateWs(PrivateWsProbeArgs),
+    PrivateWsObserve(PrivateWsObserveCliArgs),
+    ContractReadonlyCanary(ContractReadonlyCanaryArgs),
     HyperliquidSelfTest(HyperliquidSelfTestPlanArgs),
     FundingArbObserve(FundingArbObserveSafetyArgs),
     CrossArbWsOpportunity(CrossArbWsOpportunityProbeSafetyArgs),
@@ -120,6 +127,22 @@ enum AccountPositionCommand {
 struct ConfigArgs {
     #[arg(long)]
     config: std::path::PathBuf,
+}
+
+#[derive(Debug, ClapArgs)]
+struct PrivateWsObserveCliArgs {
+    #[arg(long, value_delimiter = ',', required = true)]
+    exchanges: Vec<String>,
+    #[arg(long, default_value_t = 30_000)]
+    timeout_ms: u64,
+    #[arg(long, default_value_t = 1_000)]
+    reconnect_delay_ms: u64,
+    #[arg(long, default_value_t = 60_000)]
+    duration_ms: u64,
+    #[arg(long)]
+    gateio_user_id: Option<String>,
+    #[arg(long, default_value_t = 200)]
+    max_events: usize,
 }
 
 #[tokio::main]
@@ -194,6 +217,15 @@ async fn run_probe(command: ProbeCommand) -> Result<()> {
                 )?
             );
         }
+        ProbeCommand::PrivateWsObserve(args) => run_private_ws_observe_cli(args).await?,
+        ProbeCommand::ContractReadonlyCanary(args) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &rustcta_tools_ops::run_contract_readonly_canary(args).await?
+                )?
+            );
+        }
         ProbeCommand::HyperliquidSelfTest(args) => {
             println!("{}", hyperliquid_self_test_safety_plan(args)?);
         }
@@ -204,6 +236,81 @@ async fn run_probe(command: ProbeCommand) -> Result<()> {
             println!("{}", cross_arb_ws_opportunity_probe_safety_plan(args)?);
         }
     }
+    Ok(())
+}
+
+async fn run_private_ws_observe_cli(args: PrivateWsObserveCliArgs) -> Result<()> {
+    let exchanges = args
+        .exchanges
+        .iter()
+        .map(|exchange| exchange.trim().to_ascii_lowercase())
+        .filter(|exchange| !exchange.is_empty())
+        .collect::<Vec<_>>();
+    if exchanges.is_empty() {
+        bail!("--exchanges must include at least one exchange");
+    }
+
+    let duration_ms = args.duration_ms.max(1_000);
+    let max_events = args.max_events.max(1);
+    let config = PrivateWsObserveConfig {
+        timeout_ms: args.timeout_ms,
+        reconnect_delay_ms: args.reconnect_delay_ms,
+        gateio_user_id: args.gateio_user_id,
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<PrivateWsObserveEvent>(1024);
+    let observed_exchanges = exchanges.clone();
+    let handle = tokio::spawn(async move {
+        rustcta_tools_ops::run_private_ws_observe_once(&observed_exchanges, config, tx).await;
+    });
+
+    let deadline = tokio::time::sleep(Duration::from_millis(duration_ms));
+    tokio::pin!(deadline);
+    let mut statuses = BTreeMap::<String, Value>::new();
+    let mut private_events = Vec::<Value>::new();
+    loop {
+        tokio::select! {
+            _ = &mut deadline => break,
+            maybe_event = rx.recv() => {
+                let Some(event) = maybe_event else {
+                    break;
+                };
+                match event {
+                    PrivateWsObserveEvent::Status { exchange, row } => {
+                        statuses.insert(exchange, row);
+                    }
+                    PrivateWsObserveEvent::PrivateEvent(row) => {
+                        private_events.push(row);
+                        if private_events.len() > max_events {
+                            let overflow = private_events.len() - max_events;
+                            private_events.drain(0..overflow);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    handle.abort();
+
+    let ready = exchanges.iter().all(|exchange| {
+        statuses.get(exchange).is_some_and(|row| {
+            row.get("connected")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && row.get("login_ok").and_then(Value::as_bool).unwrap_or(true)
+        })
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "tool": "rustcta-tools-ops probe private-ws-observe",
+            "read_only": true,
+            "exchanges": exchanges,
+            "duration_ms": duration_ms,
+            "private_ws_ready": ready,
+            "statuses": statuses,
+            "private_events_sample": private_events,
+        }))?
+    );
     Ok(())
 }
 

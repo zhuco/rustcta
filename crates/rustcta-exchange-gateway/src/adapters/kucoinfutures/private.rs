@@ -592,7 +592,7 @@ fn order_state_from_place_ack(
         price: request.price.clone(),
         filled_quantity: "0".to_string(),
         average_fill_price: None,
-        reduce_only: false,
+        reduce_only: request.reduce_only,
         post_only: request.post_only || request.order_type == OrderType::PostOnly,
         created_at: Some(chrono::Utc::now()),
         updated_at: chrono::Utc::now(),

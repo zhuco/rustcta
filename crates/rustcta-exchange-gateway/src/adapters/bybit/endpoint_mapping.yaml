@@ -115,7 +115,7 @@ endpoints:
     product: perpetual
     transport: rest
     method: GET
-    path: /v5/market/funding/history
+    path: /v5/market/tickers
     auth: none
     rate_limit_bucket: public_market
     weight: 1
@@ -125,6 +125,7 @@ endpoints:
       status: implemented
       fixture: tests/fixtures/exchanges/bybit/funding_history.json
       test: crates/rustcta-exchange-gateway/src/adapters/bybit/tests.rs
+    notes: "Runtime fetches tickers for current funding and scanner enrichment fields mark_price/index_price/open_interest/turnover_24h/volume_24h/next_funding_time, then /v5/market/funding/history for the latest settled funding timestamp."
   - operation: open_interest
     product: perpetual
     transport: rest

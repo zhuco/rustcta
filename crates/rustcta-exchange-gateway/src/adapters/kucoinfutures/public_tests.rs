@@ -87,18 +87,34 @@ async fn kucoinfutures_adapter_should_load_level2_20_order_book_from_public_rest
 
 #[tokio::test]
 async fn kucoinfutures_adapter_should_load_latest_funding_rate_from_public_rest() {
-    let (base_url, seen) = spawn_rest_server(vec![json!({
-        "code": "200000",
-        "data": {
-            "items": [{
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "200000",
+            "data": [{
                 "symbol": "XBTUSDTM",
-                "timePoint": 1743055200000_i64,
-                "fundingRate": "0.0001",
-                "funding": "-0.0123",
-                "currency": "USDT"
+                "fundingFeeRate": "-0.0002",
+                "predictedFundingFeeRate": "0.0003",
+                "markPrice": "65000.5",
+                "indexPrice": "64999.9",
+                "openInterest": "12345",
+                "turnoverOf24h": "9876543.21",
+                "volumeOf24h": "151.25",
+                "nextFundingRateDateTime": 1743084000000_i64
             }]
-        }
-    })])
+        }),
+        json!({
+            "code": "200000",
+            "data": {
+                "items": [{
+                    "symbol": "XBTUSDTM",
+                    "timePoint": 1743055200000_i64,
+                    "fundingRate": "0.0001",
+                    "funding": "-0.0123",
+                    "currency": "USDT"
+                }]
+            }
+        }),
+    ])
     .await;
     let adapter = KuCoinFuturesGatewayAdapter::new(KuCoinFuturesGatewayConfig {
         rest_base_url: base_url,
@@ -118,9 +134,30 @@ async fn kucoinfutures_adapter_should_load_latest_funding_rate_from_public_rest(
     .expect("funding");
 
     assert_eq!(response.rates.len(), 1);
-    assert_eq!(response.rates[0].funding_rate, "0.0001");
+    assert_eq!(response.rates[0].funding_rate, "-0.0002");
+    assert_eq!(
+        response.rates[0].predicted_funding_rate.as_deref(),
+        Some("0.0003")
+    );
     assert!(response.rates[0].funding_time.is_some());
+    assert_eq!(
+        response.rates[0]
+            .next_funding_time
+            .expect("next funding")
+            .timestamp_millis(),
+        1743084000000
+    );
+    assert_eq!(response.rates[0].mark_price.as_deref(), Some("65000.5"));
+    assert_eq!(response.rates[0].index_price.as_deref(), Some("64999.9"));
+    assert_eq!(response.rates[0].open_interest.as_deref(), Some("12345"));
+    assert_eq!(
+        response.rates[0].turnover_24h.as_deref(),
+        Some("9876543.21")
+    );
+    assert_eq!(response.rates[0].volume_24h.as_deref(), Some("151.25"));
     let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.path, "/api/v1/contracts/active");
+    let request = seen.lock().unwrap()[1].clone();
     assert_eq!(request.path, "/api/v1/funding-history");
     assert_eq!(
         request.query.get("symbol").map(String::as_str),

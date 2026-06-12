@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
-    SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRatesRequest, FundingRatesResponse,
+    OrderBookRequest, OrderBookResponse, SymbolRulesRequest, SymbolRulesResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use serde_json::Value;
 
 use super::parser::{
-    normalize_aster_symbol, normalize_depth, parse_orderbook_snapshot, parse_symbol_rules,
+    normalize_aster_symbol, normalize_depth, parse_aster_funding_snapshots,
+    parse_orderbook_snapshot, parse_symbol_rules,
 };
 use super::AsterGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -79,6 +81,60 @@ impl AsterGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
             order_book,
+        })
+    }
+
+    pub(super) async fn get_funding_rates_impl(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        for symbol in &request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            self.ensure_perpetual(symbol.market_type)?;
+        }
+
+        let premium = if request.symbols.len() == 1 {
+            self.get_aster_mark_price(Some(&request.symbols[0].exchange_symbol.symbol))
+                .await?
+        } else {
+            self.get_aster_mark_price(None).await?
+        };
+
+        let mut history_by_symbol = HashMap::new();
+        for symbol in &request.symbols {
+            let normalized = normalize_aster_symbol(&symbol.exchange_symbol.symbol)?;
+            match self.get_aster_funding_history(&normalized, Some(1)).await {
+                Ok(history) => {
+                    history_by_symbol.insert(normalized, history);
+                }
+                Err(ExchangeApiError::Exchange(_)) => {
+                    // Keep the current premium snapshot usable when history is absent or the
+                    // venue returns an exchange-level error for a newly listed contract.
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        let mut rates = parse_aster_funding_snapshots(
+            &self.exchange_id,
+            &request.symbols,
+            &premium,
+            &history_by_symbol,
+        )?;
+        if !request.symbols.is_empty() {
+            let requested = request
+                .symbols
+                .iter()
+                .map(|symbol| normalize_aster_symbol(&symbol.exchange_symbol.symbol))
+                .collect::<ExchangeApiResult<Vec<_>>>()?;
+            rates.retain(|rate| requested.contains(&rate.symbol.exchange_symbol.symbol));
+        }
+
+        Ok(FundingRatesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            rates,
         })
     }
 

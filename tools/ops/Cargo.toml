@@ -18,6 +18,8 @@ log = "0.4.27"
 reqwest.workspace = true
 rmp-serde = "1.1"
 rustcta-types.workspace = true
+rustcta-exchange-api.workspace = true
+rustcta-exchange-gateway.workspace = true
 rustcta-reporting.workspace = true
 rustcta-smart-money.workspace = true
 rustcta-strategy-cross-exchange-arbitrage = { path = "../../strategies/cross-exchange-arbitrage" }
@@ -25,6 +27,8 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 sha2.workspace = true
+sha3 = "0.10"
+secp256k1 = { version = "0.27", features = ["recovery"] }
 tokio.workspace = true
 tokio-tungstenite = { version = "0.20", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 url = "2.4"

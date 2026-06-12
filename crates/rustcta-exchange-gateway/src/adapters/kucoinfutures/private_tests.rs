@@ -1,15 +1,15 @@
 use rustcta_exchange_api::{
     AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
-    CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
-    OpenOrdersRequest, PageCursor, PageRequest, PlaceOrderRequest, PositionsRequest,
-    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
+    CancelAllOrdersRequest, CancelOrderRequest, ClosePositionRequest, ExchangeApiError,
+    ExchangeClient, FeesRequest, OpenOrdersRequest, PageCursor, PageRequest, PlaceOrderRequest,
+    PositionsRequest, QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
     EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
+use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
 
 use super::test_support::{context, exchange_id, spawn_rest_server, symbol_scope, SeenRequest};
-use super::{KuCoinFuturesGatewayAdapter, KuCoinFuturesGatewayConfig};
+use super::{GatewayAdapter, KuCoinFuturesGatewayAdapter, KuCoinFuturesGatewayConfig};
 
 fn kucoinfutures_fixture(name: &str) -> serde_json::Value {
     let text = match name {
@@ -310,6 +310,57 @@ async fn kucoinfutures_adapter_should_compose_batch_place_and_cancel_requests() 
     assert_eq!(requests[1].body.as_ref().unwrap()["clientOid"], "BATCH2");
     assert_signed_request_method(&requests[2], "DELETE", "/api/v1/orders/3001");
     assert_signed_request_method(&requests[3], "DELETE", "/api/v1/orders/3002");
+}
+
+#[tokio::test]
+async fn kucoinfutures_close_position_should_submit_reduce_only_ioc_order() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "200000",
+        "data": {"orderId": "4101", "clientOid": "CLOSE_LONG"}
+    })])
+    .await;
+    let adapter = KuCoinFuturesGatewayAdapter::new(KuCoinFuturesGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        api_passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..KuCoinFuturesGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = GatewayAdapter::close_position(
+        &adapter,
+        ClosePositionRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("close-long"),
+            symbol: symbol_scope(),
+            position_side: PositionSide::Long,
+            quantity: "2".to_string(),
+            price: Some("65000".to_string()),
+            order_type: OrderType::IOC,
+            time_in_force: TimeInForce::IOC,
+            client_order_id: "CLOSE_LONG".to_string(),
+            max_slippage_pct: None,
+        },
+    )
+    .await
+    .expect("close position");
+
+    assert!(response.accepted);
+    assert_eq!(response.exchange_order_id.as_deref(), Some("4101"));
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_request_method(&requests[0], "POST", "/api/v1/orders");
+    let body = requests[0].body.as_ref().expect("close order body");
+    assert_eq!(body["clientOid"], "CLOSE_LONG");
+    assert_eq!(body["symbol"], "XBTUSDTM");
+    assert_eq!(body["side"], "sell");
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["timeInForce"], "IOC");
+    assert_eq!(body["reduceOnly"], true);
+    assert_eq!(body["size"], "2");
+    assert_eq!(body["price"], "65000");
 }
 
 #[tokio::test]

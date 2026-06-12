@@ -271,6 +271,10 @@ pub fn parse_funding_rate(
             .and_then(value_as_i64)
             .and_then(DateTime::<Utc>::from_timestamp_millis),
         mark_price: None,
+        index_price: None,
+        open_interest: None,
+        turnover_24h: None,
+        volume_24h: None,
         source: Some("okx.public.funding-rate".to_string()),
         updated_at: Utc::now(),
     })

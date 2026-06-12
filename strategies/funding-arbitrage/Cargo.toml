@@ -12,6 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 rustcta-strategy-sdk.workspace = true
+rustcta-exchange-api.workspace = true
+rustcta-exchange-gateway.workspace = true
+rustcta-types.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

@@ -106,6 +106,10 @@ pub struct FundingRateSnapshot {
     pub funding_time: Option<DateTime<Utc>>,
     pub next_funding_time: Option<DateTime<Utc>>,
     pub mark_price: Option<String>,
+    pub index_price: Option<String>,
+    pub open_interest: Option<String>,
+    pub turnover_24h: Option<String>,
+    pub volume_24h: Option<String>,
     pub source: Option<String>,
     pub updated_at: DateTime<Utc>,
 }

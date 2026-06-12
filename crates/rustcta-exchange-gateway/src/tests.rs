@@ -122,6 +122,11 @@ fn gateway_operation_should_parse_advanced_spot_order_operations() {
         GatewayOperation::from_str("countdown_cancel_all").unwrap(),
         GatewayOperation::SetCountdownCancelAll
     );
+    assert_eq!(
+        GatewayOperation::from_str("margin_mode").unwrap(),
+        GatewayOperation::SetMarginMode
+    );
+    assert_eq!(GatewayOperation::SetMarginMode.as_str(), "set_margin_mode");
     assert_eq!(GatewayOperation::ClosePosition.as_str(), "close_position");
 }
 
@@ -143,6 +148,22 @@ fn gateway_protocol_should_validate_account_control_payloads() {
     };
 
     request.validate().expect("set leverage payload");
+
+    let margin_mode = GatewayProtocolRequest {
+        schema_version: GATEWAY_PROTOCOL_SCHEMA_VERSION,
+        request_id: "set-margin-mode".to_string(),
+        tenant_id: tenant_id(),
+        account_id: Some(account_id()),
+        operation: GatewayOperation::SetMarginMode,
+        payload: GatewayRequestPayload::SetMarginMode(rustcta_exchange_api::SetMarginModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-margin-mode"),
+            symbol: symbol_scope(),
+            mode: rustcta_exchange_api::MarginMode::Isolated,
+        }),
+        requested_at: Utc::now(),
+    };
+    margin_mode.validate().expect("set margin mode payload");
 
     let rejected = GatewayProtocolRequest {
         payload: GatewayRequestPayload::SetLeverage(rustcta_exchange_api::SetLeverageRequest {

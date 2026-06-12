@@ -220,6 +220,9 @@ pub struct CrossArbSlippageCaptureConfigSummary {
     pub max_maker_top_depth_usdt: String,
     pub hedge_top_of_book_capacity_ratio: String,
     pub enforce_hedge_top_depth: bool,
+    pub risk_flatten_grace_secs: i64,
+    pub risk_flatten_close_min_net_profit_pct: String,
+    pub risk_flatten_hedge_min_net_profit_pct: String,
     pub open_order_role: &'static str,
     pub hedge_order_role: &'static str,
     pub close_order_role: &'static str,
@@ -774,6 +777,13 @@ fn slippage_capture_summary(
         max_maker_top_depth_usdt: decimal_string(slippage.max_maker_top_depth_usdt),
         hedge_top_of_book_capacity_ratio: percent_string(slippage.hedge_top_of_book_capacity_ratio),
         enforce_hedge_top_depth: slippage.enforce_hedge_top_depth,
+        risk_flatten_grace_secs: slippage.risk_flatten_grace_secs,
+        risk_flatten_close_min_net_profit_pct: percent_string(
+            slippage.risk_flatten_close_min_net_profit_pct,
+        ),
+        risk_flatten_hedge_min_net_profit_pct: percent_string(
+            slippage.risk_flatten_hedge_min_net_profit_pct,
+        ),
         open_order_role: "maker_limit_capture",
         hedge_order_role: "taker_ioc_after_maker_fill",
         close_order_role: "dual_taker_reduce_only",

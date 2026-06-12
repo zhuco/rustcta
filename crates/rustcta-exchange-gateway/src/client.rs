@@ -13,9 +13,9 @@ use rustcta_exchange_api::{
     PerpAccountControlProvider, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
     PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
     QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
-    SymbolAccountConfigRequest, SymbolAccountConfigResponse, SymbolRulesRequest,
-    SymbolRulesResponse,
+    SetLeverageRequest, SetLeverageResponse, SetMarginModeRequest, SetMarginModeResponse,
+    SetPositionModeRequest, SetPositionModeResponse, SymbolAccountConfigRequest,
+    SymbolAccountConfigResponse, SymbolRulesRequest, SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, ExchangeError, ExchangeId, TenantId};
 
@@ -449,6 +449,24 @@ pub trait GatewayClient: Send + Sync {
         )
         .await?
         .into_set_position_mode()
+    }
+
+    async fn set_margin_mode(
+        &self,
+        request_id: String,
+        tenant_id: TenantId,
+        account_id: Option<AccountId>,
+        request: SetMarginModeRequest,
+    ) -> Result<SetMarginModeResponse, GatewayError> {
+        self.send_request(
+            request_id,
+            tenant_id,
+            account_id,
+            GatewayOperation::SetMarginMode,
+            GatewayRequestPayload::SetMarginMode(request),
+        )
+        .await?
+        .into_set_margin_mode()
     }
 
     async fn close_position(
@@ -1010,6 +1028,21 @@ impl PerpAccountControlProvider for GatewayExchangeClient {
         )
         .await?
         .into_set_position_mode()
+        .map_err(|error| gateway_error_to_exchange_api(&self.exchange, error))
+    }
+
+    async fn set_margin_mode(
+        &self,
+        request: SetMarginModeRequest,
+    ) -> ExchangeApiResult<SetMarginModeResponse> {
+        let request_id = request_id_or(&request.context.request_id, "gateway-set-margin-mode");
+        self.send_exchange_request(
+            request_id,
+            GatewayOperation::SetMarginMode,
+            GatewayRequestPayload::SetMarginMode(request),
+        )
+        .await?
+        .into_set_margin_mode()
         .map_err(|error| gateway_error_to_exchange_api(&self.exchange, error))
     }
 

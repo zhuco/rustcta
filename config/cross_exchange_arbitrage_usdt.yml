@@ -1,7 +1,7 @@
 mode: live_small
 max_live_notional_per_trade: 5.2
 max_consecutive_losses: 10
-execution_module: slippage_capture
+execution_module: dual_taker
 enabled_exchanges:
 - binance
 - gate
@@ -18,6 +18,8 @@ excluded_bases:
 - TRX
 - TON
 - LTC
+excluded_symbols:
+- SOPH/USDT
 strategy:
   name: cross_exchange_arbitrage_usdt_perp
   mode: live_small
@@ -26,7 +28,7 @@ market:
   quote_asset: USDT
   market_type: perpetual
   depth_levels: 1
-  stale_quote_ms: 6000
+  stale_quote_ms: 3000
   min_common_exchanges: 2
   public_book_speed: fastest
   public_book_trigger_profile: fastest_l1_10ms
@@ -36,8 +38,8 @@ market:
   top_of_book_capacity_ratio: 0.8
 thresholds:
   min_display_raw_spread: 0.001
-  min_open_raw_spread: 0.010
-  min_open_maker_taker_net_edge: 0.001
+  min_open_raw_spread: 0.02
+  min_open_maker_taker_net_edge: 0.002
   max_open_raw_spread: 0.10
   route_overrides: []
   close_min_net_profit_pct: 0.001
@@ -47,13 +49,13 @@ thresholds:
   expected_close_spread_pct: 0.002
 dual_taker:
   target_notional_usdt: 5.2
-  min_open_spread_pct: 0.010
+  min_open_spread_pct: 0.02
   max_open_spread_pct: 0.10
-  taker_slippage_pct: 0.02
+  taker_slippage_pct: 0.015
   close_min_net_profit_pct: 0.001
   expected_close_spread_pct: 0.002
   top_of_book_capacity_ratio: 0.8
-  orderbook_stale_ms: 6000
+  orderbook_stale_ms: 3000
   min_orderbook_levels: 1
   single_leg_timeout_ms: 600
   max_consecutive_single_leg_fills: 3
@@ -62,15 +64,15 @@ dual_taker:
   symbol_cooldown_secs: 300
   max_hold_secs: 86400
   close_on_max_hold_requires_profit: true
-  min_open_net_profit_pct: 0.001
+  min_open_net_profit_pct: 0.002
 slippage_capture:
   target_notional_usdt: 5.2
-  min_open_spread_pct: 0.010
-  min_open_net_profit_pct: 0.001
+  min_open_spread_pct: 0.009
+  min_open_net_profit_pct: 0.002
   max_open_spread_pct: 0.10
   startup_skip_spread_secs: 10
   max_signal_age_ms: 3000
-  maker_price_offset_pct: 0.0025
+  maker_price_offset_pct: 0.0035
   hedge_taker_slippage_pct: 0.005
   close_taker_slippage_pct: 0.005
   close_min_net_profit_pct: 0.001
@@ -79,17 +81,20 @@ slippage_capture:
   max_maker_top_depth_usdt: 0.0
   hedge_top_of_book_capacity_ratio: 0.8
   enforce_hedge_top_depth: false
-  orderbook_stale_ms: 6000
+  orderbook_stale_ms: 3000
   min_orderbook_levels: 1
   max_open_bundles: 10
   max_positions_per_exchange: 10
   max_active_bundles_per_symbol: 1
   symbol_cooldown_secs: 15
+  risk_flatten_grace_secs: 900
+  risk_flatten_close_min_net_profit_pct: 0.001
+  risk_flatten_hedge_min_net_profit_pct: 0.001
   max_hold_secs: 86400
   close_on_max_hold_requires_profit: true
 execution_quality:
-  min_open_raw_spread_pct: 0.010
-  min_open_net_edge_pct: 0.001
+  min_open_raw_spread_pct: 0.02
+  min_open_net_edge_pct: 0.002
   min_open_executable_depth_ratio: 1.2
   min_close_net_profit_pct: 0.001
 sizing:
@@ -249,6 +254,18 @@ disabled:
     market_type: perpetual
     symbol: SPCX/USDT
     reason: binance_tradfi_perps_agreement_required
+  - exchange: binance
+    market_type: perpetual
+    symbol: SOPH/USDT
+    reason: reserved_for_funding_spread_expansion_maker_local_test
+  - exchange: gate
+    market_type: perpetual
+    symbol: SOPH/USDT
+    reason: reserved_for_funding_spread_expansion_maker_local_test
+  - exchange: bitget
+    market_type: perpetual
+    symbol: SOPH/USDT
+    reason: reserved_for_funding_spread_expansion_maker_local_test
 execution:
   trading_enabled: true
   require_release_binary: true
@@ -263,14 +280,14 @@ execution:
   max_concurrent_maker_orders: 5
   max_signal_age_ms: 3000
   maker_price_offset_ticks: 0
-  slippage_capture_offset_pct: 0.0025
+  slippage_capture_offset_pct: 0.0035
   maker_aggressive_after_cancels: 5
   maker_aggressive_step_ticks: 1
   maker_aggressive_max_ticks: 2
   maker_cooldown_after_cancels: 10
   maker_cooldown_ms: 120000
-  taker_ioc_slippage_limit_pct: 0.005
-  open_execution_style: slippage_capture
+  taker_ioc_slippage_limit_pct: 0.015
+  open_execution_style: dual_taker
   close_execution_style: dual_taker
 private_ws:
   timeout_ms: 15000
@@ -285,11 +302,11 @@ reconciliation:
   quantity_tolerance: 1e-8
   orphan_tolerance: 1e-6
 risk:
-  stale_quote_ms: 6000
-  max_book_age_ms: 6000
+  stale_quote_ms: 3000
+  max_book_age_ms: 3000
   restore_route_cooldowns_from_profit_history: false
   taker_slippage_buffer: 0.0005
-  max_taker_slippage_pct: 0.02
+  max_taker_slippage_pct: 0.015
   maker_non_fill_penalty: 0.001
   safety_buffer: 0.001
   max_notional_per_symbol_usdt: 5.2
@@ -778,6 +795,7 @@ universe:
   max_symbol_count: 408
   include_symbols: []
   exclude_symbols:
+  - SOPH/USDT
   - AERGO/USDT
   - AGT/USDT
   - AIGENSYN/USDT

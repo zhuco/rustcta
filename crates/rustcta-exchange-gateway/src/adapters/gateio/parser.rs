@@ -248,6 +248,20 @@ pub fn parse_funding_rate_snapshot(
             .or_else(|| data.get("nextFundingTime"))
             .and_then(gateio_timestamp),
         mark_price: string_or_number(data.get("mark_price").or_else(|| data.get("markPrice"))),
+        index_price: string_or_number(data.get("index_price").or_else(|| data.get("indexPrice"))),
+        open_interest: string_or_number(
+            data.get("total_size")
+                .or_else(|| data.get("open_interest"))
+                .or_else(|| data.get("openInterest")),
+        ),
+        turnover_24h: string_or_number(
+            data.get("volume_24h_quote")
+                .or_else(|| data.get("turnover24h")),
+        ),
+        volume_24h: string_or_number(
+            data.get("volume_24h_base")
+                .or_else(|| data.get("volume24h")),
+        ),
         source: Some("gateio_public_futures_tickers".to_string()),
         updated_at: Utc::now(),
     })

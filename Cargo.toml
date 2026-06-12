@@ -24,6 +24,7 @@ members = [
     "strategies/spot-futures-arbitrage",
     "strategies/cross-exchange-arbitrage",
     "strategies/funding-arbitrage",
+    "strategies/funding-spread-expansion-maker",
     "strategies/hedged-grid",
     "strategies/mean-reversion",
     "strategies/poisson-market-maker",
@@ -34,7 +35,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.22"
+version = "0.3.23"
 edition = "2021"
 license = "UNLICENSED"
 publish = false

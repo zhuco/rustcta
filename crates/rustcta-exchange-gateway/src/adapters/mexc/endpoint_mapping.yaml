@@ -12,7 +12,7 @@ rest:
   testnet_base_url: ""
 base_urls:
   spot_rest: https://api.mexc.com
-  contract_rest: https://contract.mexc.com
+  contract_rest: https://api.mexc.com
   spot_public_ws: wss://wbs-api.mexc.com/ws
   contract_public_ws: wss://contract.mexc.com/edge
 rate_limits:
@@ -112,8 +112,11 @@ websocket:
       timeout_ms: 10000
     resync: rest_order_book_snapshot
   private:
-    support: unsupported
-    auth: listen_key
+    support: native
+    auth: signed_login
+    url: wss://contract.mexc.com/edge
+    login_method: login
+    filter_method: personal.filter
     renewal_ms: null
     relogin_on_reconnect: true
     fallback: rest_reconciliation
@@ -158,7 +161,7 @@ endpoints:
     transport: rest
     product: perpetual
     method: GET
-    path: /api/v1/contract/detail
+    path: /api/v1/contract/detail/country
     auth: none
     rate_limit_bucket: contract_public
     weight: 1
@@ -185,6 +188,7 @@ endpoints:
     response_parser:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/mexc/public_tests.rs
+    notes: "Runtime maps fundingRate, timestamp, nextSettleTime, fairPrice/markPrice, idxPrice/indexPrice, and optional mark_price/index_price/open_interest/turnover_24h/volume_24h/next_funding_time liquidity fields into the shared FundingRateSnapshot."
   - operation: get_balances
     transport: rest
     product: spot
@@ -249,13 +253,17 @@ endpoints:
     transport: rest
     product: perpetual
     method: POST
-    path: /api/v1/private/order/submit
+    path: /api/v1/private/order/create
     auth: hmac
     credential_scopes: [trade]
     rate_limit_bucket: contract_orders
     weight: 1
     request_spec_required: true
-    notes: "Contract order body maps shared quantity to MEXC vol; side codes encode open/close via reduce_only."
+    request_spec:
+      fixture: tests/fixtures/exchanges/mexc/request_specs/place_perpetual_order.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/mexc/private_tests.rs
+    notes: "Contract order JSON body maps shared quantity to MEXC vol; side codes encode open/close via reduce_only."
   - operation: place_quote_market_order
     transport: rest
     product: spot
@@ -340,7 +348,7 @@ endpoints:
     transport: rest
     product: perpetual
     method: GET
-    path: /api/v1/private/order/list/open_orders/{symbol}
+    path: /api/v1/private/order/list/open_orders
     auth: hmac
     credential_scopes: [read_only]
     rate_limit_bucket: contract_private
@@ -381,6 +389,37 @@ endpoints:
       status: implemented
       test: crates/rustcta-exchange-gateway/src/adapters/mexc/private_tests.rs
     notes: "Runtime maps shared SetLeverageRequest to cross-margin openType=2 and applies both long(positionType=1) and short(positionType=2)."
+  - operation: get_symbol_account_config
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/v1/private/position/position_mode
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
+    support: native
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/mexc/private_tests.rs
+    notes: "Runtime reads current MEXC contract positionMode and exposes it as shared position mode account config."
+  - operation: set_position_mode
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/v1/private/position/change_position_mode
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: contract_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/mexc/request_specs/set_position_mode.json
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/mexc/private_tests.rs
+    support: native
+    notes: "Runtime maps shared Hedge to MEXC positionMode=1 and OneWay to positionMode=2; official API requires no active orders, plan orders, or unfinished positions."
 streams:
   - operation: public_orderbook_bbo
     product: spot

@@ -156,6 +156,7 @@ struct LedgerArgs {
 #[derive(Debug, Subcommand)]
 enum SupervisorCommand {
     PrintLegacySpec(PrintLegacySpecArgs),
+    PrintCrossArbShardSpecs(PrintCrossArbShardSpecsArgs),
     Readiness(SupervisorReadinessArgs),
     ValidateRegistry(ValidateRegistryArgs),
     ValidateSpec(ValidateSpecArgs),
@@ -226,6 +227,34 @@ struct PrintLegacySpecArgs {
     log_dir: Option<String>,
     #[arg(long)]
     restart_backoff_ms: Option<u64>,
+}
+
+#[derive(Debug, Parser)]
+struct PrintCrossArbShardSpecsArgs {
+    #[arg(long, default_value_t = 1)]
+    shard_count: usize,
+    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
+    config: String,
+    #[arg(long, default_value = "cross_arb_live")]
+    strategy_id_prefix: String,
+    #[arg(long, default_value = "local")]
+    run_id_prefix: String,
+    #[arg(long, default_value = "local")]
+    tenant_id: String,
+    #[arg(long, default_value = "cross_arb_3venues")]
+    account_id: String,
+    #[arg(long)]
+    working_dir: Option<String>,
+    #[arg(long, default_value = "logs/supervisor")]
+    log_dir: String,
+    #[arg(long, default_value = "logs/cross_exchange_arbitrage")]
+    runtime_dir: String,
+    #[arg(long)]
+    restart_backoff_ms: Option<u64>,
+    #[arg(long, default_value_t = 5000)]
+    dashboard_refresh_ms: u64,
+    #[arg(long, default_value_t = false)]
+    enable_live_trading: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -545,6 +574,10 @@ fn run_supervisor(command: SupervisorCommand) -> Result<()> {
             spec.validate()?;
             println!("{}", serde_json::to_string_pretty(&spec)?);
         }
+        SupervisorCommand::PrintCrossArbShardSpecs(args) => {
+            let specs = build_cross_arb_shard_specs(&args)?;
+            println!("{}", serde_json::to_string_pretty(&specs)?);
+        }
         SupervisorCommand::Readiness(args) => {
             let report = supervisor_readiness_report(&args.spec_dir)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -572,6 +605,82 @@ fn run_supervisor(command: SupervisorCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn build_cross_arb_shard_specs(
+    args: &PrintCrossArbShardSpecsArgs,
+) -> Result<Vec<StrategyProcessSpec>> {
+    if args.shard_count == 0 || args.shard_count > 1024 {
+        bail!("--shard-count must be between 1 and 1024");
+    }
+    let mut specs = Vec::with_capacity(args.shard_count);
+    for shard_id in 0..args.shard_count {
+        let strategy_id = format!("{}_shard_{shard_id}", args.strategy_id_prefix);
+        let run_id = format!("{}_shard_{shard_id}", args.run_id_prefix);
+        let mut options = LegacyProcessSpecOptions::new(LegacyProcessTemplate::CrossArbLive);
+        options.strategy_id = Some(strategy_id.clone());
+        options.run_id = Some(run_id.clone());
+        options.tenant_id = Some(args.tenant_id.clone());
+        options.config_path = Some(args.config.clone());
+        options.working_dir = args.working_dir.clone();
+        options.log_dir = Some(args.log_dir.clone());
+        options.restart_backoff_ms = args.restart_backoff_ms;
+        let mut spec = build_legacy_process_spec(options);
+        replace_arg_value(&mut spec.args, "--strategy-id", &strategy_id);
+        replace_arg_value(&mut spec.args, "--run-id", &run_id);
+        replace_arg_value(&mut spec.args, "--tenant-id", &args.tenant_id);
+        replace_arg_value(&mut spec.args, "--account-id", &args.account_id);
+        replace_arg_value(
+            &mut spec.args,
+            "--lock-file",
+            &format!("{}/cross_arb_live_shard_{shard_id}.lock", args.runtime_dir),
+        );
+        replace_arg_value(
+            &mut spec.args,
+            "--dashboard-snapshot-path",
+            &format!(
+                "{}/cross_arb_live_dashboard_shard_{shard_id}.json",
+                args.runtime_dir
+            ),
+        );
+        replace_arg_value(
+            &mut spec.args,
+            "--trade-ledger-path",
+            &format!("{}/trade_events_shard_{shard_id}.jsonl", args.runtime_dir),
+        );
+        replace_arg_value(
+            &mut spec.args,
+            "--dashboard-refresh-ms",
+            &args.dashboard_refresh_ms.to_string(),
+        );
+        append_arg_pair(&mut spec.args, "--shard-id", &shard_id.to_string());
+        append_arg_pair(
+            &mut spec.args,
+            "--shard-count",
+            &args.shard_count.to_string(),
+        );
+        if args.enable_live_trading && !spec.args.iter().any(|arg| arg == "--enable-live-trading") {
+            spec.args.push("--enable-live-trading".to_string());
+        }
+        spec.validate()?;
+        specs.push(spec);
+    }
+    Ok(specs)
+}
+
+fn replace_arg_value(args: &mut Vec<String>, flag: &str, value: &str) {
+    if let Some(index) = args.iter().position(|arg| arg == flag) {
+        if let Some(existing) = args.get_mut(index + 1) {
+            *existing = value.to_string();
+            return;
+        }
+    }
+    append_arg_pair(args, flag, value);
+}
+
+fn append_arg_pair(args: &mut Vec<String>, flag: &str, value: &str) {
+    args.push(flag.to_string());
+    args.push(value.to_string());
 }
 
 async fn run_ops(command: OpsCommand) -> Result<()> {
@@ -951,6 +1060,53 @@ mod tests {
         assert!(
             Args::try_parse_from(["rustcta-industrial", "ops", "admin", "cancel-order"]).is_err()
         );
+    }
+
+    #[test]
+    fn supervisor_cross_arb_shard_specs_should_emit_distinct_shard_args() {
+        let args = PrintCrossArbShardSpecsArgs {
+            shard_count: 3,
+            config: "config/cross_exchange_arbitrage_usdt.yml".to_string(),
+            strategy_id_prefix: "cross_arb_live".to_string(),
+            run_id_prefix: "run".to_string(),
+            tenant_id: "tenant-a".to_string(),
+            account_id: "acct-a".to_string(),
+            working_dir: Some(".".to_string()),
+            log_dir: "logs/supervisor".to_string(),
+            runtime_dir: "logs/cross_exchange_arbitrage".to_string(),
+            restart_backoff_ms: Some(1000),
+            dashboard_refresh_ms: 7000,
+            enable_live_trading: false,
+        };
+
+        let specs = build_cross_arb_shard_specs(&args).expect("shard specs");
+
+        assert_eq!(specs.len(), 3);
+        for (shard_id, spec) in specs.iter().enumerate() {
+            assert_eq!(spec.strategy_id, format!("cross_arb_live_shard_{shard_id}"));
+            assert!(spec
+                .args
+                .windows(2)
+                .any(|pair| pair[0] == "--shard-id" && pair[1] == shard_id.to_string()));
+            assert!(spec
+                .args
+                .windows(2)
+                .any(|pair| pair[0] == "--shard-count" && pair[1] == "3"));
+            assert!(spec
+                .args
+                .windows(2)
+                .any(|pair| pair[0] == "--dashboard-refresh-ms" && pair[1] == "7000"));
+            assert!(spec
+                .args
+                .windows(2)
+                .any(|pair| pair[0] == "--lock-file"
+                    && pair[1].contains(&format!("shard_{shard_id}"))));
+            assert!(spec
+                .args
+                .windows(2)
+                .any(|pair| pair[0] == "--dashboard-snapshot-path"
+                    && pair[1].contains(&format!("shard_{shard_id}"))));
+        }
     }
 
     #[test]

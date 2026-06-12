@@ -2,10 +2,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::{
-    ControlApiStateSnapshot, FeeSummaryView, FeeVenueSummary, JsonRowsView, LogEventView, LogLevel,
-    LogStreamView, OpportunitiesView, RiskEventView, RiskSeverity, RiskStatus, RiskSummaryView,
-    RuntimeControlReadView, StrategySnapshotEnvelope, StrategySnapshotSource, SymbolScannerView,
-    SymbolsView, CONTROL_API_SCHEMA_VERSION,
+    ControlApiStateSnapshot, FeeSummaryView, FeeVenueSummary, JsonRowsView, LogCategory,
+    LogEventView, LogLevel, LogStreamView, OpportunitiesView, RiskEventView, RiskSeverity,
+    RiskStatus, RiskSummaryView, RuntimeControlReadView, StrategySnapshotEnvelope,
+    StrategySnapshotSource, SymbolScannerView, SymbolsView, CONTROL_API_SCHEMA_VERSION,
 };
 
 pub fn apply_runtime_or_legacy_snapshot(
@@ -436,6 +436,7 @@ pub fn log_stream_from_legacy_snapshot(legacy: &Value) -> LogStreamView {
                 events.push(LogEventView {
                     log_id: format!("risk-{}", risk_event.event_id),
                     level: log_level_for_risk_severity(risk_event.severity),
+                    category: log_category_for_risk_severity(risk_event.severity),
                     target: Some(risk_event.scope),
                     message: risk_event.message,
                     occurred_at: risk_event.occurred_at,
@@ -630,9 +631,15 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
         .as_object()
         .is_some_and(serde_json::Map::is_empty)
     {
+        let strategy_id = cross_detail
+            .pointer("/summary/strategy_id")
+            .and_then(Value::as_str)
+            .or_else(|| legacy.get("strategy_id").and_then(Value::as_str))
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("contract-arb-local");
         snapshots.push(StrategySnapshotEnvelope {
             schema_version: CONTROL_API_SCHEMA_VERSION,
-            strategy_id: "contract-arb-local".to_string(),
+            strategy_id: strategy_id.to_string(),
             strategy_kind: "cross_exchange_arbitrage".to_string(),
             run_id: None,
             status: None,
@@ -726,6 +733,14 @@ fn log_level_for_risk_severity(severity: RiskSeverity) -> LogLevel {
         RiskSeverity::Critical | RiskSeverity::Error => LogLevel::Error,
         RiskSeverity::Warning => LogLevel::Warn,
         RiskSeverity::Info => LogLevel::Info,
+    }
+}
+
+fn log_category_for_risk_severity(severity: RiskSeverity) -> LogCategory {
+    match severity {
+        RiskSeverity::Critical | RiskSeverity::Error => LogCategory::Error,
+        RiskSeverity::Warning => LogCategory::Warn,
+        RiskSeverity::Info => LogCategory::Info,
     }
 }
 

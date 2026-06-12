@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "strategy_id": "funding_spread_expansion_maker_live",
+  "strategy_kind": "funding_spread_expansion_maker",
+  "run_id": "local",
+  "tenant_id": "local",
+  "config_path": "config/funding_spread_expansion_maker_usdt.yml",
+  "command": "cargo",
+  "args": [
+    "run",
+    "-p",
+    "rustcta-strategy-funding-spread-expansion-maker",
+    "--bin",
+    "funding-spread-expansion-maker-runtime",
+    "--",
+    "--config",
+    "config/funding_spread_expansion_maker_usdt.yml",
+    "--strategy-id",
+    "funding_spread_expansion_maker_live"
+  ],
+  "working_dir": ".",
+  "log_path": "logs/supervisor/funding_spread_expansion_maker_live.log",
+  "restart_backoff_ms": 5000,
+  "recovery_policy": {
+    "restart_on_exit": false,
+    "restart_on_stale_heartbeat": false,
+    "max_restart_attempts": 0,
+    "heartbeat_timeout_ms": null,
+    "snapshot_timeout_ms": null,
+    "restart_backoff_ms": 5000
+  }
+}

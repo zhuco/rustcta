@@ -1,0 +1,19 @@
+{
+  "exchange": "aster",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/fapi/v3/order",
+  "auth": "signed",
+  "form_contains": {
+    "symbol": "BTCUSDT",
+    "orderId": "2001",
+    "newClientOrderId": "cli-amend",
+    "quantity": "0.02",
+    "recvWindow": "5000"
+  },
+  "form_signature_fields": ["user", "signer", "nonce", "signature"],
+  "forbid_form_values_containing": ["test-secret"],
+  "runtime_status": "runtime_enabled"
+}

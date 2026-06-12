@@ -494,6 +494,17 @@ impl BinanceGatewayAdapter {
         self.ensure_supported_market(request.symbol.market_type)?;
         let symbol = normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?;
         let mut attempts = Vec::new();
+        if request.exchange_order_id.is_some() && request.client_order_id.is_some() {
+            let mut params = HashMap::new();
+            params.insert("symbol".to_string(), symbol.clone());
+            insert_order_identifier(
+                &mut params,
+                request.exchange_order_id.as_deref(),
+                request.client_order_id.as_deref(),
+                "query_order",
+            )?;
+            attempts.push(params);
+        }
         if let Some(order_id) = request.exchange_order_id.as_deref() {
             attempts.push(binance_order_query_params(&symbol, "orderId", order_id));
         }

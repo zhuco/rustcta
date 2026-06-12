@@ -28,6 +28,7 @@ pub enum GatewayOperation {
     GetRecentFills,
     GetSymbolAccountConfig,
     SetLeverage,
+    SetMarginMode,
     SetPositionMode,
     ClosePosition,
     SetCountdownCancelAll,
@@ -59,6 +60,7 @@ impl GatewayOperation {
             Self::GetRecentFills => "get_recent_fills",
             Self::GetSymbolAccountConfig => "get_symbol_account_config",
             Self::SetLeverage => "set_leverage",
+            Self::SetMarginMode => "set_margin_mode",
             Self::SetPositionMode => "set_position_mode",
             Self::ClosePosition => "close_position",
             Self::SetCountdownCancelAll => "set_countdown_cancel_all",
@@ -101,6 +103,7 @@ impl FromStr for GatewayOperation {
                 Ok(Self::GetSymbolAccountConfig)
             }
             "set_leverage" | "leverage" => Ok(Self::SetLeverage),
+            "set_margin_mode" | "margin_mode" => Ok(Self::SetMarginMode),
             "set_position_mode" | "position_mode" => Ok(Self::SetPositionMode),
             "close_position" => Ok(Self::ClosePosition),
             "set_countdown_cancel_all" | "countdown_cancel_all" => Ok(Self::SetCountdownCancelAll),

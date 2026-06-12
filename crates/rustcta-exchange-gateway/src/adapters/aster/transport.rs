@@ -98,6 +98,25 @@ impl AsterRest {
         .await
     }
 
+    pub async fn send_signed_put(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        user_address: &str,
+        signer_address: &str,
+        signer_private_key: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::PUT,
+            endpoint,
+            params,
+            user_address,
+            signer_address,
+            signer_private_key,
+        )
+        .await
+    }
+
     pub async fn send_signed_delete(
         &self,
         endpoint: &str,

@@ -33,16 +33,16 @@ pub use core::{
     DualTakerCloseEvaluation, DualTakerFeeEstimate, DualTakerOpenOpportunity, ExchangeFeeRates,
     ExchangeId, ExchangeRuntimeStatus, ExchangeStartupReadiness, ExchangeStatusRegistry,
     FeeBreakdown, FeeModel, FeeRole, FillInferenceType, FundingEstimate, FundingModel,
-    FundingSettlementLedger, MakerLegKind, NetPosition, NetPositionWarning, OpenArbitragePosition,
-    OpenBlockReason, OpenOpportunityAudit, OpenOpportunityAuditReport, OpenOpportunityDecision,
-    OpenOpportunityRejectReason, OrderBookTop, OrderSide, PairedTakerFillState, PositionSide,
-    PrecisionRegistry, QuantityUnit, SimulatedBundleState, SimulatedBundleStatus, SingleLegGuard,
-    SlippageCaptureArbitrageConfig, SlippageCaptureHedgePlan, SlippageCaptureMakerOrderDraft,
-    SlippageCaptureOpenOpportunity, SlippageCaptureOrderRole, SlippageCaptureStartupGate,
-    StartupPositionTakeoverPlan, StartupReadiness, StartupSingleLegResolution, StartupUsdtPosition,
-    StrategyLogEventKind, StrategyLogRotationConfig, StrategyRoute, SymbolPrecision,
-    TakerFillAudit, TakerOrderDraft, TakerOrderRole, VolatilityRankDirection, VolatilityRankTicker,
-    VolatilityUniverseConfig,
+    FundingSettlement, FundingSettlementLedger, MakerLegKind, NetPosition, NetPositionWarning,
+    OpenArbitragePosition, OpenBlockReason, OpenOpportunityAudit, OpenOpportunityAuditReport,
+    OpenOpportunityDecision, OpenOpportunityRejectReason, OrderBookTop, OrderSide,
+    PairedTakerFillState, PositionSide, PrecisionRegistry, QuantityUnit, SimulatedBundleState,
+    SimulatedBundleStatus, SingleLegGuard, SlippageCaptureArbitrageConfig,
+    SlippageCaptureHedgePlan, SlippageCaptureMakerOrderDraft, SlippageCaptureOpenOpportunity,
+    SlippageCaptureOrderRole, SlippageCaptureStartupGate, StartupPositionTakeoverPlan,
+    StartupReadiness, StartupSingleLegResolution, StartupUsdtPosition, StrategyLogEventKind,
+    StrategyLogRotationConfig, StrategyRoute, SymbolPrecision, TakerFillAudit, TakerOrderDraft,
+    TakerOrderRole, VolatilityRankDirection, VolatilityRankTicker, VolatilityUniverseConfig,
 };
 pub use runtime_contract::{
     build_runtime_contract, default_runtime_contract, CrossArbDashboardSnapshot,
@@ -539,6 +539,21 @@ impl CrossExchangeArbitrageConfig {
         }
         if let Some(value) = i64_at(value, &["slippage_capture", "symbol_cooldown_secs"]) {
             self.slippage_capture.symbol_cooldown_secs = value.max(0);
+        }
+        if let Some(value) = i64_at(value, &["slippage_capture", "risk_flatten_grace_secs"]) {
+            self.slippage_capture.risk_flatten_grace_secs = value.max(0);
+        }
+        if let Some(value) = f64_at(
+            value,
+            &["slippage_capture", "risk_flatten_close_min_net_profit_pct"],
+        ) {
+            self.slippage_capture.risk_flatten_close_min_net_profit_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(
+            value,
+            &["slippage_capture", "risk_flatten_hedge_min_net_profit_pct"],
+        ) {
+            self.slippage_capture.risk_flatten_hedge_min_net_profit_pct = value.max(0.0);
         }
     }
 }
@@ -1416,7 +1431,10 @@ pub fn config_schema() -> StrategyConfigSchema {
                         "max_open_bundles": { "type": "integer", "minimum": 1 },
                         "max_positions_per_exchange": { "type": "integer", "minimum": 1 },
                         "max_active_bundles_per_symbol": { "type": "integer", "minimum": 1 },
-                        "symbol_cooldown_secs": { "type": "integer", "minimum": 0 }
+                        "symbol_cooldown_secs": { "type": "integer", "minimum": 0 },
+                        "risk_flatten_grace_secs": { "type": "integer", "minimum": 0 },
+                        "risk_flatten_close_min_net_profit_pct": { "type": "number", "minimum": 0.0 },
+                        "risk_flatten_hedge_min_net_profit_pct": { "type": "number", "minimum": 0.0 }
                     }
                 },
                 "logging": {

@@ -1,11 +1,12 @@
 use crate::{
-    read_models, AgentConnectionStatus, AgentSummary, ControlApiStateSnapshot, LogEventView,
-    LogLevel, StrategyLogTailView, StrategySnapshotEnvelope, CONTROL_API_SCHEMA_VERSION,
+    read_models, AgentConnectionStatus, AgentSummary, ControlApiStateSnapshot, JsonRowsView,
+    LogCategory, LogEventView, LogLevel, StrategyLogTailView, StrategySnapshotEnvelope,
+    CONTROL_API_SCHEMA_VERSION,
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rustcta_event_ledger::{
     AuditActor, AuditActorType, AuditOutcome, AuditRecord, EventIdentity, EventKind, LedgerEvent,
-    LedgerStore,
+    LedgerPayload, LedgerStore,
 };
 use rustcta_supervisor::{
     JsonFileProcessRegistryStore, LifecycleCommand, LifecycleCommandRecord, LocalProcessSupervisor,
@@ -206,8 +207,21 @@ impl ControlApiState {
         }
         for path in &self.extra_strategy_snapshot_paths {
             if let Ok(raw) = tokio::fs::read_to_string(path.as_ref()).await {
-                if let Ok(strategy_snapshots) = strategy_snapshots_from_extra_file(&raw) {
-                    merge_strategy_snapshots(&mut snapshot.strategy_snapshots, strategy_snapshots);
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if looks_like_runtime_or_legacy_dashboard_snapshot(&value) {
+                        let overlay = read_models::apply_runtime_or_legacy_snapshot(
+                            Self::empty_local_snapshot(),
+                            &value,
+                        );
+                        merge_control_api_snapshot_overlay(&mut snapshot, overlay);
+                    } else if let Ok(strategy_snapshots) =
+                        strategy_snapshots_from_extra_value(&value)
+                    {
+                        merge_strategy_snapshots(
+                            &mut snapshot.strategy_snapshots,
+                            strategy_snapshots,
+                        );
+                    }
                 }
             }
         }
@@ -467,9 +481,13 @@ impl ControlApiState {
         .await
         {
             Ok((events, truncated)) => {
+                let (events, truncated) = self
+                    .merge_control_audit_log_events(events, truncated, view.max_lines)
+                    .await;
                 view.readable = true;
                 view.truncated = truncated;
                 view.event_count = events.len();
+                view.counts = log_category_counts(&events);
                 view.events = events;
             }
             Err(error) => {
@@ -479,12 +497,37 @@ impl ControlApiState {
 
         view
     }
+
+    async fn merge_control_audit_log_events(
+        &self,
+        mut events: Vec<LogEventView>,
+        truncated: bool,
+        max_lines: usize,
+    ) -> (Vec<LogEventView>, bool) {
+        let Ok(audit_events) = self.audit_events(None).await else {
+            return (events, truncated);
+        };
+        let mut control_events = audit_events
+            .into_iter()
+            .filter_map(control_audit_log_event_from_ledger)
+            .collect::<Vec<_>>();
+        if control_events.is_empty() {
+            return (events, truncated);
+        }
+        events.append(&mut control_events);
+        events.sort_by(|left, right| left.occurred_at.cmp(&right.occurred_at));
+        let max_lines = max_lines.max(1);
+        let truncated = truncated || events.len() > max_lines;
+        if events.len() > max_lines {
+            events.drain(0..events.len() - max_lines);
+        }
+        (events, truncated)
+    }
 }
 
-fn strategy_snapshots_from_extra_file(
-    raw: &str,
+fn strategy_snapshots_from_extra_value(
+    value: &serde_json::Value,
 ) -> Result<Vec<StrategySnapshotEnvelope>, serde_json::Error> {
-    let value = serde_json::from_str::<serde_json::Value>(raw)?;
     if let Ok(envelope) = serde_json::from_value::<StrategySnapshotEnvelope>(value.clone()) {
         return Ok(vec![envelope]);
     }
@@ -499,15 +542,72 @@ fn strategy_snapshots_from_extra_file(
     Ok(Vec::new())
 }
 
+fn looks_like_runtime_or_legacy_dashboard_snapshot(value: &serde_json::Value) -> bool {
+    value.get("cross_arb_dashboard").is_some()
+        || value.get("runtime").is_some()
+        || value.get("summary").is_some()
+        || value.get("opportunities").is_some()
+        || value.get("market_snapshots").is_some()
+}
+
+fn merge_control_api_snapshot_overlay(
+    target: &mut ControlApiStateSnapshot,
+    overlay: ControlApiStateSnapshot,
+) {
+    target.generated_at = target.generated_at.max(overlay.generated_at);
+    append_json_rows(&mut target.inventory, overlay.inventory);
+    append_json_rows(&mut target.books, overlay.books);
+    append_json_rows(&mut target.exchanges, overlay.exchanges);
+    append_json_rows(&mut target.recent_trades, overlay.recent_trades);
+    append_json_rows(
+        &mut target.recent_opportunities,
+        overlay.recent_opportunities,
+    );
+    target
+        .opportunities
+        .recent
+        .extend(overlay.opportunities.recent);
+    target
+        .opportunities
+        .arbitrage
+        .extend(overlay.opportunities.arbitrage);
+    if !overlay
+        .opportunities
+        .statistics
+        .as_object()
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        target.opportunities.statistics = overlay.opportunities.statistics;
+    }
+    target.risk.events.extend(overlay.risk.events);
+    target.risk.open_risk_event_count = target
+        .risk
+        .events
+        .iter()
+        .filter(|event| event.resolved_at.is_none())
+        .count();
+    target.risk.last_event_at = target
+        .risk
+        .events
+        .iter()
+        .map(|event| event.occurred_at)
+        .max();
+    merge_strategy_snapshots(&mut target.strategy_snapshots, overlay.strategy_snapshots);
+}
+
+fn append_json_rows(target: &mut JsonRowsView, overlay: JsonRowsView) {
+    target.rows.extend(overlay.rows);
+}
+
 fn merge_strategy_snapshots(
     snapshots: &mut Vec<StrategySnapshotEnvelope>,
     incoming: Vec<StrategySnapshotEnvelope>,
 ) {
     for strategy_snapshot in incoming {
-        if let Some(existing) = snapshots.iter_mut().find(|snapshot| {
-            snapshot.strategy_id == strategy_snapshot.strategy_id
-                || snapshot.strategy_kind == strategy_snapshot.strategy_kind
-        }) {
+        if let Some(existing) = snapshots
+            .iter_mut()
+            .find(|snapshot| snapshot.strategy_id == strategy_snapshot.strategy_id)
+        {
             *existing = strategy_snapshot;
         } else {
             snapshots.push(strategy_snapshot);
@@ -629,6 +729,7 @@ fn parse_log_line(
 ) -> LogEventView {
     let level = parse_log_level(line);
     let lower = line.to_ascii_lowercase();
+    let category = classify_strategy_log_line(&lower, level);
     let message = if contains_private_log_marker(&lower) {
         "[redacted log line]".to_string()
     } else {
@@ -638,10 +739,233 @@ fn parse_log_line(
     LogEventView {
         log_id: format!("{target}-tail-{index}"),
         level,
+        category,
         target: Some(target.to_string()),
         message,
         occurred_at: parse_log_time(line).unwrap_or(fallback_time),
     }
+}
+
+fn log_category_counts(events: &[LogEventView]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    counts.insert("all".to_string(), events.len());
+    for event in events {
+        *counts
+            .entry(event.category.as_key().to_string())
+            .or_insert(0) += 1;
+    }
+    for category in [
+        "error", "warn", "trade", "control", "balance", "market", "info",
+    ] {
+        counts.entry(category.to_string()).or_insert(0);
+    }
+    counts
+}
+
+fn control_audit_log_event_from_ledger(event: LedgerEvent) -> Option<LogEventView> {
+    let LedgerPayload::Audit(record) = event.payload else {
+        return None;
+    };
+    let level = match record.outcome {
+        AuditOutcome::Failed => LogLevel::Error,
+        AuditOutcome::Rejected => LogLevel::Warn,
+        AuditOutcome::Accepted | AuditOutcome::Succeeded => LogLevel::Info,
+    };
+    Some(LogEventView {
+        log_id: format!("control-audit-{}", event.sequence),
+        level,
+        category: LogCategory::Control,
+        target: Some("control".to_string()),
+        message: control_audit_log_message(&record),
+        occurred_at: record.identity.occurred_at,
+    })
+}
+
+fn control_audit_log_message(record: &AuditRecord) -> String {
+    let command = record
+        .metadata
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            record
+                .metadata
+                .get("payload")
+                .and_then(|payload| payload.get("command"))
+                .and_then(serde_json::Value::as_str)
+        });
+    let strategy_id = record
+        .metadata
+        .get("strategy_id")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            record
+                .metadata
+                .get("payload")
+                .and_then(|payload| payload.get("strategy_id"))
+                .and_then(serde_json::Value::as_str)
+        });
+    let operation_id = record
+        .metadata
+        .get("operation_id")
+        .and_then(serde_json::Value::as_str);
+    let mut parts = vec![
+        "control audit".to_string(),
+        format!("action={}", record.action),
+        format!("outcome={:?}", record.outcome).to_ascii_lowercase(),
+    ];
+    if let Some(command) = command {
+        parts.push(format!("command={command}"));
+    }
+    if let Some(strategy_id) = strategy_id {
+        parts.push(format!("strategy_id={strategy_id}"));
+    }
+    if let Some(operation_id) = operation_id {
+        parts.push(format!("operation_id={operation_id}"));
+    }
+    parts.join(" ")
+}
+
+fn classify_strategy_log_line(lower: &str, level: LogLevel) -> LogCategory {
+    if contains_any(
+        lower,
+        &["open_decision_audit", "cross_arb_open_decision_audit"],
+    ) {
+        return LogCategory::Info;
+    }
+
+    if level == LogLevel::Error
+        || contains_any(
+            lower,
+            &[
+                "manual_intervention_required",
+                "emergency close",
+                "emergency_close",
+                "single_leg_fill_detected",
+                "partial_close",
+                "residual_market_flatten",
+                "external_position_check_failed",
+                "risk_auto_stop",
+                "failed with result",
+                "fatal",
+                "panic",
+            ],
+        )
+    {
+        return LogCategory::Error;
+    }
+
+    if level == LogLevel::Warn
+        || contains_any(
+            lower,
+            &[
+                "cross_arb_alert",
+                "alert",
+                "warning",
+                "timeout",
+                "unfilled",
+                "maker_timeout",
+                "maker_cancel",
+                "submit_failed",
+                "cancel_rejected",
+                "rejected",
+                "blocked",
+                "cooldown",
+                "risk_flatten",
+                "no_profit",
+                "degraded",
+                "capability_missing",
+                "capability_degraded",
+                "insufficient",
+                "slippage_capture_maker_timeout_alert",
+                "open_route_cooldown",
+            ],
+        )
+    {
+        return LogCategory::Warn;
+    }
+
+    if contains_any(
+        lower,
+        &[
+            "control",
+            "command",
+            "manual_close",
+            "start_paused",
+            "close_only",
+            "new_entries_blocked_by_control",
+            "settings",
+            "config",
+            "pause",
+            "resume",
+        ],
+    ) {
+        return LogCategory::Control;
+    }
+
+    if contains_any(
+        lower,
+        &[
+            "balance",
+            "equity",
+            "inventory",
+            "margin",
+            "collateral",
+            "wallet",
+        ],
+    ) {
+        return LogCategory::Balance;
+    }
+
+    if contains_any(
+        lower,
+        &[
+            "cross-arb trade event",
+            "lifecycle=open",
+            "lifecycle=close",
+            "action=cross_arb_open",
+            "action=cross_arb_close",
+            "slippage_capture_open",
+            "slippage_capture_taker_hedge",
+            "order_trade_update",
+            "trade_lite",
+            "maker",
+            "hedge",
+            "taker",
+            "fill",
+            "filled",
+            " ack",
+            "pnl",
+            "profit",
+        ],
+    ) {
+        return LogCategory::Trade;
+    }
+
+    if contains_any(
+        lower,
+        &[
+            "market",
+            "book",
+            "orderbook",
+            "top-of-book",
+            "spread",
+            "quote",
+            "websocket",
+            "direct_websocket",
+            "depth",
+            "signal_expired",
+            "stale",
+            "latency_span",
+        ],
+    ) {
+        return LogCategory::Market;
+    }
+
+    LogCategory::Info
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
 }
 
 fn parse_log_level(line: &str) -> LogLevel {

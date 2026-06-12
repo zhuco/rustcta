@@ -53,6 +53,7 @@ pub enum EventKind {
     CancelAckEvent,
     BundleEvent,
     FillEvent,
+    FundingSettlementEvent,
     BalanceSnapshotEvent,
     PositionSnapshotEvent,
     RiskDecisionEvent,
@@ -162,6 +163,14 @@ impl LedgerEvent {
         )
     }
 
+    pub fn funding_settlement(record: FundingSettlementLedgerRecord) -> Self {
+        Self::new(
+            EventKind::FundingSettlementEvent,
+            record.identity.clone(),
+            LedgerPayload::FundingSettlement(record),
+        )
+    }
+
     pub fn balance_snapshot(record: BalanceSnapshotRecord) -> Self {
         Self::new(
             EventKind::BalanceSnapshotEvent,
@@ -265,6 +274,7 @@ pub enum LedgerPayload {
     OrderLifecycle(OrderLifecycleRecord),
     Bundle(BundleSubmitAck),
     Fill(FillLedgerRecord),
+    FundingSettlement(FundingSettlementLedgerRecord),
     BalanceSnapshot(BalanceSnapshotRecord),
     FeeModelDecision(FeeModelDecision),
     ReservationDecision(ReservationDecision),
@@ -289,6 +299,7 @@ impl LedgerPayload {
             LedgerPayload::Reconciliation(event) => validate_execution_payload(event),
             LedgerPayload::OrderReconciliation(summary) => validate_execution_payload(summary),
             LedgerPayload::Rejection(decision) => validate_execution_payload(decision),
+            LedgerPayload::FundingSettlement(record) => record.validated(),
             LedgerPayload::OrderLifecycle(_)
             | LedgerPayload::Bundle(_)
             | LedgerPayload::Fill(_)
@@ -479,6 +490,93 @@ impl FillLedgerRecord {
             filled_at,
             metadata: Value::Null,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingSettlementLedgerRecord {
+    pub schema_version: SchemaVersion,
+    pub identity: EventIdentity,
+    pub bundle_id: String,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: CanonicalSymbol,
+    pub position_side: PositionSide,
+    pub notional_usdt: f64,
+    pub funding_rate: f64,
+    pub funding_pnl_usdt: f64,
+    pub mark_price: Option<f64>,
+    pub index_price: Option<f64>,
+    pub settled_at: DateTime<Utc>,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+impl FundingSettlementLedgerRecord {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        identity: EventIdentity,
+        bundle_id: impl Into<String>,
+        exchange_id: ExchangeId,
+        market_type: MarketType,
+        canonical_symbol: CanonicalSymbol,
+        position_side: PositionSide,
+        notional_usdt: f64,
+        funding_rate: f64,
+        funding_pnl_usdt: f64,
+        settled_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            schema_version: EVENT_LEDGER_SCHEMA_VERSION,
+            identity,
+            bundle_id: bundle_id.into(),
+            exchange_id,
+            market_type,
+            canonical_symbol,
+            position_side,
+            notional_usdt,
+            funding_rate,
+            funding_pnl_usdt,
+            mark_price: None,
+            index_price: None,
+            settled_at,
+            metadata: Value::Null,
+        }
+    }
+
+    pub fn validated(&self) -> Result<()> {
+        if self.bundle_id.trim().is_empty() {
+            return Err(LedgerError::Validation {
+                message: "funding settlement bundle_id is required".to_string(),
+            });
+        }
+        if !self.notional_usdt.is_finite() || self.notional_usdt < 0.0 {
+            return Err(LedgerError::Validation {
+                message: "funding settlement notional_usdt must be finite and non-negative"
+                    .to_string(),
+            });
+        }
+        if !self.funding_rate.is_finite() {
+            return Err(LedgerError::Validation {
+                message: "funding settlement funding_rate must be finite".to_string(),
+            });
+        }
+        if !self.funding_pnl_usdt.is_finite() {
+            return Err(LedgerError::Validation {
+                message: "funding settlement funding_pnl_usdt must be finite".to_string(),
+            });
+        }
+        for (field, value) in [
+            ("mark_price", self.mark_price),
+            ("index_price", self.index_price),
+        ] {
+            if value.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+                return Err(LedgerError::Validation {
+                    message: format!("funding settlement {field} must be positive when present"),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -952,6 +1050,23 @@ mod tests {
         ))
     }
 
+    fn funding_settlement_event(bundle_id: &str, pnl_usdt: f64) -> LedgerEvent {
+        let mut record = FundingSettlementLedgerRecord::new(
+            identity().with_correlation_id(bundle_id),
+            bundle_id,
+            exchange_id(),
+            MarketType::Perpetual,
+            symbol(),
+            PositionSide::Short,
+            100.0,
+            0.0005,
+            pnl_usdt,
+            Utc::now(),
+        );
+        record.mark_price = Some(65_000.0);
+        LedgerEvent::funding_settlement(record)
+    }
+
     #[tokio::test]
     async fn append_and_replay_should_preserve_sequence_order() {
         let ledger = InMemoryLedger::new();
@@ -1013,6 +1128,53 @@ mod tests {
             .expect("replay fills");
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn funding_settlement_events_should_append_replay_and_sum_pnl() {
+        let ledger = InMemoryLedger::new();
+
+        let first = ledger
+            .append(funding_settlement_event("bundle-1", 0.05))
+            .await
+            .expect("append first settlement");
+        let second = ledger
+            .append(funding_settlement_event("bundle-1", -0.02))
+            .await
+            .expect("append second settlement");
+
+        assert_eq!(first.kind, EventKind::FundingSettlementEvent);
+        assert_eq!(second.sequence, 2);
+
+        let settlements = ledger
+            .replay_kind(EventKind::FundingSettlementEvent, None)
+            .await
+            .expect("replay settlements");
+        let total = settlements
+            .iter()
+            .map(|event| match &event.payload {
+                LedgerPayload::FundingSettlement(record) => record.funding_pnl_usdt,
+                other => panic!("expected funding settlement payload, got {other:?}"),
+            })
+            .sum::<f64>();
+        assert!((total - 0.03).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn funding_settlement_events_should_reject_invalid_amounts() {
+        let ledger = InMemoryLedger::new();
+        let mut event = funding_settlement_event("bundle-1", f64::NAN);
+        if let LedgerPayload::FundingSettlement(record) = &mut event.payload {
+            record.notional_usdt = -1.0;
+        }
+
+        let error = ledger
+            .append(event)
+            .await
+            .expect_err("invalid settlement must reject");
+
+        assert!(matches!(error, LedgerError::Validation { .. }));
+        assert_eq!(ledger.len().expect("ledger len"), 0);
     }
 
     #[tokio::test]
@@ -1187,6 +1349,11 @@ mod tests {
             .await
             .expect("append account snapshot");
 
+        let settlement = ledger
+            .append(funding_settlement_event("bundle-1", 0.05))
+            .await
+            .expect("append funding settlement");
+
         let audit = ledger
             .append(LedgerEvent::audit(AuditRecord::new(
                 identity(),
@@ -1203,9 +1370,10 @@ mod tests {
                 ack.sequence,
                 fill.sequence,
                 account.sequence,
+                settlement.sequence,
                 audit.sequence
             ],
-            [1, 2, 3, 4, 5]
+            [1, 2, 3, 4, 5, 6]
         );
 
         let reopened = JsonlLedger::new(&path);
@@ -1217,6 +1385,7 @@ mod tests {
                 EventKind::OrderAckEvent,
                 EventKind::FillEvent,
                 EventKind::BalanceSnapshotEvent,
+                EventKind::FundingSettlementEvent,
                 EventKind::AuditEvent,
             ]
         );
@@ -1227,7 +1396,7 @@ mod tests {
                 .iter()
                 .map(|event| event.sequence)
                 .collect::<Vec<_>>(),
-            vec![3, 4, 5]
+            vec![3, 4, 5, 6]
         );
 
         std::fs::remove_dir_all(temp_dir).ok();

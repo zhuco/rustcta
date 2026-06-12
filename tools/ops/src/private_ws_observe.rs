@@ -1,17 +1,21 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures_util::SinkExt;
+use secp256k1::{ecdsa::RecoverableSignature, Message as SecpMessage, Secp256k1, SecretKey};
 use serde_json::{json, Value};
+use sha3::{Digest, Keccak256};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Instant};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::private_ws_probe::{
-    env_first, gateio_ws_signature, hmac_sha256_base64, read_probe_frame, sanitize_value,
+    env_first, gateio_ws_signature, hmac_sha256_base64, hmac_sha256_hex, read_probe_frame,
+    sanitize_value,
 };
-use crate::ws_proxy_probe::connect_websocket;
+use crate::ws_proxy_probe::{connect_websocket, reqwest_client_builder_with_ws_proxy};
 
 #[derive(Debug, Clone)]
 pub struct PrivateWsObserveConfig {
@@ -27,7 +31,7 @@ pub enum PrivateWsObserveEvent {
 }
 
 #[derive(Debug, Clone)]
-struct PrivateWsRuntimeState {
+struct PrivateWsObserveState {
     exchange: String,
     connected: bool,
     login_ok: Option<bool>,
@@ -38,7 +42,7 @@ struct PrivateWsRuntimeState {
     last_latency_ms: Option<i64>,
 }
 
-pub fn spawn_private_ws_observe_tasks(
+pub async fn run_private_ws_observe_once(
     exchanges: &[String],
     config: PrivateWsObserveConfig,
     tx: mpsc::Sender<PrivateWsObserveEvent>,
@@ -46,51 +50,66 @@ pub fn spawn_private_ws_observe_tasks(
     dotenv::dotenv().ok();
     for exchange in exchanges {
         match normalize_private_exchange(exchange) {
-            Some("binance") => spawn_private_task("binance", config.clone(), tx.clone()),
-            Some("bitget") => spawn_private_task("bitget", config.clone(), tx.clone()),
-            Some("gateio") => spawn_private_task("gateio", config.clone(), tx.clone()),
+            Some("binance") => {
+                observe_private_exchange_once("binance", config.clone(), tx.clone()).await
+            }
+            Some("bitget") => {
+                observe_private_exchange_once("bitget", config.clone(), tx.clone()).await
+            }
+            Some("gateio") => {
+                observe_private_exchange_once("gateio", config.clone(), tx.clone()).await
+            }
+            Some("aster") => {
+                observe_private_exchange_once("aster", config.clone(), tx.clone()).await
+            }
+            Some("mexc") => observe_private_exchange_once("mexc", config.clone(), tx.clone()).await,
+            Some("kucoinfutures") => {
+                observe_private_exchange_once("kucoinfutures", config.clone(), tx.clone()).await
+            }
+            Some("bybit") => {
+                observe_private_exchange_once("bybit", config.clone(), tx.clone()).await
+            }
             _ => {}
         }
     }
 }
 
-fn spawn_private_task(
+async fn observe_private_exchange_once(
     exchange: &'static str,
     config: PrivateWsObserveConfig,
     tx: mpsc::Sender<PrivateWsObserveEvent>,
 ) {
-    tokio::spawn(async move {
-        let mut state = PrivateWsRuntimeState::new(exchange);
-        loop {
-            let result = match exchange {
-                "binance" => run_binance_private_stream(&config, &mut state, &tx).await,
-                "bitget" => run_bitget_private_stream(&config, &mut state, &tx).await,
-                "gateio" => run_gateio_private_stream(&config, &mut state, &tx).await,
-                _ => unreachable!("private exchange is normalized"),
-            };
-            if let Err(error) = result {
-                state.connected = false;
-                state.login_ok = match exchange {
-                    "bitget" => Some(false),
-                    _ => state.login_ok,
-                };
-                state.disconnect_count = state.disconnect_count.saturating_add(1);
-                send_status(
-                    &tx,
-                    &state,
-                    "error",
-                    format!("private websocket error: {error}"),
-                )
-                .await;
-            }
-            tokio::time::sleep(Duration::from_millis(config.reconnect_delay_ms.max(1000))).await;
-        }
-    });
+    let mut state = PrivateWsObserveState::new(exchange);
+    let result = match exchange {
+        "binance" => run_binance_private_stream(&config, &mut state, &tx).await,
+        "bitget" => run_bitget_private_stream(&config, &mut state, &tx).await,
+        "gateio" => run_gateio_private_stream(&config, &mut state, &tx).await,
+        "aster" => run_aster_private_stream(&config, &mut state, &tx).await,
+        "mexc" => run_mexc_private_stream(&config, &mut state, &tx).await,
+        "kucoinfutures" => run_kucoinfutures_private_stream(&config, &mut state, &tx).await,
+        "bybit" => run_bybit_private_stream(&config, &mut state, &tx).await,
+        _ => unreachable!("private exchange is normalized"),
+    };
+    if let Err(error) = result {
+        state.connected = false;
+        state.login_ok = match exchange {
+            "bitget" => Some(false),
+            _ => state.login_ok,
+        };
+        state.disconnect_count = state.disconnect_count.saturating_add(1);
+        send_status(
+            &tx,
+            &state,
+            "error",
+            format!("private websocket error: {error:#}"),
+        )
+        .await;
+    }
 }
 
 async fn run_binance_private_stream(
     config: &PrivateWsObserveConfig,
-    state: &mut PrivateWsRuntimeState,
+    state: &mut PrivateWsObserveState,
     tx: &mpsc::Sender<PrivateWsObserveEvent>,
 ) -> Result<()> {
     state.connected = false;
@@ -119,7 +138,7 @@ async fn run_binance_private_stream(
     ])
     .unwrap_or_else(|| "wss://fstream.binance.com/private/ws".to_string());
     let timeout_duration = Duration::from_millis(config.timeout_ms.max(1000));
-    let client = reqwest::Client::builder()
+    let client = reqwest_client_builder_with_ws_proxy()
         .timeout(timeout_duration)
         .build()
         .context("build Binance REST client")?;
@@ -183,7 +202,7 @@ async fn run_binance_private_stream(
 
 async fn run_bitget_private_stream(
     config: &PrivateWsObserveConfig,
-    state: &mut PrivateWsRuntimeState,
+    state: &mut PrivateWsObserveState,
     tx: &mpsc::Sender<PrivateWsObserveEvent>,
 ) -> Result<()> {
     state.connected = false;
@@ -320,7 +339,7 @@ async fn run_bitget_private_stream(
 
 async fn run_gateio_private_stream(
     config: &PrivateWsObserveConfig,
-    state: &mut PrivateWsRuntimeState,
+    state: &mut PrivateWsObserveState,
     tx: &mpsc::Sender<PrivateWsObserveEvent>,
 ) -> Result<()> {
     state.connected = false;
@@ -430,9 +449,474 @@ async fn run_gateio_private_stream(
     }
 }
 
+async fn run_aster_private_stream(
+    config: &PrivateWsObserveConfig,
+    state: &mut PrivateWsObserveState,
+    tx: &mpsc::Sender<PrivateWsObserveEvent>,
+) -> Result<()> {
+    state.connected = false;
+    state.login_ok = None;
+    state.subscribed_channels = vec![
+        "ORDER_TRADE_UPDATE".to_string(),
+        "ACCOUNT_UPDATE".to_string(),
+    ];
+
+    let user_address = env_first(&["RUSTCTA_ASTER_USER_ADDRESS", "ASTER_USER_ADDRESS"])
+        .context("missing Aster user address")?;
+    let signer_address = env_first(&["RUSTCTA_ASTER_SIGNER_ADDRESS", "ASTER_SIGNER_ADDRESS"])
+        .context("missing Aster signer address")?;
+    let signer_private_key = env_first(&[
+        "RUSTCTA_ASTER_SIGNER_PRIVATE_KEY",
+        "ASTER_SIGNER_PRIVATE_KEY",
+    ])
+    .context("missing Aster signer private key")?;
+    let rest_base = env_first(&["RUSTCTA_ASTER_REST_BASE_URL", "ASTER_REST_BASE_URL"])
+        .unwrap_or_else(|| "https://fapi.asterdex.com".to_string());
+    let ws_base = env_first(&["RUSTCTA_ASTER_PRIVATE_WS_URL", "ASTER_PRIVATE_WS_URL"])
+        .unwrap_or_else(|| "wss://fstream.asterdex.com/ws".to_string());
+    let timeout_duration = Duration::from_millis(config.timeout_ms.max(1000));
+    let client = reqwest_client_builder_with_ws_proxy()
+        .timeout(timeout_duration)
+        .build()
+        .context("build Aster REST client")?;
+    let listen_key = start_aster_listen_key(
+        &client,
+        &rest_base,
+        &user_address,
+        &signer_address,
+        &signer_private_key,
+    )
+    .await?;
+    let url = format!("{}/{}", ws_base.trim_end_matches('/'), listen_key);
+    let result = async {
+        let (mut ws, _) = timeout(timeout_duration, connect_websocket(url.as_str()))
+            .await
+            .context("connect Aster private websocket timed out")?
+            .context("connect Aster private websocket")?;
+        state.connected = true;
+        send_status(
+            tx,
+            state,
+            "online",
+            "Aster private websocket connected; listenKey bootstrap used",
+        )
+        .await;
+
+        let mut next_keepalive = Instant::now() + Duration::from_secs(30 * 60);
+        loop {
+            if Instant::now() >= next_keepalive {
+                keepalive_aster_listen_key(
+                    &client,
+                    &rest_base,
+                    &user_address,
+                    &signer_address,
+                    &signer_private_key,
+                    &listen_key,
+                )
+                .await?;
+                next_keepalive = Instant::now() + Duration::from_secs(30 * 60);
+                send_status(tx, state, "online", "Aster listenKey keepalive ok").await;
+            }
+            match read_probe_frame(&mut ws, timeout_duration).await? {
+                Some(frame) => {
+                    state.message_count = state.message_count.saturating_add(1);
+                    let now = Utc::now();
+                    for row in aster_private_event_rows(&frame.sample, frame.value.as_ref(), now) {
+                        if row
+                            .get("private_kind")
+                            .and_then(Value::as_str)
+                            .is_some_and(|kind| {
+                                matches!(kind, "fill" | "order" | "balance" | "position")
+                            })
+                        {
+                            state.event_count = state.event_count.saturating_add(1);
+                        }
+                        state.last_latency_ms = row.get("latency_ms").and_then(Value::as_i64);
+                        tx.send(PrivateWsObserveEvent::PrivateEvent(row)).await.ok();
+                    }
+                    send_status(
+                        tx,
+                        state,
+                        "online",
+                        "Aster private websocket frame received",
+                    )
+                    .await;
+                }
+                None => {
+                    send_status(tx, state, "online", "Aster private websocket idle").await;
+                }
+            }
+        }
+    }
+    .await;
+    let _ = close_aster_listen_key(
+        &client,
+        &rest_base,
+        &user_address,
+        &signer_address,
+        &signer_private_key,
+        &listen_key,
+    )
+    .await;
+    result
+}
+
+async fn run_mexc_private_stream(
+    config: &PrivateWsObserveConfig,
+    state: &mut PrivateWsObserveState,
+    tx: &mpsc::Sender<PrivateWsObserveEvent>,
+) -> Result<()> {
+    state.connected = false;
+    state.login_ok = Some(false);
+    state.subscribed_channels.clear();
+
+    let api_key = env_first(&[
+        "RUSTCTA_MEXC_API_KEY",
+        "MEXC_CONTRACT_API_KEY",
+        "MEXC_API_KEY",
+    ])
+    .context("missing MEXC API key")?;
+    let api_secret = env_first(&[
+        "RUSTCTA_MEXC_API_SECRET",
+        "MEXC_CONTRACT_API_SECRET",
+        "MEXC_API_SECRET",
+    ])
+    .context("missing MEXC API secret")?;
+    let url = env_first(&[
+        "RUSTCTA_MEXC_CONTRACT_PRIVATE_WS_URL",
+        "MEXC_CONTRACT_WS_URL",
+    ])
+    .unwrap_or_else(|| "wss://contract.mexc.com/edge".to_string());
+    let timeout_duration = Duration::from_millis(config.timeout_ms.max(1000));
+    let (mut ws, _) = timeout(timeout_duration, connect_websocket(url.as_str()))
+        .await
+        .context("connect MEXC contract private websocket timed out")?
+        .context("connect MEXC contract private websocket")?;
+    state.connected = true;
+    send_status(
+        tx,
+        state,
+        "starting",
+        "MEXC contract private websocket connected",
+    )
+    .await;
+
+    let req_time = Utc::now().timestamp_millis().to_string();
+    let signature = hmac_sha256_hex(&api_secret, &format!("{api_key}{req_time}"))?;
+    ws.send(Message::Text(
+        json!({
+            "method": "login",
+            "param": {
+                "apiKey": api_key,
+                "reqTime": req_time,
+                "signature": signature,
+            },
+            "subscribe": false,
+        })
+        .to_string(),
+    ))
+    .await
+    .context("send MEXC private login")?;
+
+    let filters = ["order", "order.deal", "position", "asset"];
+    loop {
+        let Some(frame) = read_probe_frame(&mut ws, timeout_duration).await? else {
+            continue;
+        };
+        state.message_count = state.message_count.saturating_add(1);
+        let value = frame.value.as_ref().unwrap_or(&frame.sample);
+        if mexc_login_ok(value) {
+            state.login_ok = Some(true);
+            break;
+        }
+        if mexc_error(value) {
+            bail!("MEXC private login error: {}", frame.sample);
+        }
+    }
+
+    ws.send(Message::Text(
+        json!({
+            "method": "personal.filter",
+            "param": {
+                "filters": filters.iter().map(|filter| json!({"filter": filter})).collect::<Vec<_>>()
+            }
+        })
+        .to_string(),
+    ))
+    .await
+    .context("send MEXC private filters")?;
+    send_status(tx, state, "starting", "MEXC private filters sent").await;
+
+    loop {
+        match read_probe_frame(&mut ws, timeout_duration).await? {
+            Some(frame) => {
+                state.message_count = state.message_count.saturating_add(1);
+                let now = Utc::now();
+                let value = frame.value.as_ref().unwrap_or(&frame.sample);
+                if mexc_filter_ack(value) {
+                    for filter in filters {
+                        if !state
+                            .subscribed_channels
+                            .iter()
+                            .any(|known| known == filter)
+                        {
+                            state.subscribed_channels.push(filter.to_string());
+                        }
+                    }
+                }
+                for row in mexc_private_event_rows(&frame.sample, frame.value.as_ref(), now) {
+                    if row
+                        .get("private_kind")
+                        .and_then(Value::as_str)
+                        .is_some_and(|kind| {
+                            matches!(kind, "fill" | "order" | "balance" | "position")
+                        })
+                    {
+                        state.event_count = state.event_count.saturating_add(1);
+                    }
+                    state.last_latency_ms = row.get("latency_ms").and_then(Value::as_i64);
+                    tx.send(PrivateWsObserveEvent::PrivateEvent(row)).await.ok();
+                }
+                let status = if state.login_ok == Some(true) && state.subscribed_channels.len() >= 4
+                {
+                    "online"
+                } else {
+                    "starting"
+                };
+                send_status(tx, state, status, "MEXC private websocket active").await;
+            }
+            None => {
+                let status = if state.login_ok == Some(true) {
+                    "online"
+                } else {
+                    "starting"
+                };
+                send_status(tx, state, status, "MEXC private websocket idle").await;
+            }
+        }
+    }
+}
+
+async fn run_kucoinfutures_private_stream(
+    config: &PrivateWsObserveConfig,
+    state: &mut PrivateWsObserveState,
+    tx: &mpsc::Sender<PrivateWsObserveEvent>,
+) -> Result<()> {
+    state.connected = false;
+    state.login_ok = None;
+    state.subscribed_channels.clear();
+
+    let api_key = env_first(&["RUSTCTA_KUCOIN_FUTURES_API_KEY", "KUCOIN_FUTURES_API_KEY"])
+        .context("missing KuCoin Futures API key")?;
+    let api_secret = env_first(&[
+        "RUSTCTA_KUCOIN_FUTURES_API_SECRET",
+        "KUCOIN_FUTURES_API_SECRET",
+    ])
+    .context("missing KuCoin Futures API secret")?;
+    let api_passphrase = env_first(&[
+        "RUSTCTA_KUCOIN_FUTURES_API_PASSPHRASE",
+        "KUCOIN_FUTURES_API_PASSPHRASE",
+    ])
+    .context("missing KuCoin Futures API passphrase")?;
+    let timeout_duration = Duration::from_millis(config.timeout_ms.max(1000));
+    let (endpoint, token) = kucoinfutures_private_bullet_token(
+        &api_key,
+        &api_secret,
+        &api_passphrase,
+        timeout_duration,
+    )
+    .await?;
+    let connect_id = format!("rustcta-private-{}", Utc::now().timestamp_millis());
+    let separator = if endpoint.contains('?') { '&' } else { '?' };
+    let url = format!("{endpoint}{separator}token={token}&connectId={connect_id}");
+    let (mut ws, _) = timeout(timeout_duration, connect_websocket(url.as_str()))
+        .await
+        .context("connect KuCoin Futures private websocket timed out")?
+        .context("connect KuCoin Futures private websocket")?;
+    state.connected = true;
+    send_status(
+        tx,
+        state,
+        "starting",
+        "KuCoin Futures private websocket connected",
+    )
+    .await;
+
+    let topics = [
+        "/contractMarket/tradeOrders",
+        "/contractAccount/wallet",
+        "/contract/position",
+    ];
+    for (index, topic) in topics.iter().enumerate() {
+        ws.send(Message::Text(
+            json!({
+                "id": format!("private-{index}"),
+                "type": "subscribe",
+                "topic": topic,
+                "privateChannel": true,
+                "response": true,
+            })
+            .to_string(),
+        ))
+        .await
+        .with_context(|| format!("send KuCoin Futures private subscribe {topic}"))?;
+    }
+
+    loop {
+        match read_probe_frame(&mut ws, timeout_duration).await? {
+            Some(frame) => {
+                state.message_count = state.message_count.saturating_add(1);
+                let now = Utc::now();
+                let value = frame.value.as_ref().unwrap_or(&frame.sample);
+                if let Some(topic) = kucoin_ack_topic(value) {
+                    if !state.subscribed_channels.iter().any(|known| known == topic) {
+                        state.subscribed_channels.push(topic.to_string());
+                    }
+                }
+                for row in
+                    kucoinfutures_private_event_rows(&frame.sample, frame.value.as_ref(), now)
+                {
+                    if row
+                        .get("private_kind")
+                        .and_then(Value::as_str)
+                        .is_some_and(|kind| {
+                            matches!(kind, "fill" | "order" | "balance" | "position")
+                        })
+                    {
+                        state.event_count = state.event_count.saturating_add(1);
+                    }
+                    state.last_latency_ms = row.get("latency_ms").and_then(Value::as_i64);
+                    tx.send(PrivateWsObserveEvent::PrivateEvent(row)).await.ok();
+                }
+                let status = if state.subscribed_channels.len() >= topics.len() {
+                    "online"
+                } else {
+                    "starting"
+                };
+                send_status(tx, state, status, "KuCoin Futures private websocket active").await;
+            }
+            None => {
+                let status = if state.subscribed_channels.len() >= topics.len() {
+                    "online"
+                } else {
+                    "starting"
+                };
+                send_status(tx, state, status, "KuCoin Futures private websocket idle").await;
+            }
+        }
+    }
+}
+
+async fn run_bybit_private_stream(
+    config: &PrivateWsObserveConfig,
+    state: &mut PrivateWsObserveState,
+    tx: &mpsc::Sender<PrivateWsObserveEvent>,
+) -> Result<()> {
+    state.connected = false;
+    state.login_ok = Some(false);
+    state.subscribed_channels.clear();
+
+    let api_key =
+        env_first(&["RUSTCTA_BYBIT_API_KEY", "BYBIT_API_KEY"]).context("missing Bybit API key")?;
+    let api_secret = env_first(&["RUSTCTA_BYBIT_API_SECRET", "BYBIT_API_SECRET"])
+        .context("missing Bybit API secret")?;
+    let url = env_first(&["RUSTCTA_BYBIT_PRIVATE_WS_URL", "BYBIT_PRIVATE_WS_URL"])
+        .unwrap_or_else(|| "wss://stream.bybit.com/v5/private".to_string());
+    let timeout_duration = Duration::from_millis(config.timeout_ms.max(1000));
+    let (mut ws, _) = timeout(timeout_duration, connect_websocket(url.as_str()))
+        .await
+        .context("connect Bybit private websocket timed out")?
+        .context("connect Bybit private websocket")?;
+    state.connected = true;
+    send_status(tx, state, "starting", "Bybit private websocket connected").await;
+
+    let expires_ms = Utc::now().timestamp_millis() + 60_000;
+    let signature = hmac_sha256_hex(&api_secret, &format!("GET/realtime{expires_ms}"))?;
+    ws.send(Message::Text(
+        json!({
+            "op": "auth",
+            "args": [api_key, expires_ms, signature],
+        })
+        .to_string(),
+    ))
+    .await
+    .context("send Bybit auth")?;
+
+    loop {
+        let Some(frame) = read_probe_frame(&mut ws, timeout_duration).await? else {
+            continue;
+        };
+        state.message_count = state.message_count.saturating_add(1);
+        let value = frame.value.as_ref().unwrap_or(&frame.sample);
+        if bybit_auth_ok(value) {
+            state.login_ok = Some(true);
+            break;
+        }
+        if bybit_error(value) {
+            bail!("Bybit private auth error: {}", frame.sample);
+        }
+    }
+
+    let topics = ["order", "execution", "position", "wallet"];
+    ws.send(Message::Text(
+        json!({
+            "op": "subscribe",
+            "args": topics,
+        })
+        .to_string(),
+    ))
+    .await
+    .context("send Bybit private subscribe")?;
+
+    loop {
+        match read_probe_frame(&mut ws, timeout_duration).await? {
+            Some(frame) => {
+                state.message_count = state.message_count.saturating_add(1);
+                let now = Utc::now();
+                let value = frame.value.as_ref().unwrap_or(&frame.sample);
+                if bybit_subscribe_ok(value) {
+                    for topic in topics {
+                        if !state.subscribed_channels.iter().any(|known| known == topic) {
+                            state.subscribed_channels.push(topic.to_string());
+                        }
+                    }
+                }
+                for row in bybit_private_event_rows(&frame.sample, frame.value.as_ref(), now) {
+                    if row
+                        .get("private_kind")
+                        .and_then(Value::as_str)
+                        .is_some_and(|kind| {
+                            matches!(kind, "fill" | "order" | "balance" | "position")
+                        })
+                    {
+                        state.event_count = state.event_count.saturating_add(1);
+                    }
+                    state.last_latency_ms = row.get("latency_ms").and_then(Value::as_i64);
+                    tx.send(PrivateWsObserveEvent::PrivateEvent(row)).await.ok();
+                }
+                let status = if state.login_ok == Some(true) && state.subscribed_channels.len() >= 4
+                {
+                    "online"
+                } else {
+                    "starting"
+                };
+                send_status(tx, state, status, "Bybit private websocket active").await;
+            }
+            None => {
+                let status = if state.login_ok == Some(true) {
+                    "online"
+                } else {
+                    "starting"
+                };
+                send_status(tx, state, status, "Bybit private websocket idle").await;
+            }
+        }
+    }
+}
+
 async fn send_status(
     tx: &mpsc::Sender<PrivateWsObserveEvent>,
-    state: &PrivateWsRuntimeState,
+    state: &PrivateWsObserveState,
     status: &str,
     message: impl Into<String>,
 ) {
@@ -527,8 +1011,32 @@ fn binance_private_event_rows(
         "cumulative_quantity": order.get("z").cloned().unwrap_or(Value::Null),
         "cumulative_quote_quantity": order.get("Z").cloned().unwrap_or(Value::Null),
         "average_fill_price": average_price_from_quantity_and_quote(order.get("z"), order.get("Z")),
+        "fee_amount": binance_fee_amount(order, data),
+        "fee_asset": binance_fee_asset(order, data),
         "latency_ms": latency_ms(now, millis_timestamp(data.get("E").or_else(|| data.get("T")))),
     }))]
+}
+
+fn binance_fee_amount(order: &Value, data: &Value) -> Value {
+    number_like(
+        order
+            .get("n")
+            .or_else(|| order.get("commission"))
+            .or_else(|| data.get("n"))
+            .or_else(|| data.get("commission")),
+    )
+    .map(|fee| json!(fee.abs()))
+    .unwrap_or(Value::Null)
+}
+
+fn binance_fee_asset(order: &Value, data: &Value) -> Value {
+    order
+        .get("N")
+        .or_else(|| order.get("commissionAsset"))
+        .or_else(|| data.get("N"))
+        .or_else(|| data.get("commissionAsset"))
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn bitget_private_event_rows(
@@ -745,6 +1253,587 @@ fn gateio_contract_settle_asset(contract: &str) -> Option<String> {
         .filter(|quote| !quote.is_empty())
 }
 
+fn aster_private_event_rows(
+    sample: &Value,
+    value: Option<&Value>,
+    now: DateTime<Utc>,
+) -> Vec<Value> {
+    let value = value.unwrap_or(sample);
+    let event = value.get("e").and_then(Value::as_str).unwrap_or("message");
+    match event {
+        "ORDER_TRADE_UPDATE" => {
+            let order = value.get("o").unwrap_or(value);
+            let private_kind = if order.get("x").and_then(Value::as_str) == Some("TRADE") {
+                "fill"
+            } else {
+                "order"
+            };
+            vec![private_event_row(
+                "aster",
+                private_kind,
+                Some(event),
+                order.get("s").and_then(Value::as_str),
+                order.get("S").and_then(Value::as_str),
+                number_like(order.get("l").or_else(|| order.get("q"))),
+                number_like(order.get("L").or_else(|| order.get("p"))),
+                "Aster private order/fill event",
+                sample,
+                now,
+            )
+            .with_extra(json!({
+                "order_status": order.get("X").cloned().unwrap_or(Value::Null),
+                "execution_type": order.get("x").cloned().unwrap_or(Value::Null),
+                "exchange_order_id": order.get("i").cloned().unwrap_or(Value::Null),
+                "client_order_id": order.get("c").cloned().unwrap_or(Value::Null),
+                "last_quantity": order.get("l").cloned().unwrap_or(Value::Null),
+                "last_price": order.get("L").cloned().unwrap_or(Value::Null),
+                "cumulative_quantity": order.get("z").cloned().unwrap_or(Value::Null),
+                "average_fill_price": average_price_from_quantity_and_quote(order.get("z"), order.get("Z")),
+                "latency_ms": latency_ms(now, millis_timestamp(value.get("E").or_else(|| value.get("T")))),
+            }))]
+        }
+        "ACCOUNT_UPDATE" => {
+            let account = value.get("a").unwrap_or(value);
+            let mut rows = Vec::new();
+            if let Some(balances) = account.get("B").and_then(Value::as_array) {
+                rows.extend(balances.iter().map(|balance| {
+                    private_event_row(
+                        "aster",
+                        "balance",
+                        Some(event),
+                        None,
+                        None,
+                        None,
+                        None,
+                        "Aster private balance update",
+                        sample,
+                        now,
+                    )
+                    .with_extra(json!({
+                        "asset": balance.get("a").cloned().unwrap_or(Value::Null),
+                        "wallet_balance": balance.get("wb").cloned().unwrap_or(Value::Null),
+                        "cross_wallet_balance": balance.get("cw").cloned().unwrap_or(Value::Null),
+                        "latency_ms": latency_ms(now, millis_timestamp(value.get("E").or_else(|| value.get("T")))),
+                    }))
+                }));
+            }
+            if let Some(positions) = account.get("P").and_then(Value::as_array) {
+                rows.extend(positions.iter().map(|position| {
+                    private_event_row(
+                        "aster",
+                        "position",
+                        Some(event),
+                        position.get("s").and_then(Value::as_str),
+                        position.get("ps").and_then(Value::as_str),
+                        number_like(position.get("pa")),
+                        number_like(position.get("ep")),
+                        "Aster private position update",
+                        sample,
+                        now,
+                    )
+                    .with_extra(json!({
+                        "position_side": position.get("ps").cloned().unwrap_or(Value::Null),
+                        "unrealized_pnl": position.get("up").cloned().unwrap_or(Value::Null),
+                        "latency_ms": latency_ms(now, millis_timestamp(value.get("E").or_else(|| value.get("T")))),
+                    }))
+                }));
+            }
+            rows
+        }
+        "listenKeyExpired" => vec![private_event_row(
+            "aster",
+            "error",
+            Some(event),
+            None,
+            None,
+            None,
+            None,
+            "Aster listenKey expired",
+            sample,
+            now,
+        )],
+        _ => Vec::new(),
+    }
+}
+
+fn mexc_login_ok(value: &Value) -> bool {
+    let method = value
+        .get("method")
+        .or_else(|| value.get("channel"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let code_ok = value
+        .get("code")
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+        .is_none_or(|code| code == 0);
+    method.contains("login")
+        && code_ok
+        && !value
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+}
+
+fn mexc_filter_ack(value: &Value) -> bool {
+    let method = value
+        .get("method")
+        .or_else(|| value.get("channel"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    method.contains("personal.filter") || method.contains("filter")
+}
+
+fn mexc_error(value: &Value) -> bool {
+    value
+        .get("code")
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+        .is_some_and(|code| code != 0)
+        || value
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+}
+
+fn mexc_private_event_rows(
+    sample: &Value,
+    value: Option<&Value>,
+    now: DateTime<Utc>,
+) -> Vec<Value> {
+    let value = value.unwrap_or(sample);
+    let channel = value
+        .get("channel")
+        .or_else(|| value.get("method"))
+        .and_then(Value::as_str);
+    let data = value.get("data").unwrap_or(value);
+    let items = data
+        .as_array()
+        .map(|items| items.iter().collect::<Vec<_>>())
+        .unwrap_or_else(|| vec![data]);
+    items
+        .into_iter()
+        .filter(|item| item.is_object())
+        .map(|item| {
+            let private_kind = match channel.unwrap_or_default() {
+                channel if channel.contains("order.deal") => "fill",
+                channel if channel.contains("position") => "position",
+                channel if channel.contains("asset") || channel.contains("balance") => "balance",
+                channel if channel.contains("order") => "order",
+                _ => "heartbeat",
+            };
+            private_event_row(
+                "mexc",
+                private_kind,
+                channel,
+                item.get("symbol").and_then(Value::as_str),
+                mexc_side_text(item),
+                number_like(
+                    item.get("dealVol")
+                        .or_else(|| item.get("vol"))
+                        .or_else(|| item.get("quantity")),
+                ),
+                number_like(
+                    item.get("dealAvgPrice")
+                        .or_else(|| item.get("price"))
+                        .or_else(|| item.get("dealPrice")),
+                ),
+                "MEXC private order/fill/account event",
+                sample,
+                now,
+            )
+            .with_extra(json!({
+                "order_status": item.get("state").or_else(|| item.get("status")).cloned().unwrap_or(Value::Null),
+                "exchange_order_id": item.get("orderId").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
+                "client_order_id": item.get("externalOid").or_else(|| item.get("clientOrderId")).cloned().unwrap_or(Value::Null),
+                "last_quantity": item.get("dealVol").or_else(|| item.get("vol")).cloned().unwrap_or(Value::Null),
+                "last_price": item.get("dealAvgPrice").or_else(|| item.get("price")).cloned().unwrap_or(Value::Null),
+                "latency_ms": latency_ms(now, millis_timestamp(value.get("ts").or_else(|| item.get("ts")).or_else(|| item.get("updateTime")))),
+            }))
+        })
+        .collect()
+}
+
+fn mexc_side_text(item: &Value) -> Option<&str> {
+    match item.get("side").and_then(Value::as_i64) {
+        Some(1) | Some(4) => Some("buy"),
+        Some(2) | Some(3) => Some("sell"),
+        _ => item.get("side").and_then(Value::as_str),
+    }
+}
+
+async fn kucoinfutures_private_bullet_token(
+    api_key: &str,
+    api_secret: &str,
+    api_passphrase: &str,
+    timeout_duration: Duration,
+) -> Result<(String, String)> {
+    let rest_base = env_first(&[
+        "RUSTCTA_KUCOIN_FUTURES_REST_BASE_URL",
+        "KUCOIN_FUTURES_REST_BASE_URL",
+    ])
+    .unwrap_or_else(|| "https://api-futures.kucoin.com".to_string());
+    let endpoint = "/api/v1/bullet-private";
+    let timestamp = Utc::now().timestamp_millis().to_string();
+    let prehash = format!("{timestamp}POST{endpoint}");
+    let signature = hmac_sha256_base64(api_secret, &prehash)?;
+    let passphrase = hmac_sha256_base64(api_secret, api_passphrase)?;
+    let client = reqwest_client_builder_with_ws_proxy()
+        .timeout(timeout_duration)
+        .build()
+        .context("build KuCoin Futures private token client")?;
+    let response = client
+        .post(format!("{}{}", rest_base.trim_end_matches('/'), endpoint))
+        .header("KC-API-KEY", api_key)
+        .header("KC-API-SIGN", signature)
+        .header("KC-API-TIMESTAMP", timestamp)
+        .header("KC-API-PASSPHRASE", passphrase)
+        .header("KC-API-KEY-VERSION", "2")
+        .send()
+        .await
+        .context("POST KuCoin Futures private websocket token")?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .context("read KuCoin token response")?;
+    if !status.is_success() {
+        bail!("HTTP {status}: {}", sanitize_text_sample(&body));
+    }
+    let value: Value = serde_json::from_str(&body).context("parse KuCoin token response")?;
+    let data = value.get("data").unwrap_or(&value);
+    let token = data
+        .get("token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .context("KuCoin Futures private token response missing token")?
+        .to_string();
+    let endpoint = data
+        .get("instanceServers")
+        .and_then(Value::as_array)
+        .and_then(|servers| servers.first())
+        .and_then(|server| server.get("endpoint"))
+        .and_then(Value::as_str)
+        .filter(|endpoint| !endpoint.is_empty())
+        .unwrap_or("wss://ws-api-futures.kucoin.com/endpoint")
+        .to_string();
+    Ok((endpoint, token))
+}
+
+fn kucoin_ack_topic(value: &Value) -> Option<&str> {
+    if value.get("type").and_then(Value::as_str) == Some("ack") {
+        value.get("topic").and_then(Value::as_str)
+    } else {
+        None
+    }
+}
+
+fn kucoinfutures_private_event_rows(
+    sample: &Value,
+    value: Option<&Value>,
+    now: DateTime<Utc>,
+) -> Vec<Value> {
+    let value = value.unwrap_or(sample);
+    let topic = value.get("topic").and_then(Value::as_str);
+    let data = value.get("data").unwrap_or(value);
+    let private_kind = match topic.unwrap_or_default() {
+        topic if topic.contains("tradeOrders") => {
+            if data.get("type").and_then(Value::as_str) == Some("match") {
+                "fill"
+            } else {
+                "order"
+            }
+        }
+        topic if topic.contains("wallet") => "balance",
+        topic if topic.contains("position") => "position",
+        _ => "heartbeat",
+    };
+    if private_kind == "heartbeat" {
+        return Vec::new();
+    }
+    vec![private_event_row(
+        "kucoinfutures",
+        private_kind,
+        topic,
+        data.get("symbol").and_then(Value::as_str),
+        data.get("side").and_then(Value::as_str),
+        number_like(
+            data.get("matchSize")
+                .or_else(|| data.get("filledSize"))
+                .or_else(|| data.get("size")),
+        ),
+        number_like(
+            data.get("matchPrice")
+                .or_else(|| data.get("price"))
+                .or_else(|| data.get("avgDealPrice")),
+        ),
+        "KuCoin Futures private order/fill/account event",
+        sample,
+        now,
+    )
+    .with_extra(json!({
+        "order_status": data.get("status").or_else(|| data.get("type")).cloned().unwrap_or(Value::Null),
+        "exchange_order_id": data.get("orderId").or_else(|| data.get("order_id")).cloned().unwrap_or(Value::Null),
+        "client_order_id": data.get("clientOid").or_else(|| data.get("client_order_id")).cloned().unwrap_or(Value::Null),
+        "last_quantity": data.get("matchSize").or_else(|| data.get("filledSize")).cloned().unwrap_or(Value::Null),
+        "last_price": data.get("matchPrice").or_else(|| data.get("price")).cloned().unwrap_or(Value::Null),
+        "latency_ms": latency_ms(now, millis_timestamp(data.get("ts").or_else(|| data.get("orderTime")).or_else(|| data.get("timestamp")))),
+    }))]
+}
+
+fn bybit_auth_ok(value: &Value) -> bool {
+    value.get("op").and_then(Value::as_str) == Some("auth")
+        && value
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+fn bybit_subscribe_ok(value: &Value) -> bool {
+    value.get("op").and_then(Value::as_str) == Some("subscribe")
+        && value
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+fn bybit_error(value: &Value) -> bool {
+    value
+        .get("success")
+        .and_then(Value::as_bool)
+        .is_some_and(|success| !success)
+        || value
+            .get("retCode")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| code != 0)
+}
+
+fn bybit_private_event_rows(
+    sample: &Value,
+    value: Option<&Value>,
+    now: DateTime<Utc>,
+) -> Vec<Value> {
+    let value = value.unwrap_or(sample);
+    let topic = value.get("topic").and_then(Value::as_str);
+    let Some(items) = value.get("data").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .map(|item| {
+            let private_kind = match topic.unwrap_or_default() {
+                topic if topic.starts_with("execution") => "fill",
+                topic if topic.starts_with("position") => "position",
+                topic if topic.starts_with("wallet") => "balance",
+                topic if topic.starts_with("order") => "order",
+                _ => "heartbeat",
+            };
+            private_event_row(
+                "bybit",
+                private_kind,
+                topic,
+                item.get("symbol").and_then(Value::as_str),
+                item.get("side").and_then(Value::as_str),
+                number_like(
+                    item.get("execQty")
+                        .or_else(|| item.get("cumExecQty"))
+                        .or_else(|| item.get("qty"))
+                        .or_else(|| item.get("size")),
+                ),
+                number_like(
+                    item.get("execPrice")
+                        .or_else(|| item.get("avgPrice"))
+                        .or_else(|| item.get("price")),
+                ),
+                "Bybit private order/execution/account event",
+                sample,
+                now,
+            )
+            .with_extra(json!({
+                "order_status": item.get("orderStatus").or_else(|| item.get("positionStatus")).cloned().unwrap_or(Value::Null),
+                "exchange_order_id": item.get("orderId").cloned().unwrap_or(Value::Null),
+                "client_order_id": item.get("orderLinkId").cloned().unwrap_or(Value::Null),
+                "fill_id": item.get("execId").cloned().unwrap_or(Value::Null),
+                "fee_amount": item.get("execFee").or_else(|| item.get("fee")).cloned().unwrap_or(Value::Null),
+                "fee_asset": item.get("feeCurrency").cloned().unwrap_or(Value::Null),
+                "last_quantity": item.get("execQty").or_else(|| item.get("cumExecQty")).cloned().unwrap_or(Value::Null),
+                "last_price": item.get("execPrice").or_else(|| item.get("avgPrice")).cloned().unwrap_or(Value::Null),
+                "latency_ms": latency_ms(now, millis_timestamp(item.get("updatedTime").or_else(|| item.get("creationTime")).or_else(|| value.get("creationTime")))),
+            }))
+        })
+        .collect()
+}
+
+fn sanitize_text_sample(text: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<Value>(text) {
+        serde_json::to_string(&sanitize_value(&value))
+            .unwrap_or_else(|_| "<unprintable>".to_string())
+    } else {
+        text.chars().take(1000).collect()
+    }
+}
+
+async fn start_aster_listen_key(
+    client: &reqwest::Client,
+    rest_base: &str,
+    user_address: &str,
+    signer_address: &str,
+    signer_private_key: &str,
+) -> Result<String> {
+    let form = aster_signed_form(
+        BTreeMap::new(),
+        user_address,
+        signer_address,
+        signer_private_key,
+    )?;
+    let response = client
+        .post(format!(
+            "{}/fapi/v3/listenKey",
+            rest_base.trim_end_matches('/')
+        ))
+        .form(&form)
+        .send()
+        .await
+        .context("POST Aster listenKey")?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .context("read Aster listenKey response")?;
+    if !status.is_success() {
+        bail!("HTTP {status}: {}", sanitize_text_sample(&body));
+    }
+    let value: Value = serde_json::from_str(&body).context("parse Aster listenKey response")?;
+    value
+        .get("listenKey")
+        .or_else(|| value.get("listen_key"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .context("Aster listenKey missing in response")
+}
+
+async fn keepalive_aster_listen_key(
+    client: &reqwest::Client,
+    rest_base: &str,
+    user_address: &str,
+    signer_address: &str,
+    signer_private_key: &str,
+    listen_key: &str,
+) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("listenKey".to_string(), listen_key.to_string());
+    let form = aster_signed_form(params, user_address, signer_address, signer_private_key)?;
+    let response = client
+        .put(format!(
+            "{}/fapi/v3/listenKey",
+            rest_base.trim_end_matches('/')
+        ))
+        .form(&form)
+        .send()
+        .await
+        .context("PUT Aster listenKey")?;
+    if !response.status().is_success() {
+        bail!("HTTP {}", response.status());
+    }
+    Ok(())
+}
+
+async fn close_aster_listen_key(
+    client: &reqwest::Client,
+    rest_base: &str,
+    user_address: &str,
+    signer_address: &str,
+    signer_private_key: &str,
+    listen_key: &str,
+) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("listenKey".to_string(), listen_key.to_string());
+    let form = aster_signed_form(params, user_address, signer_address, signer_private_key)?;
+    let response = client
+        .delete(format!(
+            "{}/fapi/v3/listenKey",
+            rest_base.trim_end_matches('/')
+        ))
+        .form(&form)
+        .send()
+        .await
+        .context("DELETE Aster listenKey")?;
+    if !response.status().is_success() {
+        bail!("HTTP {}", response.status());
+    }
+    Ok(())
+}
+
+fn aster_signed_form(
+    mut params: BTreeMap<String, String>,
+    user_address: &str,
+    signer_address: &str,
+    signer_private_key: &str,
+) -> Result<BTreeMap<String, String>> {
+    params.insert(
+        "nonce".to_string(),
+        Utc::now().timestamp_micros().to_string(),
+    );
+    params.insert("user".to_string(), user_address.to_string());
+    params.insert("signer".to_string(), signer_address.to_string());
+    let query = params
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let signature = aster_sign_message(signer_private_key, &query)?;
+    params.insert("signature".to_string(), signature);
+    Ok(params)
+}
+
+fn aster_sign_message(private_key_hex: &str, message_text: &str) -> Result<String> {
+    let key = private_key_hex.trim().trim_start_matches("0x");
+    let bytes = hex::decode(key).context("decode Aster signer private key")?;
+    let secret = SecretKey::from_slice(&bytes).context("parse Aster signer private key")?;
+    let digest = aster_eip712_digest(message_text);
+    let message = SecpMessage::from_slice(&digest).context("build Aster signer message")?;
+    let secp = Secp256k1::new();
+    let signature: RecoverableSignature = secp.sign_ecdsa_recoverable(&message, &secret);
+    let (recovery_id, compact) = signature.serialize_compact();
+    let mut bytes = Vec::with_capacity(65);
+    bytes.extend_from_slice(&compact);
+    bytes.push((recovery_id.to_i32() + 27) as u8);
+    Ok(format!("0x{}", hex::encode(bytes)))
+}
+
+fn aster_eip712_digest(message_text: &str) -> [u8; 32] {
+    let typehash_domain = keccak(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    );
+    let typehash_message = keccak(b"Message(string msg)");
+    let mut message_enc = Vec::with_capacity(64);
+    message_enc.extend_from_slice(&typehash_message);
+    message_enc.extend_from_slice(&keccak(message_text.as_bytes()));
+    let message_hash = keccak(&message_enc);
+
+    let mut chain_id = [0u8; 32];
+    chain_id[24..].copy_from_slice(&1666_u64.to_be_bytes());
+    let mut domain_enc = Vec::with_capacity(160);
+    domain_enc.extend_from_slice(&typehash_domain);
+    domain_enc.extend_from_slice(&keccak(b"AsterSignTransaction"));
+    domain_enc.extend_from_slice(&keccak(b"1"));
+    domain_enc.extend_from_slice(&chain_id);
+    domain_enc.extend_from_slice(&[0u8; 32]);
+    let domain_hash = keccak(&domain_enc);
+
+    let mut encoded = Vec::with_capacity(66);
+    encoded.extend_from_slice(&[0x19, 0x01]);
+    encoded.extend_from_slice(&domain_hash);
+    encoded.extend_from_slice(&message_hash);
+    keccak(&encoded)
+}
+
+fn keccak(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Keccak256::new();
+    hasher.update(bytes);
+    hasher.finalize().into()
+}
+
 fn private_event_row(
     exchange: &str,
     private_kind: &str,
@@ -864,7 +1953,7 @@ async fn close_binance_listen_key(
     Ok(())
 }
 
-impl PrivateWsRuntimeState {
+impl PrivateWsObserveState {
     fn new(exchange: impl Into<String>) -> Self {
         Self {
             exchange: exchange.into(),
@@ -884,6 +1973,12 @@ fn normalize_private_exchange(exchange: &str) -> Option<&'static str> {
         "binance" | "binance-usdm" | "binance-perp" => Some("binance"),
         "bitget" | "bitget-usdt-futures" | "bitget-perp" => Some("bitget"),
         "gate" | "gateio" | "gate-io" | "gateio-usdt-futures" | "gateio-perp" => Some("gateio"),
+        "aster" | "aster-perp" | "aster-futures" => Some("aster"),
+        "mexc" | "mexc-contract" | "mexc-perp" => Some("mexc"),
+        "kucoinfutures" | "kucoin-futures" | "kucoin_futures" | "kucoinfutures-perp" => {
+            Some("kucoinfutures")
+        }
+        "bybit" | "bybit-linear" | "bybit-perp" => Some("bybit"),
         _ => None,
     }
 }
@@ -918,7 +2013,10 @@ fn normalize_symbol(symbol: &str) -> String {
 
 fn canonical_symbol(symbol: &str) -> String {
     let normalized = normalize_symbol(symbol);
-    if let Some(base) = normalized.strip_suffix("USDT") {
+    if let Some(base) = normalized.strip_suffix("USDTM") {
+        let base = if base == "XBT" { "BTC" } else { base };
+        format!("{base}/USDT")
+    } else if let Some(base) = normalized.strip_suffix("USDT") {
         format!("{base}/USDT")
     } else {
         normalized
@@ -942,7 +2040,9 @@ mod tests {
                 "l": "9",
                 "L": "0.08895",
                 "z": "66",
-                "Z": "5.8707"
+                "Z": "5.8707",
+                "n": "0.00293535",
+                "N": "USDT"
             }
         });
         let rows =
@@ -952,6 +2052,8 @@ mod tests {
         assert_eq!(rows[0]["quantity"], 9.0);
         assert_eq!(rows[0]["cumulative_quantity"], "66");
         assert_eq!(rows[0]["average_fill_price"], 0.08895);
+        assert_eq!(rows[0]["fee_amount"], 0.00293535);
+        assert_eq!(rows[0]["fee_asset"], "USDT");
 
         let bitget = json!({
             "arg": {"channel": "fill"},
@@ -1046,5 +2148,97 @@ mod tests {
         assert_eq!(rows[0]["private_kind"], "heartbeat");
         assert_eq!(rows[0]["channel"], "futures.orders");
         assert_eq!(rows[0]["raw_sample"]["payload"][0], "<redacted>");
+    }
+
+    #[test]
+    fn target_contract_private_event_rows_should_classify_fills() {
+        let now = Utc::now();
+        let aster = json!({
+            "e": "ORDER_TRADE_UPDATE",
+            "E": 1_700_000_000_000_i64,
+            "o": {
+                "s": "BTCUSDT",
+                "S": "BUY",
+                "x": "TRADE",
+                "X": "FILLED",
+                "l": "0.1",
+                "L": "64999",
+                "z": "0.1",
+                "Z": "6499.9",
+                "i": "a-1",
+                "c": "client-a"
+            }
+        });
+        let rows = aster_private_event_rows(&sanitize_value(&aster), Some(&aster), now);
+        assert_eq!(rows[0]["private_kind"], "fill");
+        assert_eq!(rows[0]["canonical_symbol"], "BTC/USDT");
+        assert_eq!(rows[0]["client_order_id"], "client-a");
+
+        let mexc = json!({
+            "channel": "push.personal.order.deal",
+            "symbol": "BTC_USDT",
+            "ts": 1_700_000_000_000_i64,
+            "data": {
+                "symbol": "BTC_USDT",
+                "side": 1,
+                "dealVol": "0.2",
+                "dealAvgPrice": "65000",
+                "orderId": "m-1",
+                "externalOid": "client-m"
+            }
+        });
+        let rows = mexc_private_event_rows(&sanitize_value(&mexc), Some(&mexc), now);
+        assert_eq!(rows[0]["private_kind"], "fill");
+        assert_eq!(rows[0]["canonical_symbol"], "BTC/USDT");
+        assert_eq!(rows[0]["side"], "buy");
+        assert_eq!(rows[0]["client_order_id"], "client-m");
+
+        let kucoin = json!({
+            "topic": "/contractMarket/tradeOrders",
+            "data": {
+                "type": "match",
+                "symbol": "XBTUSDTM",
+                "side": "buy",
+                "matchSize": "1",
+                "matchPrice": "65001",
+                "orderId": "k-1",
+                "clientOid": "client-k",
+                "ts": 1_700_000_000_000_i64
+            }
+        });
+        let rows = kucoinfutures_private_event_rows(&sanitize_value(&kucoin), Some(&kucoin), now);
+        assert_eq!(rows[0]["private_kind"], "fill");
+        assert_eq!(rows[0]["canonical_symbol"], "BTC/USDT");
+        assert_eq!(rows[0]["client_order_id"], "client-k");
+
+        let bybit = json!({
+            "topic": "execution.linear",
+            "creationTime": 1_700_000_000_000_i64,
+            "data": [{
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "execQty": "0.3",
+                "execPrice": "65002",
+                "orderId": "b-1",
+                "orderLinkId": "client-b",
+                "execId": "fill-b"
+            }]
+        });
+        let rows = bybit_private_event_rows(&sanitize_value(&bybit), Some(&bybit), now);
+        assert_eq!(rows[0]["private_kind"], "fill");
+        assert_eq!(rows[0]["canonical_symbol"], "BTC/USDT");
+        assert_eq!(rows[0]["client_order_id"], "client-b");
+        assert_eq!(rows[0]["fill_id"], "fill-b");
+    }
+
+    #[test]
+    fn aster_observer_signing_should_match_gateway_shape() {
+        let signature = aster_sign_message(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+            "nonce=1748310859508867&signer=0x7e5f4552091a69125d5dfcb7b8c2659029395bdf&symbol=ASTERUSDT&type=LIMIT",
+        )
+        .expect("signature");
+        assert_eq!(signature.len(), 132);
+        assert!(signature.starts_with("0x"));
     }
 }

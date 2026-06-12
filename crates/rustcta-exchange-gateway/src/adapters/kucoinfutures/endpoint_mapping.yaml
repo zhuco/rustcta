@@ -119,11 +119,18 @@ websocket:
         endpoint_operation: get_order_book
         path: /api/v1/level2/snapshot
   private:
-    support: native
+    support: spec_only
     token_endpoint: /api/v1/bullet-private
     auth: rest_bullet_token
     renewal: refresh_before_expiry
     renew_before_expiry_ms: 3600000
+    topics:
+      - /contractMarket/tradeOrders
+      - /contractAccount/wallet
+      - /contract/position
+    reconnect:
+      resubscribe: true
+      rest_resync_operations: [get_balances, get_positions, get_open_orders, get_recent_fills, query_order]
     fallback: rest_reconciliation
 unsupported:
   - operation: spot_product
@@ -187,7 +194,7 @@ endpoints:
     product: perpetual
     transport: rest
     method: GET
-    path: /api/v1/funding-history
+    path: /api/v1/contracts/active
     auth: none
     credential_scopes: []
     rate_limit_bucket: futures_public
@@ -200,6 +207,7 @@ endpoints:
       status: implemented
       fixture: tests/fixtures/exchanges/kucoinfutures/funding_history_success.json
       test: crates/rustcta-exchange-gateway/src/adapters/kucoinfutures/public_tests.rs
+    notes: "Runtime fetches contracts/active for current funding and scanner enrichment fields mark_price/index_price/open_interest/turnover_24h/volume_24h/predicted_funding_rate/next_funding_time before reading /api/v1/funding-history for latest historical funding time."
   - operation: place_order
     product: perpetual
     transport: rest

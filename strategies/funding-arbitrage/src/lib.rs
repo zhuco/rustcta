@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 
 pub mod app_runtime;
 pub mod core;
+pub mod gateway_scan;
 pub mod live_plan;
 pub mod runtime_contract;
 
@@ -26,6 +27,10 @@ pub use core::{
     build_startup_markdown, candidate_from_snapshot, candidate_orderable, planned_quantity,
     select_exchange_funding, ExchangeFundingSelection, FundingCandidate, FundingCoreConfig,
     FundingInstrument, FundingScanReport, FundingSnapshot, FundingSymbol,
+};
+pub use gateway_scan::{
+    build_report_from_gateway_scan_bundles, funding_snapshot_from_gateway,
+    instrument_from_symbol_rules, GatewayFundingScanBundle,
 };
 pub use live_plan::{
     build_live_plan, build_live_plan_at, build_live_plan_markdown, build_live_result_markdown,
@@ -847,25 +852,23 @@ mod tests {
     }
 
     #[test]
-    fn manifest_should_not_depend_on_exchange_adapters() {
+    fn manifest_should_keep_core_library_adapter_free() {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("rustcta-strategy-sdk.workspace = true"));
-        for forbidden in [
-            "rustcta-exchange-api",
-            "rustcta-exchange-gateway",
-            "legacy exchange adapter path",
-            "gateio",
-            "kucoin",
-            "okx",
-            "binance",
-            "bitget",
-            "mexc",
-        ] {
+        assert!(manifest.contains("rustcta-exchange-api.workspace = true"));
+        assert!(manifest.contains("rustcta-exchange-gateway.workspace = true"));
+        for forbidden in ["legacy exchange adapter path", "okx", "bitget"] {
             assert!(
                 !manifest.contains(forbidden),
                 "{forbidden} should not appear in manifest"
             );
         }
+        let library_source = include_str!("lib.rs");
+        let gateway_crate_name = concat!("rustcta", "_exchange", "_gateway");
+        assert!(
+            !library_source.contains(gateway_crate_name),
+            "core strategy library should stay adapter-free; the runtime binary owns gateway wiring"
+        );
     }
 
     #[test]

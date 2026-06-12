@@ -3,19 +3,19 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, BatchAtomicity,
-    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchExecutionMode,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
-    CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
-    FundingRatesResponse, HeartbeatCapability, HistoryCapability, OpenOrdersRequest,
-    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, ReconnectCapability, StreamAuthCapability, StreamHeartbeatDirection,
-    StreamResyncCapability, StreamRuntimeCapability, SymbolRulesRequest, SymbolRulesResponse,
-    TimeInForce,
+    AccountControlCapabilities, AmendOrderRequest, AmendOrderResponse, BalancesRequest,
+    BalancesResponse, BatchAtomicity, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
+    BatchCapability, BatchExecutionMode, BatchPlaceOrdersRequest, BatchPlaceOrdersResponse,
+    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
+    CapabilitySupport, ClosePositionRequest, ClosePositionResponse, CredentialScope,
+    ExchangeApiError, ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest,
+    FeesResponse, FundingRatesRequest, FundingRatesResponse, HeartbeatCapability,
+    HistoryCapability, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, ReconnectCapability,
+    StreamAuthCapability, StreamHeartbeatDirection, StreamResyncCapability,
+    StreamRuntimeCapability, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -194,6 +194,30 @@ impl GatewayAdapter for KuCoinFuturesGatewayAdapter {
             message: Some("kucoinfutures perpetual public REST gateway adapter".to_string()),
         }
     }
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        let private = self.config.private_rest_enabled();
+        AccountControlCapabilities {
+            exchange: self.exchange_id.clone(),
+            supports_symbol_account_config: false,
+            supports_leverage: false,
+            supports_margin_mode_change: false,
+            supports_position_mode_change: false,
+            supports_close_position: private,
+            supports_countdown_cancel_all: false,
+        }
+    }
+
+    async fn close_position(
+        &self,
+        request: ClosePositionRequest,
+    ) -> ExchangeApiResult<ClosePositionResponse> {
+        let place_request = super::close_position_order_request(&request)?;
+        let response = self.place_order_impl(place_request).await?;
+        Ok(super::close_position_response_from_place_order(
+            &request, response,
+        ))
+    }
 }
 
 #[async_trait]
@@ -229,6 +253,8 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
         capabilities.supports_batch_place_order = self.config.private_rest_enabled();
         capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_client_order_id = true;
+        capabilities.supports_reduce_only = true;
+        capabilities.supports_post_only = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
             TimeInForce::IOC,
@@ -245,7 +271,7 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
         capabilities.max_order_book_depth = Some(100);
         capabilities.max_recent_fill_limit = Some(500);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(100));
         capabilities.refresh_v2_from_legacy_flags();
         capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
         capabilities.capabilities_v2.private_streams = if self.config.private_rest_enabled() {
@@ -258,9 +284,7 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
         capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
             public: CapabilitySupport::native(),
             private: if self.config.private_rest_enabled() {
-                CapabilitySupport::rest_fallback(
-                    "kucoinfutures private streams require REST bullet-private token acquisition and renewal",
-                )
+                CapabilitySupport::native()
             } else {
                 CapabilitySupport::unsupported(
                     "kucoinfutures private stream token requires API key, secret and passphrase",
@@ -268,6 +292,10 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
             },
             supports_subscribe: true,
             supports_unsubscribe: true,
+            supports_public_subscribe: true,
+            supports_public_unsubscribe: true,
+            supports_private_subscribe: self.config.private_rest_enabled(),
+            supports_private_unsubscribe: self.config.private_rest_enabled(),
             heartbeat: HeartbeatCapability {
                 supported: true,
                 required: true,
@@ -283,9 +311,9 @@ impl ExchangeClient for KuCoinFuturesGatewayAdapter {
             },
             resync: StreamResyncCapability {
                 order_book: true,
-                balances: true,
+                balances: self.config.private_rest_enabled(),
                 positions: self.config.private_rest_enabled(),
-                orders: true,
+                orders: self.config.private_rest_enabled(),
             },
             auth: StreamAuthCapability {
                 required: self.config.private_rest_enabled(),

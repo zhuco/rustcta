@@ -5,7 +5,7 @@ Status: `rustcta-exchange-gateway` KuCoin Futures perpetual REST and WebSocket-s
 ## Scope
 
 - Adapter id and registration name: `kucoinfutures`
-- Product line: KuCoin Futures USDT/USD perpetual contracts.
+- Product line: KuCoin classic Futures USDT/USD perpetual contracts.
 - REST base URL: `https://api-futures.kucoin.com`
 - WebSocket endpoint: `wss://ws-api-futures.kucoin.com/endpoint`
 - Private REST signing: KuCoin V2 HMAC-SHA256 base64 with `KC-API-KEY`, `KC-API-SIGN`, `KC-API-TIMESTAMP`, signed passphrase, and `KC-API-KEY-VERSION: 2`.
@@ -25,7 +25,7 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/kucoinfu
 | Place/cancel/cancel-all | `POST /api/v1/orders`, `DELETE /api/v1/orders/{id}`, `DELETE /api/v1/orders` | Implemented |
 | Open orders/query/fills | `GET /api/v1/orders`, `GET /api/v1/orders/{id}`, `GET /api/v1/fills` | Implemented |
 | Public WS | `/contractMarket/ticker`, `/contractMarket/level2`, `/contractMarket/execution` | Subscription specs |
-| Private WS | `/contractMarket/tradeOrders`, `/contractAccount/wallet`, `/contract/position` | Token/session specs |
+| Private WS | `/contractMarket/tradeOrders`, `/contractAccount/wallet`, `/contract/position` | Token/session specs and parser-only normalization |
 
 ## Official WebSocket Order Book Detail
 
@@ -42,6 +42,31 @@ Spot remains in `kucoin`; this adapter advertises `MarketType::Perpetual` only. 
 Funding history is available through `ExchangeClient::get_funding_rates` and returns the latest public funding snapshots normalized into `FundingRateSnapshot`.
 
 Batch place/cancel is gateway-composed from sequential REST calls and is non-atomic. REST reconciliation fallback uses query order, open orders, recent fills, positions, and order book snapshots after ambiguous mutations or stream gaps.
+
+Private WS event parsers normalize order, fill, wallet, position, and heartbeat
+payloads. Bullet-token leases, account-level resubscribe specs, and REST resync
+operation plans are covered by tests, but live private stream capability remains
+REST fallback until the runtime ready gate, reconnect loop, and post-reconnect
+REST resync are wired together.
+
+## Classic / UTA Boundary
+
+This adapter is scoped to KuCoin classic futures. Do not route UTA Futures
+endpoints, symbols, position ids, margin mode, or private stream topics through
+the `kucoinfutures` classic profile.
+
+UTA support requires a separate profile or adapter decision with these minimum
+artifacts before runtime promotion:
+
+- Official endpoint audit for UTA futures public REST, private REST, and WS.
+- Request specs for UTA order create/cancel/query/open/fills, balances,
+  positions, funding, leverage, and position/margin mode.
+- Parser fixtures for UTA account, position, order, fill, funding, and public
+  order book payloads.
+- Capability mapping that keeps classic and UTA order id, symbol, position,
+  and margin semantics separate.
+- Readback reconciliation and live dry-run gates that prove UTA private writes
+  do not reuse classic futures assumptions.
 
 ## Validation
 

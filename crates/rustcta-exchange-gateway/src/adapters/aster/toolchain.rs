@@ -1,12 +1,15 @@
 use rustcta_exchange_api::{
-    BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth, EndpointCapability,
-    EndpointTransport, ExchangeClientCapabilities, HistoryCapability,
+    BatchAtomicity, BatchCapability, CapabilitySupport, CredentialScope, EndpointAuth,
+    EndpointCapability, EndpointTransport, ExchangeClientCapabilities, HeartbeatCapability,
+    HistoryCapability, ReconnectCapability, StreamAuthCapability, StreamHeartbeatDirection,
+    StreamResyncCapability, StreamRuntimeCapability,
 };
 use rustcta_types::MarketType;
 
 pub(super) fn apply_toolchain_capabilities(
     capabilities: &mut ExchangeClientCapabilities,
     private_rest_enabled: bool,
+    private_streams_enabled: bool,
 ) {
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
     capabilities.capabilities_v2.private_rest = if private_rest_enabled {
@@ -17,15 +20,72 @@ pub(super) fn apply_toolchain_capabilities(
         )
     };
     capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
-    capabilities.capabilities_v2.private_streams = if private_rest_enabled {
+    capabilities.capabilities_v2.private_streams = if private_streams_enabled {
         CapabilitySupport::native()
+    } else if private_rest_enabled {
+        CapabilitySupport::unsupported("Aster private WS is disabled by configuration")
     } else {
         CapabilitySupport::unsupported("Aster private WS requires V3 API wallet credentials")
     };
-    capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported("Aster batch place order is not implemented");
-    capabilities.capabilities_v2.batch_cancel_orders =
-        BatchCapability::unsupported("Aster batch cancel order is not implemented");
+    capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
+        public: CapabilitySupport::native(),
+        private: capabilities.capabilities_v2.private_streams.clone(),
+        supports_subscribe: true,
+        supports_unsubscribe: true,
+        supports_public_subscribe: true,
+        supports_public_unsubscribe: true,
+        supports_private_subscribe: private_streams_enabled,
+        supports_private_unsubscribe: private_streams_enabled,
+        heartbeat: HeartbeatCapability {
+            supported: true,
+            required: true,
+            direction: StreamHeartbeatDirection::ClientPing,
+            interval_ms: Some(30_000),
+            timeout_ms: Some(10_000),
+        },
+        reconnect: ReconnectCapability {
+            supported: true,
+            requires_resubscribe: true,
+            preserves_session: false,
+            max_reconnect_attempts: None,
+        },
+        resync: StreamResyncCapability {
+            order_book: true,
+            balances: private_streams_enabled,
+            positions: private_streams_enabled,
+            orders: private_streams_enabled,
+        },
+        auth: StreamAuthCapability {
+            required: private_streams_enabled,
+            credential_scopes: vec![CredentialScope::ReadOnly, CredentialScope::Trade],
+            renewal_ms: Some(30 * 60 * 1_000),
+            uses_listen_key: true,
+            requires_relogin_on_reconnect: true,
+        },
+        ..StreamRuntimeCapability::default()
+    };
+    capabilities.capabilities_v2.funding_rates = CapabilitySupport::native();
+    capabilities.capabilities_v2.batch_place_orders = if private_rest_enabled {
+        BatchCapability {
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+            ..BatchCapability::native(BatchAtomicity::Partial, Some(5))
+        }
+    } else {
+        BatchCapability::unsupported("Aster batch place order requires private REST credentials")
+    };
+    capabilities.capabilities_v2.batch_cancel_orders = if private_rest_enabled {
+        BatchCapability {
+            same_symbol_required: true,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+            ..BatchCapability::native(BatchAtomicity::Partial, Some(10))
+        }
+    } else {
+        BatchCapability::unsupported("Aster batch cancel order requires private REST credentials")
+    };
     capabilities.capabilities_v2.cancel_all_orders = if private_rest_enabled {
         CapabilitySupport::native()
     } else {
@@ -91,7 +151,7 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             Some(5),
         ),
         rest_endpoint(
-            "funding_mark_price",
+            "get_funding_rates",
             CapabilitySupport::native(),
             "GET",
             "/fapi/v3/premiumIndex",
@@ -101,7 +161,7 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             Some(1),
         ),
         rest_endpoint(
-            "funding_history",
+            "get_funding_rates_history",
             CapabilitySupport::native(),
             "GET",
             "/fapi/v3/fundingRate",
@@ -153,6 +213,27 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             1,
         ),
         (
+            "amend_order",
+            "PUT",
+            "/fapi/v3/order",
+            CredentialScope::Trade,
+            1,
+        ),
+        (
+            "batch_place_orders",
+            "POST",
+            "/fapi/v3/batchOrders",
+            CredentialScope::Trade,
+            5,
+        ),
+        (
+            "batch_cancel_orders",
+            "DELETE",
+            "/fapi/v3/batchOrders",
+            CredentialScope::Trade,
+            1,
+        ),
+        (
             "cancel_order",
             "DELETE",
             "/fapi/v3/order",
@@ -186,6 +267,27 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             "/fapi/v3/userTrades",
             CredentialScope::ReadOnly,
             20,
+        ),
+        (
+            "set_leverage",
+            "POST",
+            "/fapi/v3/leverage",
+            CredentialScope::Trade,
+            1,
+        ),
+        (
+            "get_position_mode",
+            "GET",
+            "/fapi/v3/positionSide/dual",
+            CredentialScope::ReadOnly,
+            30,
+        ),
+        (
+            "set_position_mode",
+            "POST",
+            "/fapi/v3/positionSide/dual",
+            CredentialScope::Trade,
+            1,
         ),
     ] {
         endpoints.push(rest_endpoint(

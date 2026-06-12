@@ -169,6 +169,7 @@ impl GatewayAdapter for OkxGatewayAdapter {
             exchange: self.exchange_id.clone(),
             supports_symbol_account_config: false,
             supports_leverage: supports_derivative_controls,
+            supports_margin_mode_change: false,
             supports_position_mode_change: supports_derivative_controls,
             supports_close_position: false,
             supports_countdown_cancel_all: false,

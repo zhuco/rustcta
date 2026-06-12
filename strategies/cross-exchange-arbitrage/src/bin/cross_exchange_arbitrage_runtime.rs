@@ -88,7 +88,7 @@ fn parse_args() -> Result<Args> {
         ),
         once: false,
         snapshot_interval_ms: 30_000,
-        command_queue: command_queue_from_env(),
+        command_queue: None,
         command_poll_interval_ms: 1_000,
     };
     while let Some(arg) = values.next() {
@@ -127,15 +127,6 @@ fn parse_args() -> Result<Args> {
         }
     }
     Ok(args)
-}
-
-fn command_queue_from_env() -> Option<PathBuf> {
-    std::env::var("RUSTCTA_CROSS_ARB_COMMAND_QUEUE_PATH")
-        .ok()
-        .or_else(|| std::env::var("RUSTCTA_CONTROL_API_LOCAL_COMMAND_QUEUE_PATH").ok())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
 }
 
 fn next_value(values: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {

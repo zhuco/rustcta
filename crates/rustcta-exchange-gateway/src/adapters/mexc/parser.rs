@@ -31,15 +31,22 @@ fn parse_contract_symbol_rules(
     exchange_id: &ExchangeId,
     value: &Value,
 ) -> ExchangeApiResult<Vec<SymbolRules>> {
-    let symbols = value
-        .get("data")
-        .and_then(Value::as_array)
-        .or_else(|| value.as_array())
-        .ok_or_else(|| parse_error(exchange_id.clone(), "contract detail missing data", value))?;
-    symbols
-        .iter()
-        .map(|value| parse_contract_symbol_rule(exchange_id, value))
-        .collect()
+    let data = value.get("data").unwrap_or(value);
+    let symbols = data
+        .as_array()
+        .map(|items| items.as_slice())
+        .unwrap_or_else(|| std::slice::from_ref(data));
+    if symbols.iter().any(Value::is_object) {
+        return symbols
+            .iter()
+            .map(|value| parse_contract_symbol_rule(exchange_id, value))
+            .collect();
+    }
+    Err(parse_error(
+        exchange_id.clone(),
+        "contract detail missing data",
+        value,
+    ))
 }
 
 fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
@@ -270,7 +277,12 @@ pub fn parse_funding_rate_snapshot(
             .or_else(|| data.get("nextFundingTime"))
             .and_then(value_as_i64)
             .and_then(DateTime::<Utc>::from_timestamp_millis),
-        mark_price: None,
+        mark_price: string_or_number(data.get("fairPrice"))
+            .or_else(|| string_or_number(data.get("markPrice"))),
+        index_price: string_or_number(data.get("idxPrice").or_else(|| data.get("indexPrice"))),
+        open_interest: string_or_number(data.get("holdVol").or_else(|| data.get("openInterest"))),
+        turnover_24h: string_or_number(data.get("amount24").or_else(|| data.get("turnover24h"))),
+        volume_24h: string_or_number(data.get("volume24").or_else(|| data.get("volume24h"))),
         source: Some("mexc.contract.funding_rate".to_string()),
         updated_at: Utc::now(),
     })

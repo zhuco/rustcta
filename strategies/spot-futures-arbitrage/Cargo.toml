@@ -12,12 +12,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 rustcta-strategy-sdk.workspace = true
-rustcta-gateway-app = { package = "rustcta-gateway", path = "../../apps/gateway" }
-rustcta-exchange-api.workspace = true
-rustcta-exchange-gateway.workspace = true
-rustcta-execution-api.workspace = true
-rustcta-execution-router.workspace = true
-rustcta-types.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

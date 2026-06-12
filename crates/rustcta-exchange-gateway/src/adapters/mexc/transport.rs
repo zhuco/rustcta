@@ -138,6 +138,7 @@ impl MexcPublicRest {
         params: &HashMap<String, String>,
         api_key: &str,
         api_secret: &str,
+        recv_window_ms: u64,
     ) -> ExchangeApiResult<Value> {
         self.send_contract_signed_request(
             reqwest::Method::GET,
@@ -146,6 +147,7 @@ impl MexcPublicRest {
             None,
             api_key,
             api_secret,
+            recv_window_ms,
         )
         .await
     }
@@ -157,6 +159,7 @@ impl MexcPublicRest {
         body: Option<&Value>,
         api_key: &str,
         api_secret: &str,
+        recv_window_ms: u64,
     ) -> ExchangeApiResult<Value> {
         self.send_contract_signed_request(
             reqwest::Method::POST,
@@ -165,6 +168,7 @@ impl MexcPublicRest {
             body,
             api_key,
             api_secret,
+            recv_window_ms,
         )
         .await
     }
@@ -208,6 +212,7 @@ impl MexcPublicRest {
         body: Option<&Value>,
         api_key: &str,
         api_secret: &str,
+        recv_window_ms: u64,
     ) -> ExchangeApiResult<Value> {
         let request_time = Utc::now().timestamp_millis().to_string();
         let query = build_query_string(params);
@@ -225,6 +230,7 @@ impl MexcPublicRest {
             .request(method, url)
             .header("ApiKey", api_key)
             .header("Request-Time", &request_time)
+            .header("Recv-Window", recv_window_ms.to_string())
             .header("Signature", signature)
             .header("Content-Type", "application/json");
         if let Some(body_text) = body_text {

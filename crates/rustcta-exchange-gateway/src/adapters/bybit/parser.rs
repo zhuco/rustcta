@@ -121,9 +121,10 @@ pub fn parse_orderbook_snapshot(
 pub fn parse_funding_rate_snapshot(
     exchange_id: &ExchangeId,
     symbol: SymbolScope,
-    value: &Value,
+    ticker_value: &Value,
+    history_value: Option<&Value>,
 ) -> ExchangeApiResult<FundingRateSnapshot> {
-    let row = value
+    let ticker = ticker_value
         .get("result")
         .and_then(|result| result.get("list"))
         .and_then(Value::as_array)
@@ -131,30 +132,41 @@ pub fn parse_funding_rate_snapshot(
         .ok_or_else(|| {
             parse_error(
                 exchange_id.clone(),
-                "Bybit funding history missing result.list",
-                value,
+                "Bybit ticker funding response missing result.list",
+                ticker_value,
             )
         })?;
-    let funding_rate = string_or_number(row.get("fundingRate")).ok_or_else(|| {
+    let funding_rate = string_or_number(ticker.get("fundingRate")).ok_or_else(|| {
         parse_error(
             exchange_id.clone(),
-            "Bybit funding history missing fundingRate",
-            row,
+            "Bybit ticker funding response missing fundingRate",
+            ticker,
         )
     })?;
-    let funding_time = row
-        .get("fundingRateTimestamp")
-        .and_then(value_as_i64)
-        .and_then(DateTime::<Utc>::from_timestamp_millis);
+    let history_row = history_value
+        .and_then(|value| value.get("result"))
+        .and_then(|result| result.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first());
     Ok(FundingRateSnapshot {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         symbol,
         funding_rate,
         predicted_funding_rate: None,
-        funding_time,
-        next_funding_time: None,
-        mark_price: None,
-        source: Some("bybit.v5.market.funding_history".to_string()),
+        funding_time: history_row
+            .and_then(|row| row.get("fundingRateTimestamp"))
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        next_funding_time: ticker
+            .get("nextFundingTime")
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        mark_price: string_or_number(ticker.get("markPrice")),
+        index_price: string_or_number(ticker.get("indexPrice")),
+        open_interest: string_or_number(ticker.get("openInterest")),
+        turnover_24h: string_or_number(ticker.get("turnover24h")),
+        volume_24h: string_or_number(ticker.get("volume24h")),
+        source: Some("bybit.v5.market.tickers".to_string()),
         updated_at: Utc::now(),
     })
 }

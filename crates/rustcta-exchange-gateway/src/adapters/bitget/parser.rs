@@ -205,6 +205,13 @@ pub fn parse_funding_rate_snapshot(
             .or_else(|| data.get("fundingTime"))
             .and_then(bitget_timestamp),
         mark_price: string_or_number(data.get("markPrice").or_else(|| data.get("mark_price"))),
+        index_price: string_or_number(data.get("indexPrice").or_else(|| data.get("index_price"))),
+        open_interest: string_or_number(
+            data.get("holdingAmount")
+                .or_else(|| data.get("openInterest")),
+        ),
+        turnover_24h: string_or_number(data.get("quoteVolume").or_else(|| data.get("turnover24h"))),
+        volume_24h: string_or_number(data.get("baseVolume").or_else(|| data.get("volume24h"))),
         source: Some("bitget_public_current_fund_rate".to_string()),
         updated_at: Utc::now(),
     })

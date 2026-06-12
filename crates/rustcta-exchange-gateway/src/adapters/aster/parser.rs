@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    ExchangeApiError, ExchangeApiResult, SymbolRules, SymbolScope, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    ExchangeApiError, ExchangeApiResult, FundingRateSnapshot, SymbolRules, SymbolScope,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     CanonicalSymbol, ExchangeError, ExchangeErrorClass, ExchangeId, ExchangeSymbol, MarketType,
@@ -139,6 +141,143 @@ pub fn parse_orderbook_snapshot(
         .and_then(value_as_i64)
         .and_then(DateTime::<Utc>::from_timestamp_millis);
     Ok(snapshot)
+}
+
+pub fn parse_aster_funding_snapshots(
+    exchange_id: &ExchangeId,
+    requested_symbols: &[SymbolScope],
+    premium_value: &Value,
+    history_by_symbol: &HashMap<String, Value>,
+) -> ExchangeApiResult<Vec<FundingRateSnapshot>> {
+    let premium_rows = if let Some(rows) = premium_value.as_array() {
+        rows.iter().collect::<Vec<_>>()
+    } else {
+        vec![premium_value]
+    };
+    let requested_by_symbol = requested_symbols
+        .iter()
+        .map(|symbol| {
+            normalize_aster_symbol(&symbol.exchange_symbol.symbol)
+                .map(|normalized| (normalized, symbol.clone()))
+        })
+        .collect::<ExchangeApiResult<HashMap<_, _>>>()?;
+    let requested_keys = requested_by_symbol.keys().cloned().collect::<Vec<_>>();
+    let mut snapshots = Vec::new();
+
+    for row in premium_rows {
+        let symbol_text = required_str(exchange_id, row, "symbol")?.to_ascii_uppercase();
+        let normalized = normalize_aster_symbol(&symbol_text)?;
+        if !requested_keys.is_empty() && !requested_keys.contains(&normalized) {
+            continue;
+        }
+        let symbol = requested_by_symbol
+            .get(&normalized)
+            .cloned()
+            .map(Ok)
+            .unwrap_or_else(|| linear_perp_symbol_scope(exchange_id, &normalized))?;
+        snapshots.push(parse_aster_funding_snapshot(
+            exchange_id,
+            symbol,
+            row,
+            history_by_symbol.get(&normalized),
+        )?);
+    }
+
+    Ok(snapshots)
+}
+
+fn parse_aster_funding_snapshot(
+    exchange_id: &ExchangeId,
+    symbol: SymbolScope,
+    premium_row: &Value,
+    history_value: Option<&Value>,
+) -> ExchangeApiResult<FundingRateSnapshot> {
+    let history_row = history_value.and_then(first_history_row);
+    let funding_rate = string_or_number(premium_row.get("lastFundingRate"))
+        .or_else(|| string_or_number(premium_row.get("fundingRate")))
+        .or_else(|| history_row.and_then(|row| string_or_number(row.get("fundingRate"))))
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "Aster premiumIndex response missing funding rate",
+                premium_row,
+            )
+        })?;
+    Ok(FundingRateSnapshot {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol,
+        funding_rate,
+        predicted_funding_rate: None,
+        funding_time: history_row
+            .and_then(|row| row.get("fundingTime"))
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        next_funding_time: premium_row
+            .get("nextFundingTime")
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        mark_price: string_or_number(premium_row.get("markPrice")),
+        index_price: string_or_number(premium_row.get("indexPrice")),
+        open_interest: string_or_number(
+            premium_row
+                .get("openInterest")
+                .or_else(|| premium_row.get("sumOpenInterest")),
+        ),
+        turnover_24h: string_or_number(
+            premium_row
+                .get("turnover24h")
+                .or_else(|| premium_row.get("quoteVolume")),
+        ),
+        volume_24h: string_or_number(
+            premium_row
+                .get("volume24h")
+                .or_else(|| premium_row.get("volume")),
+        ),
+        source: Some("aster.fapi.v3.premiumIndex".to_string()),
+        updated_at: premium_row
+            .get("time")
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis)
+            .unwrap_or_else(Utc::now),
+    })
+}
+
+fn first_history_row(value: &Value) -> Option<&Value> {
+    value.as_array().and_then(|rows| rows.first()).or_else(|| {
+        value
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|rows| rows.first())
+    })
+}
+
+fn linear_perp_symbol_scope(
+    exchange_id: &ExchangeId,
+    symbol_text: &str,
+) -> ExchangeApiResult<SymbolScope> {
+    let (base, quote) = split_linear_symbol(symbol_text);
+    let canonical_symbol = CanonicalSymbol::new(&base, &quote).map_err(validation_error)?;
+    let market_type = MarketType::Perpetual;
+    Ok(SymbolScope {
+        exchange: exchange_id.clone(),
+        market_type,
+        canonical_symbol: Some(canonical_symbol),
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, symbol_text)
+            .map_err(validation_error)?,
+    })
+}
+
+fn split_linear_symbol(symbol: &str) -> (String, String) {
+    let pair = symbol
+        .split_once('_')
+        .map(|(pair, _)| pair)
+        .unwrap_or(symbol);
+    for quote in ["USDT", "USDC", "USD"] {
+        if let Some(base) = pair.strip_suffix(quote) {
+            return (base.to_string(), quote.to_string());
+        }
+    }
+    (pair.to_string(), "USD".to_string())
 }
 
 pub fn normalize_aster_symbol(symbol: &str) -> ExchangeApiResult<String> {

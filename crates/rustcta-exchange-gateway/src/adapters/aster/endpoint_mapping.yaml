@@ -1,11 +1,11 @@
 schema_version: 1
 exchange: aster
 adapter: rustcta_exchange_gateway::adapters::aster
-status_date: "2026-06-08"
+status_date: "2026-06-12"
 metadata:
   status: draft
   source: Aster Futures V3 API docs and Task 11 local implementation
-  last_reviewed: "2026-06-08"
+  last_reviewed: "2026-06-12"
   notes: Perpetual-only Aster adapter. Private REST uses EIP-712 AsterSignTransaction signing but is classified as signed auth for the shared mapping schema.
 market_types: [perpetual]
 products: [perpetual]
@@ -40,6 +40,11 @@ websocket:
   private:
     url: wss://fstream.asterdex.com/ws/{listen_key}
     channels: [ACCOUNT_UPDATE, ORDER_TRADE_UPDATE, listenKeyExpired]
+    listen_key:
+      create: POST /fapi/v3/listenKey
+      renew: PUT /fapi/v3/listenKey
+      delete: DELETE /fapi/v3/listenKey
+      support: parser_and_lifecycle_helpers
 endpoints:
   - operation: get_symbol_rules
     product: perpetual
@@ -69,6 +74,39 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: native
+  - operation: create_listen_key
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /fapi/v3/listenKey
+    auth: signed
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    support: native
+  - operation: renew_listen_key
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PUT
+    path: /fapi/v3/listenKey
+    auth: signed
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    support: native
+  - operation: delete_listen_key
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /fapi/v3/listenKey
+    auth: signed
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    support: native
   - operation: funding_mark_price
     product: perpetual
     market_types: [perpetual]
@@ -83,6 +121,11 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: native
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/aster/premium_index_single.json
+      test: crates/rustcta-exchange-gateway/src/adapters/aster/v3_tests.rs
+    notes: Runtime maps mark_price, index_price, and next_funding_time into FundingRateSnapshot when present.
   - operation: funding_history
     product: perpetual
     market_types: [perpetual]
@@ -97,6 +140,10 @@ endpoints:
     atomicity: not_applicable
     testnet: false
     support: native
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/aster/funding_rate_history.json
+      test: crates/rustcta-exchange-gateway/src/adapters/aster/v3_tests.rs
   - operation: get_balances
     product: perpetual
     market_types: [perpetual]
@@ -246,18 +293,20 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/aster/amend-order
-    auth: unsupported
+    method: PUT
+    path: /fapi/v3/order
+    auth: signed
     credential_scopes: [trade]
     rate_limit_bucket: signed_uid
-    weight: 0
-    request_spec_required: false
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/aster/request_specs/amend_order.json
     native_batch: false
-    atomicity: unsupported
+    atomicity: atomic
     testnet: false
-    support: unsupported
-    reason: aster.amend_order_unsupported
+    support: native
+    sign_path: eip712_v3_query
   - operation: place_order_list
     product: perpetual
     market_types: [perpetual]
@@ -278,34 +327,42 @@ endpoints:
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/aster/batch-place
-    auth: unsupported
+    method: POST
+    path: /fapi/v3/batchOrders
+    auth: signed
     credential_scopes: [trade]
     rate_limit_bucket: signed_uid
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: unsupported
+    weight: 5
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/aster/request_specs/batch_place_orders.json
+    native_batch: true
+    atomicity: partial
     testnet: false
-    support: unsupported
-    reason: aster.batch_place_orders_unsupported
+    support: native
+    max_items: 5
+    sign_path: eip712_v3_query
+    notes: Runtime parses per-item partial failures from batch response code/msg rows.
   - operation: batch_cancel_orders
     product: perpetual
     market_types: [perpetual]
     transport: rest
-    method: UNSUPPORTED
-    path: /unsupported/aster/batch-cancel
-    auth: unsupported
+    method: DELETE
+    path: /fapi/v3/batchOrders
+    auth: signed
     credential_scopes: [trade]
     rate_limit_bucket: signed_uid
-    weight: 0
-    request_spec_required: false
-    native_batch: false
-    atomicity: unsupported
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/aster/request_specs/batch_cancel_orders.json
+    native_batch: true
+    atomicity: partial
     testnet: false
-    support: unsupported
-    reason: aster.batch_cancel_orders_unsupported
+    support: native
+    max_items: 10
+    sign_path: eip712_v3_query
+    notes: Runtime supports one symbol per call and does not mix orderIdList with origClientOrderIdList.
 unsupported:
   - operation: spot_product
     status: project_unimplemented

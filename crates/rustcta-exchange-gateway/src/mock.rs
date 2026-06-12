@@ -228,6 +228,11 @@ impl LocalGateway for MockExchangeGateway {
                     operation: "mock.set_leverage".to_string(),
                 });
             }
+            GatewayRequestPayload::SetMarginMode(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.set_margin_mode".to_string(),
+                });
+            }
             GatewayRequestPayload::SetPositionMode(_) => {
                 return Err(GatewayError::UnsupportedOperation {
                     operation: "mock.set_position_mode".to_string(),

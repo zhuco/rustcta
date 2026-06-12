@@ -5,14 +5,17 @@ use chrono::Utc;
 use rustcta_exchange_api::{
     AccountControlCapabilities, BalancesRequest, BalancesResponse, CancelAllOrdersRequest,
     CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
-    CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
-    FundingRatesResponse, HeartbeatDirection, HeartbeatPolicy, HistoryCapability,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookCapability, OrderBookRequest,
-    OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SetLeverageRequest,
-    SetLeverageResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    ClosePositionRequest, ClosePositionResponse, CredentialScope, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    FundingRatesRequest, FundingRatesResponse, HeartbeatCapability, HeartbeatDirection,
+    HeartbeatPolicy, HistoryCapability, OpenOrdersRequest, OpenOrdersResponse, OrderBookCapability,
+    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    ReconnectCapability, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
+    SetPositionModeResponse, StreamAuthCapability, StreamHeartbeatDirection,
+    StreamResyncCapability, StreamRuntimeCapability, SymbolAccountConfigRequest,
+    SymbolAccountConfigResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -169,9 +172,9 @@ impl MexcGatewayAdapter {
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> ExchangeApiResult<serde_json::Value> {
-        let (api_key, api_secret, _) = self.private_credentials(operation)?;
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
         self.rest
-            .send_contract_signed_get(endpoint, params, api_key, api_secret)
+            .send_contract_signed_get(endpoint, params, api_key, api_secret, recv_window_ms)
             .await
     }
 
@@ -182,9 +185,9 @@ impl MexcGatewayAdapter {
         params: &HashMap<String, String>,
         body: Option<&serde_json::Value>,
     ) -> ExchangeApiResult<serde_json::Value> {
-        let (api_key, api_secret, _) = self.private_credentials(operation)?;
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
         self.rest
-            .send_contract_signed_post(endpoint, params, body, api_key, api_secret)
+            .send_contract_signed_post(endpoint, params, body, api_key, api_secret, recv_window_ms)
             .await
     }
 
@@ -231,12 +234,20 @@ impl GatewayAdapter for MexcGatewayAdapter {
         let private = self.config.private_rest_enabled();
         AccountControlCapabilities {
             exchange: self.exchange_id.clone(),
-            supports_symbol_account_config: false,
+            supports_symbol_account_config: private,
             supports_leverage: private,
-            supports_position_mode_change: false,
-            supports_close_position: false,
+            supports_margin_mode_change: false,
+            supports_position_mode_change: private,
+            supports_close_position: private,
             supports_countdown_cancel_all: false,
         }
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        self.get_symbol_account_config_impl(request).await
     }
 
     async fn set_leverage(
@@ -244,6 +255,24 @@ impl GatewayAdapter for MexcGatewayAdapter {
         request: SetLeverageRequest,
     ) -> ExchangeApiResult<SetLeverageResponse> {
         self.set_leverage_impl(request).await
+    }
+
+    async fn set_position_mode(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        self.set_position_mode_impl(request).await
+    }
+
+    async fn close_position(
+        &self,
+        request: ClosePositionRequest,
+    ) -> ExchangeApiResult<ClosePositionResponse> {
+        let place_request = super::close_position_order_request(&request)?;
+        let response = self.place_order_impl(place_request).await?;
+        Ok(super::close_position_response_from_place_order(
+            &request, response,
+        ))
     }
 }
 
@@ -260,6 +289,9 @@ impl ExchangeClient for MexcGatewayAdapter {
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
         capabilities.supports_public_streams = true;
+        capabilities.supports_private_streams = private;
+        capabilities.private_stream_capabilities =
+            Some(streams::mexc_contract_private_stream_capabilities(private));
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
@@ -274,6 +306,8 @@ impl ExchangeClient for MexcGatewayAdapter {
         capabilities.supports_open_orders = private;
         capabilities.supports_recent_fills = private;
         capabilities.supports_client_order_id = true;
+        capabilities.supports_reduce_only = true;
+        capabilities.supports_post_only = true;
         capabilities.supports_time_in_force =
             vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK];
         capabilities.supports_order_types = vec![
@@ -283,57 +317,60 @@ impl ExchangeClient for MexcGatewayAdapter {
             OrderType::IOC,
             OrderType::FOK,
         ];
-        capabilities.max_order_book_depth = Some(1000);
-        capabilities.order_book = OrderBookCapability::strict_delta(Some(1000));
-        capabilities.max_recent_fill_limit = Some(1000);
+        capabilities.max_order_book_depth = Some(50);
+        capabilities.order_book = OrderBookCapability::snapshot_only(Some(50));
+        capabilities.max_recent_fill_limit = Some(100);
         capabilities.refresh_v2_from_legacy_flags();
         capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
-        capabilities.capabilities_v2.private_streams = CapabilitySupport::rest_fallback(
-            "private WebSocket is not wired; reconciliation uses private REST readbacks",
-        );
-        capabilities.capabilities_v2.stream_runtime.heartbeat_policy = HeartbeatPolicy {
-            direction: HeartbeatDirection::ClientPing,
-            ping_interval_ms: 30_000,
-            pong_timeout_ms: 10_000,
-            stale_message_ms: 60_000,
-            requires_pong_payload_echo: false,
+        capabilities.capabilities_v2.private_streams = if private {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported("MEXC private streams require API key and secret")
         };
-        capabilities.capabilities_v2.stream_runtime.public =
-            capabilities.capabilities_v2.public_streams.clone();
-        capabilities.capabilities_v2.stream_runtime.private =
-            capabilities.capabilities_v2.private_streams.clone();
-        capabilities
-            .capabilities_v2
-            .stream_runtime
-            .resync
-            .order_book = true;
-        capabilities.capabilities_v2.stream_runtime.resync.balances = private;
-        capabilities.capabilities_v2.stream_runtime.resync.orders = private;
-        capabilities
-            .capabilities_v2
-            .stream_runtime
-            .heartbeat
-            .direction = rustcta_exchange_api::StreamHeartbeatDirection::ClientPing;
-        capabilities
-            .capabilities_v2
-            .stream_runtime
-            .heartbeat
-            .required = true;
-        capabilities
-            .capabilities_v2
-            .stream_runtime
-            .heartbeat
-            .interval_ms = Some(30_000);
-        capabilities
-            .capabilities_v2
-            .stream_runtime
-            .heartbeat
-            .timeout_ms = Some(10_000);
-        capabilities
-            .capabilities_v2
-            .stream_runtime
-            .heartbeat_policy
-            .direction = HeartbeatDirection::ClientPing;
+        capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
+            public: CapabilitySupport::native(),
+            private: capabilities.capabilities_v2.private_streams.clone(),
+            supports_subscribe: true,
+            supports_unsubscribe: true,
+            supports_public_subscribe: true,
+            supports_public_unsubscribe: true,
+            supports_private_subscribe: private,
+            supports_private_unsubscribe: private,
+            heartbeat: HeartbeatCapability {
+                supported: true,
+                required: true,
+                direction: StreamHeartbeatDirection::ClientPing,
+                interval_ms: Some(30_000),
+                timeout_ms: Some(10_000),
+            },
+            reconnect: ReconnectCapability {
+                supported: true,
+                requires_resubscribe: true,
+                preserves_session: false,
+                max_reconnect_attempts: None,
+            },
+            resync: StreamResyncCapability {
+                order_book: true,
+                balances: private,
+                positions: private,
+                orders: private,
+            },
+            auth: StreamAuthCapability {
+                required: private,
+                credential_scopes: vec![CredentialScope::ReadOnly, CredentialScope::Trade],
+                renewal_ms: None,
+                uses_listen_key: false,
+                requires_relogin_on_reconnect: true,
+            },
+            heartbeat_policy: HeartbeatPolicy {
+                direction: HeartbeatDirection::ClientPing,
+                ping_interval_ms: 30_000,
+                pong_timeout_ms: 10_000,
+                stale_message_ms: 60_000,
+                requires_pong_payload_echo: false,
+            },
+            ..StreamRuntimeCapability::default()
+        };
         capabilities.capabilities_v2.batch_place_orders = rustcta_exchange_api::BatchCapability {
             support: CapabilitySupport::composed(
                 "planner may compose sequential single-order REST calls",
@@ -373,7 +410,7 @@ impl ExchangeClient for MexcGatewayAdapter {
             supports_limit: true,
             supports_cursor: true,
             supports_from_id: true,
-            max_limit: Some(1000),
+            max_limit: Some(100),
             max_window_ms: None,
         };
         capabilities.capabilities_v2.credential_scopes = if private {
@@ -478,9 +515,9 @@ impl ExchangeClient for MexcGatewayAdapter {
 
     async fn subscribe_private_stream(
         &self,
-        _subscription: PrivateStreamSubscription,
+        subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        self.unsupported_private("mexc.subscribe_private_stream")
+        self.subscribe_private_stream_impl(subscription).await
     }
 }
 

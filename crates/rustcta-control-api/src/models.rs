@@ -456,6 +456,7 @@ impl Default for LogStreamView {
 pub struct LogEventView {
     pub log_id: String,
     pub level: LogLevel,
+    pub category: LogCategory,
     pub target: Option<String>,
     pub message: String,
     pub occurred_at: DateTime<Utc>,
@@ -560,6 +561,7 @@ pub struct StrategyLogTailView {
     pub max_lines: usize,
     pub max_bytes: usize,
     pub event_count: usize,
+    pub counts: std::collections::BTreeMap<String, usize>,
     pub read_error: Option<String>,
     pub events: Vec<LogEventView>,
 }
@@ -575,8 +577,35 @@ impl Default for StrategyLogTailView {
             max_lines: 0,
             max_bytes: 0,
             event_count: 0,
+            counts: std::collections::BTreeMap::new(),
             read_error: None,
             events: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogCategory {
+    Error,
+    Warn,
+    Trade,
+    Control,
+    Balance,
+    Market,
+    Info,
+}
+
+impl LogCategory {
+    pub fn as_key(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Trade => "trade",
+            Self::Control => "control",
+            Self::Balance => "balance",
+            Self::Market => "market",
+            Self::Info => "info",
         }
     }
 }

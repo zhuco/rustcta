@@ -1,6 +1,7 @@
 use std::path::Path;
 
 pub mod account_position_render;
+pub mod contract_readonly_canary;
 pub mod gateio_bitget_spot_symbols;
 pub mod hyperliquid_self_test;
 pub mod private_ws_observe;
@@ -10,8 +11,14 @@ pub mod ws_config_probe;
 pub mod ws_proxy_probe;
 
 pub use account_position_render::{run_account_position_render, AccountPositionRenderArgs};
+pub use contract_readonly_canary::{
+    run_contract_readonly_canary, ContractReadonlyCanaryArgs, ContractReadonlyCanaryReport,
+};
 pub use gateio_bitget_spot_symbols::{run_gateio_bitget_spot_symbols, GateioBitgetSpotSymbolsArgs};
 pub use hyperliquid_self_test::{hyperliquid_self_test_safety_plan, HyperliquidSelfTestPlanArgs};
+pub use private_ws_observe::{
+    run_private_ws_observe_once, PrivateWsObserveConfig, PrivateWsObserveEvent,
+};
 pub use private_ws_probe::{run_private_ws_probe, PrivateWsProbeArgs, PrivateWsProbeReport};
 pub use rustcta_reporting::{run_trend_report, TrendReportArgs};
 pub use rustcta_smart_money::{

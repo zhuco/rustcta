@@ -13,7 +13,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::ws_proxy_probe::connect_websocket;
+use crate::ws_proxy_probe::{connect_websocket, reqwest_client_builder_with_ws_proxy};
 
 type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
@@ -89,6 +89,9 @@ pub async fn run_private_ws_probe(args: PrivateWsProbeArgs) -> Result<PrivateWsP
             "binance" => probe_binance_private_ws(&args, timeout_duration).await,
             "bitget" => probe_bitget_private_ws(&args, timeout_duration).await,
             "gateio" => probe_gateio_private_ws(&args, timeout_duration).await,
+            "aster" | "mexc" | "kucoinfutures" | "bybit" => {
+                probe_observer_managed_private_ws(exchange)
+            }
             _ => unreachable!("selected exchange is validated"),
         };
         exchanges.push(report);
@@ -153,7 +156,7 @@ async fn probe_binance_private_ws(
             .to_string(),
     );
 
-    let client = match reqwest::Client::builder()
+    let client = match reqwest_client_builder_with_ws_proxy()
         .timeout(timeout_duration)
         .build()
         .context("build reqwest client")
@@ -168,7 +171,7 @@ async fn probe_binance_private_ws(
     let listen_key = match start_binance_listen_key(&client, &rest_base, &api_key).await {
         Ok(listen_key) => listen_key,
         Err(error) => {
-            report.error(format!("start listenKey failed: {error}"));
+            report.error(format!("start listenKey failed: {error:#}"));
             return report;
         }
     };
@@ -422,6 +425,43 @@ async fn probe_gateio_private_ws(
         report.error(format!("read subscribe frames failed: {error}"));
     }
     report.finish(args.require_events);
+    report
+}
+
+fn probe_observer_managed_private_ws(exchange: &str) -> PrivateWsExchangeReport {
+    let (endpoint, channels, note) = match exchange {
+        "aster" => (
+            "wss://fstream.asterdex.com/ws/<listenKey>",
+            vec!["ORDER_TRADE_UPDATE", "ACCOUNT_UPDATE"],
+            "Aster private websocket live readiness is handled by private_ws_observe because it requires a signed listenKey lifecycle.",
+        ),
+        "mexc" => (
+            "wss://contract.mexc.com/edge",
+            vec!["order", "order.deal", "position", "asset"],
+            "MEXC contract private websocket live readiness is handled by private_ws_observe because it requires a continuous login/filter session.",
+        ),
+        "kucoinfutures" => (
+            "wss://ws-api-futures.kucoin.com/endpoint?<private-token>",
+            vec![
+                "/contractMarket/tradeOrders",
+                "/contractAccount/wallet",
+                "/contract/position",
+            ],
+            "KuCoin Futures private websocket live readiness is handled by private_ws_observe because private bullet tokens are connection-scoped.",
+        ),
+        "bybit" => (
+            "wss://stream.bybit.com/v5/private",
+            vec!["order", "execution", "position", "wallet"],
+            "Bybit private websocket live readiness is handled by private_ws_observe with auth plus topic acknowledgements.",
+        ),
+        _ => unreachable!("observer managed exchange"),
+    };
+    let mut report = PrivateWsExchangeReport::new(exchange, endpoint);
+    report.subscriptions = channels
+        .into_iter()
+        .map(PrivateWsSubscriptionReport::new)
+        .collect();
+    report.skip(note);
     report
 }
 
@@ -728,7 +768,7 @@ async fn fetch_gateio_futures_user_id(
     let timestamp = Utc::now().timestamp().to_string();
     let path = gateio_signed_request_path(&rest_base, endpoint);
     let signature = gateio_rest_signature(api_secret, "GET", &path, "", "", &timestamp)?;
-    let client = reqwest::Client::builder()
+    let client = reqwest_client_builder_with_ws_proxy()
         .timeout(timeout_duration)
         .build()
         .context("build Gate.io REST client")?;
@@ -845,12 +885,26 @@ fn record_frame(
 fn selected_private_exchanges(filter: &str) -> Result<Vec<&'static str>> {
     let filter = filter.trim().to_ascii_lowercase();
     if filter == "all" {
-        return Ok(vec!["binance", "bitget", "gateio"]);
+        return Ok(vec![
+            "binance",
+            "bitget",
+            "gateio",
+            "aster",
+            "mexc",
+            "kucoinfutures",
+            "bybit",
+        ]);
     }
     match filter.as_str() {
         "binance" | "binance-usdm" | "binance-perp" => Ok(vec!["binance"]),
         "bitget" | "bitget-usdt-futures" | "bitget-perp" => Ok(vec!["bitget"]),
         "gate" | "gateio" | "gate-io" | "gateio-usdt-futures" | "gateio-perp" => Ok(vec!["gateio"]),
+        "aster" | "aster-perp" | "aster-futures" => Ok(vec!["aster"]),
+        "mexc" | "mexc-contract" | "mexc-perp" => Ok(vec!["mexc"]),
+        "kucoinfutures" | "kucoin-futures" | "kucoin_futures" | "kucoinfutures-perp" => {
+            Ok(vec!["kucoinfutures"])
+        }
+        "bybit" | "bybit-linear" | "bybit-perp" => Ok(vec!["bybit"]),
         _ => bail!("unsupported private websocket exchange filter: {filter}"),
     }
 }
@@ -860,6 +914,13 @@ pub fn hmac_sha256_base64(secret: &str, payload: &str) -> Result<String> {
         HmacSha256::new_from_slice(secret.as_bytes()).context("create hmac-sha256 signer")?;
     mac.update(payload.as_bytes());
     Ok(general_purpose::STANDARD.encode(mac.finalize().into_bytes()))
+}
+
+pub fn hmac_sha256_hex(secret: &str, payload: &str) -> Result<String> {
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).context("create hmac-sha256 signer")?;
+    mac.update(payload.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
 pub fn gateio_ws_signature(
@@ -1023,6 +1084,35 @@ mod tests {
     }
 
     #[test]
+    fn private_ws_probe_hmac_hex_should_match_bybit_and_mexc_vectors() {
+        let bybit =
+            hmac_sha256_hex("test-secret", "GET/realtime1700000060000").expect("bybit signature");
+        assert_eq!(
+            bybit,
+            "abe532db72409312ffdc9b1ba94e90026bcf78460bad4ffa175864bd5c895c37"
+        );
+
+        let mexc =
+            hmac_sha256_hex("test-secret", "mx-test-key1611038237237").expect("mexc signature");
+        assert_eq!(
+            mexc,
+            "09f1f80d2e37c8be308d32b2b5cb09906a63a3967928f75d3db30c38029fe406"
+        );
+    }
+
+    #[test]
+    fn private_ws_probe_exchange_selection_should_include_contract_observer_venues() {
+        let all = selected_private_exchanges("all").expect("all exchanges");
+        for exchange in ["mexc", "kucoinfutures", "bybit"] {
+            assert!(all.contains(&exchange), "missing {exchange}");
+        }
+        assert_eq!(
+            selected_private_exchanges("kucoin-futures").expect("kucoin"),
+            vec!["kucoinfutures"]
+        );
+    }
+
+    #[test]
     fn gateio_signature_should_match_known_hmac_shape() {
         let signature =
             gateio_ws_signature("secret", "futures.orders", "subscribe", 123).expect("signature");
@@ -1081,11 +1171,19 @@ mod tests {
 
     #[test]
     fn selected_private_exchanges_should_accept_aliases() {
-        assert_eq!(selected_private_exchanges("all").unwrap().len(), 3);
+        assert_eq!(selected_private_exchanges("all").unwrap().len(), 7);
         assert_eq!(selected_private_exchanges("gate").unwrap(), vec!["gateio"]);
+        assert_eq!(
+            selected_private_exchanges("aster-futures").unwrap(),
+            vec!["aster"]
+        );
         assert_eq!(
             selected_private_exchanges("bitget-usdt-futures").unwrap(),
             vec!["bitget"]
+        );
+        assert_eq!(
+            selected_private_exchanges("bybit-linear").unwrap(),
+            vec!["bybit"]
         );
     }
 }

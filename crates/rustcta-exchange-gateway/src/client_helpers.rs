@@ -4,8 +4,8 @@ use rustcta_exchange_api::{
     CancelAllOrdersResponse, CancelOrderResponse, ClosePositionResponse,
     CountdownCancelAllResponse, FeesResponse, FundingRatesResponse, OpenOrdersResponse,
     OrderBookResponse, OrderListResponse, PlaceOrderResponse, PositionsResponse,
-    QueryOrderResponse, RecentFillsResponse, SetLeverageResponse, SetPositionModeResponse,
-    SymbolAccountConfigResponse, SymbolRulesResponse,
+    QueryOrderResponse, RecentFillsResponse, SetLeverageResponse, SetMarginModeResponse,
+    SetPositionModeResponse, SymbolAccountConfigResponse, SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, TenantId};
 
@@ -172,6 +172,14 @@ impl GatewayProtocolResponse {
         self.require_accepted()?;
         match self.payload {
             GatewayResponsePayload::SetLeverage(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_set_margin_mode(self) -> Result<SetMarginModeResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::SetMarginMode(response) => Ok(response),
             other => Err(unexpected_payload(self.operation, other)),
         }
     }

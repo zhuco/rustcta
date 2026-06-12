@@ -3,19 +3,21 @@ use std::sync::{Arc, Mutex};
 
 use rustcta_exchange_api::{
     AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
-    ExchangeClient, ExchangeStreamEvent, FeesRequest, FundingRatesRequest, PlaceOrderRequest,
-    PositionMode, PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind,
-    PublicStreamSubscription, RequestContext, SetLeverageRequest, SetPositionModeRequest,
-    SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    CapabilitySupport, ClosePositionRequest, CountdownCancelAllRequest, ExchangeClient,
+    ExchangeStreamEvent, FeesRequest, FundingRatesRequest, PlaceOrderRequest, PositionMode,
+    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
+    RequestContext, SetLeverageRequest, SetPositionModeRequest, StreamHeartbeatDirection,
+    SymbolScope, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderStatus,
-    OrderType, TenantId,
+    OrderType, PositionSide, TenantId,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+use crate::orderbook_state::{OrderBookApplyOutcome, OrderBookState, OrderBookStateConfig};
 use crate::request_spec::{ActualHttpRequest, RequestSpec};
 use crate::signing_spec::SigningVector;
 
@@ -23,8 +25,10 @@ use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::private_parser::parse_fee_snapshots;
 use super::signing::{sign_rest_payload, sign_ws_auth};
 use super::streams::{
-    bybit_heartbeat_payload, bybit_private_auth_payload, bybit_private_subscribe_payload,
+    bybit_heartbeat_payload, bybit_private_auth_payload, bybit_private_resubscribe_plan,
+    bybit_private_subscribe_payload, bybit_private_subscribe_payloads,
     bybit_public_subscribe_payload, bybit_public_ws_url, classify_ws_control,
+    parse_bybit_orderbook_delta, parse_bybit_private_stream_events,
     parse_bybit_public_stream_events,
 };
 use super::{BybitGatewayAdapter, BybitGatewayConfig, GatewayAdapter};
@@ -123,11 +127,57 @@ fn bybit_capabilities_should_declare_public_funding_rates() {
 }
 
 #[test]
+fn bybit_capabilities_should_declare_private_stream_runtime_when_credentials_are_enabled() {
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_private_rest);
+    assert!(capabilities.supports_private_streams);
+    assert!(capabilities
+        .private_stream_capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.supports_orders
+            && capabilities.supports_fills
+            && capabilities.supports_balances
+            && capabilities.supports_positions));
+    assert!(matches!(
+        capabilities.capabilities_v2.private_streams,
+        CapabilitySupport::Native
+    ));
+    assert!(capabilities.order_book.supports_sequence);
+    let runtime = &capabilities.capabilities_v2.stream_runtime;
+    assert!(runtime.public.is_supported());
+    assert!(runtime.private.is_supported());
+    assert!(runtime.supports_public_subscribe);
+    assert!(runtime.supports_private_subscribe);
+    assert!(runtime.heartbeat.required);
+    assert_eq!(
+        runtime.heartbeat.direction,
+        StreamHeartbeatDirection::ClientPing
+    );
+    assert!(runtime.reconnect.supported);
+    assert!(runtime.reconnect.requires_resubscribe);
+    assert!(runtime.resync.order_book);
+    assert!(runtime.resync.orders);
+    assert!(runtime.resync.positions);
+    assert!(runtime.resync.balances);
+    assert!(runtime.auth.required);
+    assert!(runtime.auth.requires_relogin_on_reconnect);
+}
+
+#[test]
 fn bybit_account_control_capabilities_should_track_private_rest() {
     let public = BybitGatewayAdapter::default_public().expect("adapter");
     let public_capabilities = GatewayAdapter::account_control_capabilities(&public);
     assert!(!public_capabilities.supports_leverage);
     assert!(!public_capabilities.supports_position_mode_change);
+    assert!(!public_capabilities.supports_close_position);
+    assert!(!public_capabilities.supports_countdown_cancel_all);
 
     let private = BybitGatewayAdapter::new(BybitGatewayConfig {
         api_key: Some("key".to_string()),
@@ -139,6 +189,8 @@ fn bybit_account_control_capabilities_should_track_private_rest() {
     let private_capabilities = GatewayAdapter::account_control_capabilities(&private);
     assert!(private_capabilities.supports_leverage);
     assert!(private_capabilities.supports_position_mode_change);
+    assert!(private_capabilities.supports_close_position);
+    assert!(private_capabilities.supports_countdown_cancel_all);
 }
 
 #[test]
@@ -190,6 +242,36 @@ fn bybit_ws_payloads_should_match_v5_shapes() {
     );
     assert_eq!(bybit_heartbeat_payload()["op"], "ping");
     assert_eq!(classify_ws_control(&json!({"op": "pong"})).unwrap(), "pong");
+}
+
+#[test]
+fn bybit_private_ws_account_plan_should_cover_all_topics_and_rest_resync() {
+    let account = private_subscription(PrivateStreamKind::Account);
+    let payloads = bybit_private_subscribe_payloads(&account).expect("payloads");
+    let topics: Vec<_> = payloads
+        .iter()
+        .map(|payload| payload["args"][0].as_str().expect("topic"))
+        .collect();
+    assert_eq!(topics, vec!["order", "execution", "position", "wallet"]);
+
+    let plan =
+        bybit_private_resubscribe_plan("test-key", "test-secret", 1_700_000_060_000, &account)
+            .expect("plan");
+    assert_eq!(plan.auth_payload["op"], "auth");
+    assert_eq!(
+        plan.topics,
+        vec!["order", "execution", "position", "wallet"]
+    );
+    assert_eq!(
+        plan.rest_resync_operations,
+        vec![
+            "get_balances",
+            "get_positions",
+            "get_open_orders",
+            "get_recent_fills",
+            "query_order"
+        ]
+    );
 }
 
 #[test]
@@ -252,6 +334,228 @@ fn bybit_public_ws_parser_should_emit_orderbook_events() {
     ));
 }
 
+#[test]
+fn bybit_public_ws_orderbook_delta_should_apply_contiguous_update_and_resync_on_gap() {
+    let exchange = exchange_id();
+    let symbol = symbol_scope("BTCUSDT");
+    let snapshot = parse_orderbook_snapshot(
+        &exchange,
+        symbol.clone(),
+        &json!({
+            "result": {
+                "s": "BTCUSDT",
+                "b": [["30247.20", "30.028"]],
+                "a": [["30249.30", "0.892"]],
+                "u": 177400507_u64,
+                "seq": 66544703342_u64
+            }
+        }),
+    )
+    .expect("snapshot");
+    let mut state = OrderBookState::from_snapshot(snapshot)
+        .expect("state")
+        .with_config(OrderBookStateConfig::strict_delta());
+
+    let contiguous = parse_bybit_orderbook_delta(
+        &exchange,
+        &symbol,
+        &json!({
+            "topic": "orderbook.50.BTCUSDT",
+            "type": "delta",
+            "data": {
+                "s": "BTCUSDT",
+                "b": [["30247.20", "31.000"]],
+                "a": [["30249.30", "0"]],
+                "u": 177400508_u64,
+                "seq": 66544703343_u64
+            },
+            "cts": 1687940967464_i64
+        }),
+    )
+    .expect("delta");
+    assert!(matches!(
+        state.apply_delta(contiguous, None).expect("apply"),
+        OrderBookApplyOutcome::DeltaApplied {
+            sequence: Some(66544703343)
+        }
+    ));
+
+    let gap = parse_bybit_orderbook_delta(
+        &exchange,
+        &symbol,
+        &json!({
+            "topic": "orderbook.50.BTCUSDT",
+            "type": "delta",
+            "data": {
+                "s": "BTCUSDT",
+                "b": [["30247.20", "32.000"]],
+                "a": [],
+                "u": 177400511_u64,
+                "seq": 66544703346_u64
+            }
+        }),
+    )
+    .expect("gap delta");
+    let outcome = state.apply_delta(gap, None).expect("apply gap");
+    let OrderBookApplyOutcome::ResyncRequired(request) = outcome else {
+        panic!("expected resync required");
+    };
+    assert_eq!(request.expected_next_sequence, Some(66544703344));
+    assert_eq!(request.received_first_sequence, Some(66544703346));
+}
+
+#[test]
+fn bybit_private_ws_parser_should_normalize_order_execution_position_and_wallet_events() {
+    let exchange = exchange_id();
+    let symbol = symbol_scope("BTCUSDT");
+    let subscription = private_subscription(PrivateStreamKind::Orders);
+    let order_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/exchanges/bybit/ws_private_order.json"
+    ))
+    .expect("order fixture");
+
+    let order_events =
+        parse_bybit_private_stream_events(&exchange, &subscription, Some(&symbol), &order_fixture)
+            .expect("order events");
+    let Some(ExchangeStreamEvent::OrderUpdate(order)) = order_events.first() else {
+        panic!("expected order update");
+    };
+    assert_eq!(order.exchange_order_id.as_deref(), Some("order-1"));
+    assert_eq!(order.client_order_id.as_deref(), Some("cli-place"));
+    assert_eq!(order.status, OrderStatus::New);
+    assert_eq!(order.position_side, Some(PositionSide::Long));
+
+    let fill_events = parse_bybit_private_stream_events(
+        &exchange,
+        &private_subscription(PrivateStreamKind::Fills),
+        None,
+        &json!({
+            "topic": "execution",
+            "data": [{
+                "symbol": "BTCUSDT",
+                "orderId": "order-1",
+                "orderLinkId": "cli-place",
+                "execId": "fill-1",
+                "side": "Buy",
+                "execPrice": "25000",
+                "execQty": "0.01",
+                "execValue": "250",
+                "execFee": "0.1",
+                "feeCurrency": "USDT",
+                "isMaker": false,
+                "execTime": "1700000000000"
+            }]
+        }),
+    )
+    .expect("fill events");
+    let Some(ExchangeStreamEvent::Fill(fill)) = fill_events.first() else {
+        panic!("expected fill");
+    };
+    assert_eq!(fill.fill_id.as_deref(), Some("fill-1"));
+    assert_eq!(fill.canonical_symbol.as_str(), "BTC/USDT");
+    assert_eq!(fill.price, 25000.0);
+    assert_eq!(fill.quantity, 0.01);
+
+    let position_events = parse_bybit_private_stream_events(
+        &exchange,
+        &private_subscription(PrivateStreamKind::Positions),
+        Some(&symbol),
+        &json!({
+            "topic": "position",
+            "data": [{
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "size": "0.01",
+                "avgPrice": "25000",
+                "markPrice": "25010",
+                "liqPrice": "0",
+                "unrealisedPnl": "1",
+                "leverage": "5"
+            }]
+        }),
+    )
+    .expect("position events");
+    let Some(ExchangeStreamEvent::PositionSnapshot(positions)) = position_events.first() else {
+        panic!("expected position snapshot");
+    };
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].side, PositionSide::Long);
+    assert_eq!(positions.positions[0].quantity, 0.01);
+
+    let balance_events = parse_bybit_private_stream_events(
+        &exchange,
+        &private_subscription(PrivateStreamKind::Balances),
+        Some(&symbol),
+        &json!({
+            "topic": "wallet",
+            "data": [{
+                "accountType": "UNIFIED",
+                "coin": [{
+                    "coin": "USDT",
+                    "walletBalance": "100",
+                    "availableToWithdraw": "90"
+                }]
+            }]
+        }),
+    )
+    .expect("balance events");
+    let Some(ExchangeStreamEvent::BalanceSnapshot(balances)) = balance_events.first() else {
+        panic!("expected balance snapshot");
+    };
+    assert_eq!(balances.balances.len(), 1);
+    assert_eq!(balances.balances[0].balances[0].asset, "USDT");
+    assert_eq!(balances.balances[0].balances[0].available, 90.0);
+
+    let categorized_fill_events = parse_bybit_private_stream_events(
+        &exchange,
+        &private_subscription(PrivateStreamKind::Fills),
+        None,
+        &json!({
+            "topic": "execution.linear",
+            "data": [{
+                "symbol": "BTCUSDT",
+                "orderId": "order-2",
+                "orderLinkId": "cli-place-2",
+                "execId": "fill-2",
+                "side": "Sell",
+                "execPrice": "25001",
+                "execQty": "0.02",
+                "execValue": "500.02",
+                "execFee": "0.2",
+                "feeCurrency": "USDT",
+                "isMaker": true,
+                "execTime": "1700000001000"
+            }]
+        }),
+    )
+    .expect("categorized fill events");
+    let Some(ExchangeStreamEvent::Fill(fill)) = categorized_fill_events.first() else {
+        panic!("expected categorized fill");
+    };
+    assert_eq!(fill.fill_id.as_deref(), Some("fill-2"));
+
+    let auth_ack = parse_bybit_private_stream_events(
+        &exchange,
+        &subscription,
+        Some(&symbol),
+        &json!({"success": true, "op": "auth", "conn_id": "abc"}),
+    )
+    .expect("auth ack");
+    assert!(auth_ack.is_empty());
+
+    let heartbeat = parse_bybit_private_stream_events(
+        &exchange,
+        &subscription,
+        Some(&symbol),
+        &json!({"success": true, "ret_msg": "pong", "op": "ping"}),
+    )
+    .expect("private heartbeat");
+    assert!(matches!(
+        heartbeat.first(),
+        Some(ExchangeStreamEvent::Heartbeat { .. })
+    ));
+}
+
 #[tokio::test]
 async fn bybit_get_fees_should_send_signed_fee_rate_request() {
     let (base_url, seen) = spawn_rest_server(vec![json!({
@@ -296,18 +600,36 @@ async fn bybit_get_fees_should_send_signed_fee_rate_request() {
 }
 
 #[tokio::test]
-async fn bybit_get_funding_rates_should_send_public_funding_history_request() {
-    let (base_url, seen) = spawn_rest_server(vec![json!({
-        "retCode": 0,
-        "retMsg": "OK",
-        "result": {
-            "list": [{
-                "symbol": "BTCUSDT",
-                "fundingRate": "0.0001",
-                "fundingRateTimestamp": "1700000000000"
-            }]
-        }
-    })])
+async fn bybit_get_funding_rates_should_merge_public_ticker_and_history_snapshot() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [{
+                    "symbol": "BTCUSDT",
+                    "markPrice": "65000.5",
+                    "indexPrice": "64999.9",
+                    "openInterest": "12345",
+                    "turnover24h": "1000000",
+                    "volume24h": "100",
+                    "fundingRate": "0.0001",
+                    "nextFundingTime": "1700028800000"
+                }]
+            }
+        }),
+        json!({
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [{
+                    "symbol": "BTCUSDT",
+                    "fundingRate": "0.0001",
+                    "fundingRateTimestamp": "1700000000000"
+                }]
+            }
+        }),
+    ])
     .await;
     let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
         rest_base_url: base_url,
@@ -330,11 +652,23 @@ async fn bybit_get_funding_rates_should_send_public_funding_history_request() {
     assert_eq!(response.rates[0].funding_rate, "0.0001");
     assert!(response.rates[0].funding_time.is_some());
     assert_eq!(
+        response.rates[0]
+            .next_funding_time
+            .expect("next funding")
+            .timestamp_millis(),
+        1700028800000
+    );
+    assert_eq!(response.rates[0].mark_price.as_deref(), Some("65000.5"));
+    assert_eq!(response.rates[0].index_price.as_deref(), Some("64999.9"));
+    assert_eq!(response.rates[0].open_interest.as_deref(), Some("12345"));
+    assert_eq!(response.rates[0].turnover_24h.as_deref(), Some("1000000"));
+    assert_eq!(response.rates[0].volume_24h.as_deref(), Some("100"));
+    assert_eq!(
         response.rates[0].source.as_deref(),
-        Some("bybit.v5.market.funding_history")
+        Some("bybit.v5.market.tickers")
     );
     let request = actual_http_request(&seen.lock().unwrap()[0]);
-    assert_eq!(request.path, "/v5/market/funding/history");
+    assert_eq!(request.path, "/v5/market/tickers");
     assert_eq!(
         request.query.get("category").map(String::as_str),
         Some("linear")
@@ -343,7 +677,12 @@ async fn bybit_get_funding_rates_should_send_public_funding_history_request() {
         request.query.get("symbol").map(String::as_str),
         Some("BTCUSDT")
     );
-    assert_eq!(request.query.get("limit").map(String::as_str), Some("1"));
+    let history_request = actual_http_request(&seen.lock().unwrap()[1]);
+    assert_eq!(history_request.path, "/v5/market/funding/history");
+    assert_eq!(
+        history_request.query.get("limit").map(String::as_str),
+        Some("1")
+    );
 }
 
 #[tokio::test]
@@ -617,6 +956,121 @@ async fn bybit_set_position_mode_should_send_signed_v5_switch_mode_request() {
     assert_eq!(body["mode"], 3);
 }
 
+#[tokio::test]
+async fn bybit_countdown_cancel_all_should_send_signed_v5_dcp_request() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "retCode": 0,
+        "retMsg": "success",
+        "result": {},
+        "retExtInfo": {},
+        "time": 1700000000000_i64
+    })])
+    .await;
+
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let capabilities = GatewayAdapter::account_control_capabilities(&adapter);
+    assert!(capabilities.supports_countdown_cancel_all);
+
+    let response = GatewayAdapter::set_countdown_cancel_all(
+        &adapter,
+        CountdownCancelAllRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-dcp"),
+            exchange: exchange_id(),
+            symbol: Some(symbol_scope("BTCUSDT")),
+            timeout_secs: 40,
+        },
+    )
+    .await
+    .expect("set dcp");
+
+    assert!(response.accepted);
+    assert_eq!(response.timeout_secs, 40);
+    assert!(response.trigger_time.is_none());
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_bybit_request(&requests[0], "POST", "/v5/order/disconnected-cancel-all");
+    load_request_spec("set_countdown_cancel_all.json")
+        .assert_matches(&actual_http_request(&requests[0]))
+        .expect("set countdown cancel all request spec");
+    let body = request_body_json(&requests[0]);
+    assert_eq!(body["product"], "DERIVATIVES");
+    assert_eq!(body["timeWindow"], 40);
+}
+
+#[tokio::test]
+async fn bybit_close_position_should_submit_reduce_only_ioc_order() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "symbol": "BTCUSDT",
+            "orderId": "4001",
+            "orderLinkId": "CLOSE_SHORT",
+            "side": "Buy",
+            "orderType": "Limit",
+            "orderStatus": "New",
+            "qty": "0.01",
+            "price": "65000",
+            "reduceOnly": true
+        },
+        "retExtInfo": {},
+        "time": 1700000000000_i64
+    })])
+    .await;
+
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = GatewayAdapter::close_position(
+        &adapter,
+        ClosePositionRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("close-short"),
+            symbol: symbol_scope("BTCUSDT"),
+            position_side: PositionSide::Short,
+            quantity: "0.01".to_string(),
+            price: Some("65000".to_string()),
+            order_type: OrderType::IOC,
+            time_in_force: TimeInForce::IOC,
+            client_order_id: "CLOSE_SHORT".to_string(),
+            max_slippage_pct: None,
+        },
+    )
+    .await
+    .expect("close position");
+
+    assert!(response.accepted);
+    assert_eq!(response.exchange_order_id.as_deref(), Some("4001"));
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_bybit_request(&requests[0], "POST", "/v5/order/create");
+    let body = request_body_json(&requests[0]);
+    assert_eq!(body["category"], "linear");
+    assert_eq!(body["symbol"], "BTCUSDT");
+    assert_eq!(body["side"], "Buy");
+    assert_eq!(body["positionIdx"], 2);
+    assert_eq!(body["reduceOnly"], true);
+    assert_eq!(body["orderType"], "Limit");
+    assert_eq!(body["timeInForce"], "IOC");
+    assert_eq!(body["orderLinkId"], "CLOSE_SHORT");
+}
+
 fn exchange_id() -> ExchangeId {
     ExchangeId::new("bybit").unwrap()
 }
@@ -627,6 +1081,17 @@ fn symbol_scope(symbol: &str) -> SymbolScope {
         market_type: MarketType::Perpetual,
         canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").unwrap()),
         exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, symbol).unwrap(),
+    }
+}
+
+fn private_subscription(kind: PrivateStreamKind) -> PrivateStreamSubscription {
+    PrivateStreamSubscription {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context("private-ws-parser"),
+        exchange: exchange_id(),
+        market_type: Some(MarketType::Perpetual),
+        account_id: AccountId::new("account").unwrap(),
+        kind,
     }
 }
 

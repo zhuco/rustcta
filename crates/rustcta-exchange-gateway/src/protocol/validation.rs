@@ -186,6 +186,10 @@ impl GatewayProtocolRequest {
                     ));
                 }
             }
+            GatewayRequestPayload::SetMarginMode(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+            }
             GatewayRequestPayload::SetPositionMode(request) => {
                 validate_exchange_schema(request.schema_version)?;
                 self.validate_context(&request.context)?;

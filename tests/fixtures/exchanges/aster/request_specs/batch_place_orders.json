@@ -1,0 +1,28 @@
+{
+  "exchange": "aster",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/fapi/v3/batchOrders",
+  "auth": "signed",
+  "form_contains": {
+    "batchOrders": [
+      {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "quantity": "0.01",
+        "price": "25000",
+        "newClientOrderId": "BATCH1",
+        "timeInForce": "GTC"
+      }
+    ],
+    "recvWindow": "5000"
+  },
+  "form_signature_fields": ["user", "signer", "nonce", "signature"],
+  "forbid_form_values_containing": ["test-secret"],
+  "runtime_status": "runtime_enabled",
+  "atomicity": "partial",
+  "max_items": 5
+}

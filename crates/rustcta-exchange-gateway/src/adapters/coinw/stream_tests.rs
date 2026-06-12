@@ -153,7 +153,7 @@ fn coinw_public_stream_parser_should_read_spot_snapshot_seq_fixture() {
         CoinwPublicStreamMessage::OrderBook(book) => {
             assert_eq!(book.order_book.sequence, Some(704538922));
             assert_eq!(book.order_book.bids[0].price, 94702.32);
-            assert_eq!(book.order_book.asks[0].quantity, 0.7071);
+            assert_eq!(book.order_book.asks[0].quantity, 7071.0 / 10000.0);
             assert!(book.order_book.exchange_timestamp.is_some());
         }
         other => panic!("unexpected message: {other:?}"),

@@ -525,6 +525,9 @@ pub struct SlippageCaptureArbitrageConfig {
     pub max_positions_per_exchange: usize,
     pub max_active_bundles_per_symbol: usize,
     pub symbol_cooldown_secs: i64,
+    pub risk_flatten_grace_secs: i64,
+    pub risk_flatten_close_min_net_profit_pct: f64,
+    pub risk_flatten_hedge_min_net_profit_pct: f64,
 }
 
 impl Default for SlippageCaptureArbitrageConfig {
@@ -554,6 +557,9 @@ impl Default for SlippageCaptureArbitrageConfig {
             max_positions_per_exchange: 10,
             max_active_bundles_per_symbol: 1,
             symbol_cooldown_secs: 300,
+            risk_flatten_grace_secs: 0,
+            risk_flatten_close_min_net_profit_pct: 0.0,
+            risk_flatten_hedge_min_net_profit_pct: 0.0,
         }
     }
 }
@@ -1340,192 +1346,197 @@ pub fn evaluate_dual_taker_open_opportunities_with_audit(
     let mut opportunities = Vec::new();
     let mut audits = Vec::new();
 
-    for long_book in books {
-        for short_book in books {
-            if long_book.exchange == short_book.exchange
-                || long_book.canonical_symbol != short_book.canonical_symbol
-            {
-                continue;
-            }
-            if short_book.best_bid_price <= long_book.best_ask_price {
-                continue;
-            }
+    for symbol_books in books_grouped_by_symbol(books) {
+        for long_book in &symbol_books {
+            for short_book in &symbol_books {
+                if long_book.exchange == short_book.exchange {
+                    continue;
+                }
+                if short_book.best_bid_price <= long_book.best_ask_price {
+                    continue;
+                }
 
-            let spread_pct =
-                (short_book.best_bid_price - long_book.best_ask_price) / long_book.best_ask_price;
-            if spread_pct < config.min_open_spread_pct {
-                continue;
-            }
-            let opportunity_id =
-                open_opportunity_id(long_book, short_book, &long_book.canonical_symbol);
-            let long_precision = precisions.get(&long_book.exchange, &long_book.canonical_symbol);
-            let short_precision =
-                precisions.get(&short_book.exchange, &short_book.canonical_symbol);
-            let long_top_depth_usdt = top_depth_usdt(long_book, long_precision, true);
-            let short_top_depth_usdt = top_depth_usdt(short_book, short_precision, false);
-            let mut audit = OpenOpportunityAudit {
-                opportunity_id: opportunity_id.clone(),
-                canonical_symbol: long_book.canonical_symbol.clone(),
-                long_exchange: long_book.exchange.clone(),
-                short_exchange: short_book.exchange.clone(),
-                decision: OpenOpportunityDecision::Rejected,
-                reject_reason: None,
-                raw_spread_pct: spread_pct,
-                configured_open_spread_pct: config.min_open_spread_pct,
-                min_open_spread_pct: config.min_open_spread_pct,
-                max_open_spread_pct: config.max_open_spread_pct,
-                min_open_net_profit_pct: config.min_open_net_profit_pct,
-                long_entry_price: long_book.best_ask_price,
-                short_entry_price: short_book.best_bid_price,
-                long_book_age_ms: long_book.age_ms(now),
-                short_book_age_ms: short_book.age_ms(now),
-                long_top_depth_usdt,
-                short_top_depth_usdt,
-                executable_top_depth_usdt: 0.0,
-                target_notional_usdt: config.target_notional_usdt,
-                quantity: None,
-                expected_net_profit_pct: None,
-                expected_net_pnl_usdt: None,
-                estimated_round_trip_fee_usdt: None,
-                observed_at: now,
-            };
+                let spread_pct = (short_book.best_bid_price - long_book.best_ask_price)
+                    / long_book.best_ask_price;
+                if spread_pct < config.min_open_spread_pct {
+                    continue;
+                }
+                let opportunity_id =
+                    open_opportunity_id(long_book, short_book, &long_book.canonical_symbol);
+                let long_precision =
+                    precisions.get(&long_book.exchange, &long_book.canonical_symbol);
+                let short_precision =
+                    precisions.get(&short_book.exchange, &short_book.canonical_symbol);
+                let long_top_depth_usdt = top_depth_usdt(long_book, long_precision, true);
+                let short_top_depth_usdt = top_depth_usdt(short_book, short_precision, false);
+                let mut audit = OpenOpportunityAudit {
+                    opportunity_id: opportunity_id.clone(),
+                    canonical_symbol: long_book.canonical_symbol.clone(),
+                    long_exchange: long_book.exchange.clone(),
+                    short_exchange: short_book.exchange.clone(),
+                    decision: OpenOpportunityDecision::Rejected,
+                    reject_reason: None,
+                    raw_spread_pct: spread_pct,
+                    configured_open_spread_pct: config.min_open_spread_pct,
+                    min_open_spread_pct: config.min_open_spread_pct,
+                    max_open_spread_pct: config.max_open_spread_pct,
+                    min_open_net_profit_pct: config.min_open_net_profit_pct,
+                    long_entry_price: long_book.best_ask_price,
+                    short_entry_price: short_book.best_bid_price,
+                    long_book_age_ms: long_book.age_ms(now),
+                    short_book_age_ms: short_book.age_ms(now),
+                    long_top_depth_usdt,
+                    short_top_depth_usdt,
+                    executable_top_depth_usdt: 0.0,
+                    target_notional_usdt: config.target_notional_usdt,
+                    quantity: None,
+                    expected_net_profit_pct: None,
+                    expected_net_pnl_usdt: None,
+                    estimated_round_trip_fee_usdt: None,
+                    observed_at: now,
+                };
 
-            if !long_book.is_valid(config.min_orderbook_levels) {
-                audit.reject_reason = Some(OpenOpportunityRejectReason::InvalidLongBook);
-                audits.push(audit);
-                continue;
-            }
-            if !short_book.is_valid(config.min_orderbook_levels) {
-                audit.reject_reason = Some(OpenOpportunityRejectReason::InvalidShortBook);
-                audits.push(audit);
-                continue;
-            }
-            if !long_book.is_fresh(now, config.orderbook_stale_ms) {
-                audit.reject_reason = Some(OpenOpportunityRejectReason::StaleLongBook);
-                audits.push(audit);
-                continue;
-            }
-            if !short_book.is_fresh(now, config.orderbook_stale_ms) {
-                audit.reject_reason = Some(OpenOpportunityRejectReason::StaleShortBook);
-                audits.push(audit);
-                continue;
-            }
-            if spread_pct > config.max_open_spread_pct {
-                audit.reject_reason = Some(OpenOpportunityRejectReason::AboveMaxSpread);
-                audits.push(audit);
-                continue;
-            }
+                if !long_book.is_valid(config.min_orderbook_levels) {
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::InvalidLongBook);
+                    audits.push(audit);
+                    continue;
+                }
+                if !short_book.is_valid(config.min_orderbook_levels) {
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::InvalidShortBook);
+                    audits.push(audit);
+                    continue;
+                }
+                if !long_book.is_fresh(now, config.orderbook_stale_ms) {
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::StaleLongBook);
+                    audits.push(audit);
+                    continue;
+                }
+                if !short_book.is_fresh(now, config.orderbook_stale_ms) {
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::StaleShortBook);
+                    audits.push(audit);
+                    continue;
+                }
+                if spread_pct > config.max_open_spread_pct {
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::AboveMaxSpread);
+                    audits.push(audit);
+                    continue;
+                }
 
-            let Some(quantity_plan) = shared_open_quantity_with_top_depth_policy(
-                long_book,
-                short_book,
-                long_precision,
-                short_precision,
-                config.target_notional_usdt,
-                config.top_of_book_capacity_ratio,
-                config.enforce_top_depth_on_open,
-            ) else {
-                audit.executable_top_depth_usdt = long_top_depth_usdt.min(short_top_depth_usdt)
-                    * config.top_of_book_capacity_ratio;
-                audit.reject_reason = Some(OpenOpportunityRejectReason::InsufficientTopDepth);
-                audits.push(audit);
-                continue;
-            };
-            let quantity = quantity_plan.base_quantity;
-            audit.quantity = Some(quantity);
-            audit.executable_top_depth_usdt = quantity_plan.executable_depth_usdt;
+                let Some(quantity_plan) = shared_open_quantity_with_top_depth_policy(
+                    long_book,
+                    short_book,
+                    long_precision,
+                    short_precision,
+                    config.target_notional_usdt,
+                    config.top_of_book_capacity_ratio,
+                    config.enforce_top_depth_on_open,
+                ) else {
+                    audit.executable_top_depth_usdt = long_top_depth_usdt.min(short_top_depth_usdt)
+                        * config.top_of_book_capacity_ratio;
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::InsufficientTopDepth);
+                    audits.push(audit);
+                    continue;
+                };
+                let quantity = quantity_plan.base_quantity;
+                audit.quantity = Some(quantity);
+                audit.executable_top_depth_usdt = quantity_plan.executable_depth_usdt;
 
-            let long_notional_usdt = quantity * long_book.best_ask_price;
-            let short_notional_usdt = quantity * short_book.best_bid_price;
-            let estimated_open_fee_usdt =
-                fee_model.fee_amount(&long_book.exchange, FeeRole::Taker, long_notional_usdt)
+                let long_notional_usdt = quantity * long_book.best_ask_price;
+                let short_notional_usdt = quantity * short_book.best_bid_price;
+                let estimated_open_fee_usdt =
+                    fee_model.fee_amount(&long_book.exchange, FeeRole::Taker, long_notional_usdt)
+                        + fee_model.fee_amount(
+                            &short_book.exchange,
+                            FeeRole::Taker,
+                            short_notional_usdt,
+                        );
+                let expected_close_spread_pct = config.expected_close_spread_pct.max(0.0);
+                let expected_spread_capture_pct = (spread_pct - expected_close_spread_pct).max(0.0);
+                let expected_gross_pnl_usdt =
+                    quantity * long_book.best_ask_price * expected_spread_capture_pct;
+                let estimated_round_trip_fee_usdt = estimated_open_fee_usdt
+                    + fee_model.fee_amount(&long_book.exchange, FeeRole::Taker, long_notional_usdt)
                     + fee_model.fee_amount(
                         &short_book.exchange,
                         FeeRole::Taker,
                         short_notional_usdt,
                     );
-            let expected_close_spread_pct = config.expected_close_spread_pct.max(0.0);
-            let expected_spread_capture_pct = (spread_pct - expected_close_spread_pct).max(0.0);
-            let expected_gross_pnl_usdt =
-                quantity * long_book.best_ask_price * expected_spread_capture_pct;
-            let estimated_round_trip_fee_usdt = estimated_open_fee_usdt
-                + fee_model.fee_amount(&long_book.exchange, FeeRole::Taker, long_notional_usdt)
-                + fee_model.fee_amount(&short_book.exchange, FeeRole::Taker, short_notional_usdt);
-            let expected_net_pnl_usdt = expected_gross_pnl_usdt - estimated_round_trip_fee_usdt;
-            let expected_net_profit_pct =
-                expected_net_pnl_usdt / long_notional_usdt.max(short_notional_usdt).max(1.0);
-            audit.expected_net_profit_pct = Some(expected_net_profit_pct);
-            audit.expected_net_pnl_usdt = Some(expected_net_pnl_usdt);
-            audit.estimated_round_trip_fee_usdt = Some(estimated_round_trip_fee_usdt);
+                let expected_net_pnl_usdt = expected_gross_pnl_usdt - estimated_round_trip_fee_usdt;
+                let expected_net_profit_pct =
+                    expected_net_pnl_usdt / long_notional_usdt.max(short_notional_usdt).max(1.0);
+                audit.expected_net_profit_pct = Some(expected_net_profit_pct);
+                audit.expected_net_pnl_usdt = Some(expected_net_pnl_usdt);
+                audit.estimated_round_trip_fee_usdt = Some(estimated_round_trip_fee_usdt);
 
-            if expected_net_profit_pct < config.min_open_net_profit_pct {
-                audit.reject_reason = Some(OpenOpportunityRejectReason::BelowMinNetProfit);
-                audits.push(audit);
-                continue;
-            }
-            if let Some(risk_state) = risk_state {
-                if let Err(reason) = risk_state.can_open(
-                    &long_book.canonical_symbol,
-                    &long_book.exchange,
-                    &short_book.exchange,
-                    config,
-                    now,
-                ) {
-                    audit.reject_reason = Some(reason.into());
+                if expected_net_profit_pct < config.min_open_net_profit_pct {
+                    audit.reject_reason = Some(OpenOpportunityRejectReason::BelowMinNetProfit);
                     audits.push(audit);
                     continue;
                 }
-            }
-            let symbol = long_book.canonical_symbol.clone();
-            let orders = vec![
-                taker_order_draft(
-                    long_book.exchange.clone(),
-                    symbol.clone(),
-                    OrderSide::Buy,
-                    quantity,
-                    long_book.best_ask_price,
-                    false,
-                    TakerOrderRole::OpenLong,
-                    config.taker_slippage_pct,
-                    long_precision,
-                ),
-                taker_order_draft(
-                    short_book.exchange.clone(),
-                    symbol.clone(),
-                    OrderSide::Sell,
-                    quantity,
-                    short_book.best_bid_price,
-                    false,
-                    TakerOrderRole::OpenShort,
-                    config.taker_slippage_pct,
-                    short_precision,
-                ),
-            ];
+                if let Some(risk_state) = risk_state {
+                    if let Err(reason) = risk_state.can_open(
+                        &long_book.canonical_symbol,
+                        &long_book.exchange,
+                        &short_book.exchange,
+                        config,
+                        now,
+                    ) {
+                        audit.reject_reason = Some(reason.into());
+                        audits.push(audit);
+                        continue;
+                    }
+                }
+                let symbol = long_book.canonical_symbol.clone();
+                let orders = vec![
+                    taker_order_draft(
+                        long_book.exchange.clone(),
+                        symbol.clone(),
+                        OrderSide::Buy,
+                        quantity,
+                        long_book.best_ask_price,
+                        false,
+                        TakerOrderRole::OpenLong,
+                        config.taker_slippage_pct,
+                        long_precision,
+                    ),
+                    taker_order_draft(
+                        short_book.exchange.clone(),
+                        symbol.clone(),
+                        OrderSide::Sell,
+                        quantity,
+                        short_book.best_bid_price,
+                        false,
+                        TakerOrderRole::OpenShort,
+                        config.taker_slippage_pct,
+                        short_precision,
+                    ),
+                ];
 
-            audit.decision = OpenOpportunityDecision::Accepted;
-            audits.push(audit);
-            opportunities.push(DualTakerOpenOpportunity {
-                opportunity_id,
-                canonical_symbol: symbol,
-                long_exchange: long_book.exchange.clone(),
-                short_exchange: short_book.exchange.clone(),
-                long_entry_price: long_book.best_ask_price,
-                short_entry_price: short_book.best_bid_price,
-                spread_pct,
-                quantity,
-                long_notional_usdt,
-                short_notional_usdt,
-                executable_top_depth_usdt: quantity_plan.executable_depth_usdt,
-                top_of_book_capacity_ratio: config.top_of_book_capacity_ratio,
-                estimated_open_fee_usdt,
-                estimated_round_trip_fee_usdt,
-                expected_close_spread_pct,
-                expected_gross_pnl_usdt,
-                expected_net_pnl_usdt,
-                expected_net_profit_pct,
-                submit_parallel: true,
-                orders,
-            });
+                audit.decision = OpenOpportunityDecision::Accepted;
+                audits.push(audit);
+                opportunities.push(DualTakerOpenOpportunity {
+                    opportunity_id,
+                    canonical_symbol: symbol,
+                    long_exchange: long_book.exchange.clone(),
+                    short_exchange: short_book.exchange.clone(),
+                    long_entry_price: long_book.best_ask_price,
+                    short_entry_price: short_book.best_bid_price,
+                    spread_pct,
+                    quantity,
+                    long_notional_usdt,
+                    short_notional_usdt,
+                    executable_top_depth_usdt: quantity_plan.executable_depth_usdt,
+                    top_of_book_capacity_ratio: config.top_of_book_capacity_ratio,
+                    estimated_open_fee_usdt,
+                    estimated_round_trip_fee_usdt,
+                    expected_close_spread_pct,
+                    expected_gross_pnl_usdt,
+                    expected_net_pnl_usdt,
+                    expected_net_profit_pct,
+                    submit_parallel: true,
+                    orders,
+                });
+            }
         }
     }
 
@@ -1593,82 +1604,85 @@ pub fn evaluate_slippage_capture_open_opportunities(
     }
 
     let mut opportunities = Vec::new();
-    for long_book in books {
-        for short_book in books {
-            if long_book.exchange == short_book.exchange
-                || long_book.canonical_symbol != short_book.canonical_symbol
-            {
-                continue;
-            }
-            if !long_book.is_valid(config.min_orderbook_levels)
-                || !short_book.is_valid(config.min_orderbook_levels)
-                || !long_book.is_fresh(now, config.orderbook_stale_ms)
-                || !short_book.is_fresh(now, config.orderbook_stale_ms)
-                || short_book.best_bid_price <= long_book.best_ask_price
-            {
-                continue;
-            }
-
-            let spread_pct =
-                (short_book.best_bid_price - long_book.best_ask_price) / long_book.best_ask_price;
-            if spread_pct < config.min_open_spread_pct || spread_pct > config.max_open_spread_pct {
-                continue;
-            }
-            if let Some(risk_state) = risk_state {
-                let close_config = config.dual_taker_close_config();
-                if risk_state
-                    .can_open(
-                        &long_book.canonical_symbol,
-                        &long_book.exchange,
-                        &short_book.exchange,
-                        &close_config,
-                        now,
-                    )
-                    .is_err()
+    for symbol_books in books_grouped_by_symbol(books) {
+        for long_book in &symbol_books {
+            for short_book in &symbol_books {
+                if long_book.exchange == short_book.exchange {
+                    continue;
+                }
+                if !long_book.is_valid(config.min_orderbook_levels)
+                    || !short_book.is_valid(config.min_orderbook_levels)
+                    || !long_book.is_fresh(now, config.orderbook_stale_ms)
+                    || !short_book.is_fresh(now, config.orderbook_stale_ms)
+                    || short_book.best_bid_price <= long_book.best_ask_price
                 {
                     continue;
                 }
-            }
 
-            let long_precision = precisions.get(&long_book.exchange, &long_book.canonical_symbol);
-            let short_precision =
-                precisions.get(&short_book.exchange, &short_book.canonical_symbol);
-            let long_ask_depth_usdt = top_depth_usdt(long_book, long_precision, true);
-            let short_bid_depth_usdt = top_depth_usdt(short_book, short_precision, false);
-            let long_candidate = slippage_capture_candidate(
-                long_book,
-                short_book,
-                long_precision,
-                short_precision,
-                long_ask_depth_usdt,
-                short_bid_depth_usdt,
-                MakerLegKind::LongMakerBuy,
-                fee_model,
-                config,
-            );
-            let short_candidate = slippage_capture_candidate(
-                long_book,
-                short_book,
-                long_precision,
-                short_precision,
-                long_ask_depth_usdt,
-                short_bid_depth_usdt,
-                MakerLegKind::ShortMakerSell,
-                fee_model,
-                config,
-            );
-            match (long_candidate, short_candidate) {
-                (Some(left), Some(right)) => {
-                    if left.maker_top_depth_usdt <= right.maker_top_depth_usdt {
-                        opportunities.push(left);
-                    } else {
-                        opportunities.push(right);
+                let spread_pct = (short_book.best_bid_price - long_book.best_ask_price)
+                    / long_book.best_ask_price;
+                if spread_pct < config.min_open_spread_pct
+                    || spread_pct > config.max_open_spread_pct
+                {
+                    continue;
+                }
+                if let Some(risk_state) = risk_state {
+                    let close_config = config.dual_taker_close_config();
+                    if risk_state
+                        .can_open(
+                            &long_book.canonical_symbol,
+                            &long_book.exchange,
+                            &short_book.exchange,
+                            &close_config,
+                            now,
+                        )
+                        .is_err()
+                    {
+                        continue;
                     }
                 }
-                (Some(opportunity), None) | (None, Some(opportunity)) => {
-                    opportunities.push(opportunity);
+
+                let long_precision =
+                    precisions.get(&long_book.exchange, &long_book.canonical_symbol);
+                let short_precision =
+                    precisions.get(&short_book.exchange, &short_book.canonical_symbol);
+                let long_ask_depth_usdt = top_depth_usdt(long_book, long_precision, true);
+                let short_bid_depth_usdt = top_depth_usdt(short_book, short_precision, false);
+                let long_candidate = slippage_capture_candidate(
+                    long_book,
+                    short_book,
+                    long_precision,
+                    short_precision,
+                    long_ask_depth_usdt,
+                    short_bid_depth_usdt,
+                    MakerLegKind::LongMakerBuy,
+                    fee_model,
+                    config,
+                );
+                let short_candidate = slippage_capture_candidate(
+                    long_book,
+                    short_book,
+                    long_precision,
+                    short_precision,
+                    long_ask_depth_usdt,
+                    short_bid_depth_usdt,
+                    MakerLegKind::ShortMakerSell,
+                    fee_model,
+                    config,
+                );
+                match (long_candidate, short_candidate) {
+                    (Some(left), Some(right)) => {
+                        if left.maker_top_depth_usdt <= right.maker_top_depth_usdt {
+                            opportunities.push(left);
+                        } else {
+                            opportunities.push(right);
+                        }
+                    }
+                    (Some(opportunity), None) | (None, Some(opportunity)) => {
+                        opportunities.push(opportunity);
+                    }
+                    (None, None) => {}
                 }
-                (None, None) => {}
             }
         }
     }
@@ -1687,6 +1701,23 @@ pub fn evaluate_slippage_capture_open_opportunities(
     let mut seen_symbols = HashSet::new();
     opportunities.retain(|opportunity| seen_symbols.insert(opportunity.canonical_symbol.as_pair()));
     opportunities
+}
+
+fn books_grouped_by_symbol(books: &[OrderBookTop]) -> Vec<Vec<&OrderBookTop>> {
+    let mut group_index_by_symbol = HashMap::<&CanonicalSymbol, usize>::new();
+    let mut groups = Vec::<Vec<&OrderBookTop>>::new();
+
+    for book in books {
+        if let Some(index) = group_index_by_symbol.get(&book.canonical_symbol) {
+            groups[*index].push(book);
+            continue;
+        }
+
+        group_index_by_symbol.insert(&book.canonical_symbol, groups.len());
+        groups.push(vec![book]);
+    }
+
+    groups
 }
 
 #[allow(clippy::too_many_arguments)]

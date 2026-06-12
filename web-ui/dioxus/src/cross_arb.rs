@@ -1357,7 +1357,9 @@ fn localized_reason_label(reason: &str, lang: Language) -> String {
         || lower.contains("disabled by config")
     {
         ("配置禁开", "Entry disabled")
-    } else if lower.contains("display-only row") || lower.contains("not evaluated") {
+    } else if lower.contains("display-only opportunity") || lower.contains("display-only row") {
+        ("未下单", "Not submitted")
+    } else if lower.contains("not evaluated") {
         ("待评估", "Pending")
     } else if lower.contains("live top-of-book is stale")
         || lower.contains("snapshot is stale")

@@ -1,0 +1,18 @@
+{
+  "exchange": "mexc",
+  "operation": "set_position_mode",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/private/position/change_position_mode",
+  "auth": "signed",
+  "query": {
+    "positionMode": { "match": "exact", "value": "2" }
+  },
+  "headers": {
+    "apikey": { "match": "exact", "value": "key" },
+    "request-time": { "match": "non_empty" },
+    "signature": { "match": "non_empty" }
+  },
+  "forbid_query_values_containing": ["secret"]
+}

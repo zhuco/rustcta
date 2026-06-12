@@ -2,7 +2,7 @@
 
 Adapter id: `aster`
 
-Status: Task 11 perpetual-only adapter for Aster DEX Futures V3. The adapter exposes public market metadata, order book and funding reads, signed private account/order reads and writes, public WebSocket subscription payloads, and private listen-key stream session setup.
+Status: Perpetual-only adapter for Aster DEX Futures V3. The adapter exposes public market metadata, order book and funding reads, signed private account/order reads and writes, account-control mutations, advanced order REST helpers, public WebSocket subscription/parser helpers, and private listen-key stream session setup.
 
 ## Scope
 
@@ -33,8 +33,11 @@ Machine-readable mapping:
 | Trading fees | `GET /fapi/v3/commissionRate` | EIP-712 signed REST |
 | Place/cancel/query/open orders | `/fapi/v3/order`, `/fapi/v3/openOrders`, `/fapi/v3/allOpenOrders` | EIP-712 signed REST |
 | Recent fills | `GET /fapi/v3/userTrades` | EIP-712 signed REST |
-| Public WS | `depth`, `aggTrade`, `ticker`, `kline` streams | Payload helpers |
-| Private WS | `POST /fapi/v3/listenKey` then listen-key stream | Session spec helper |
+| Account control | `POST /fapi/v3/leverage`, `GET/POST /fapi/v3/positionSide/dual` | EIP-712 signed REST |
+| Amend order | `PUT /fapi/v3/order` | EIP-712 signed REST |
+| Batch place/cancel | `POST/DELETE /fapi/v3/batchOrders` | EIP-712 signed REST with per-item partial failure parsing |
+| Public WS | `bookTicker`, partial depth, diff depth, `aggTrade`, `ticker`, `kline` streams | Payload helpers and parser fixtures |
+| Private WS | `POST/PUT/DELETE /fapi/v3/listenKey` then listen-key stream | Session lifecycle helpers and parser-only event normalization |
 
 ## Official WebSocket Order Book Detail
 
@@ -43,14 +46,23 @@ channels include bookTicker, partial depth, and diff depth. bookTicker is
 real-time; partial/diff depth can be 100ms, 250ms, or 500ms; partial depth
 supports 5/10/20 levels. Diff depth uses `U/u/pu` and REST snapshot
 `lastUpdateId` replay; if `pu` does not equal the previous `u`, the local book
-must be rebuilt. Current project support is declared/payload helper only, so
-mapping still needs interval, depth, channel and sequence fields. Source batch:
-[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+must be rebuilt. The adapter has local parser coverage for bookTicker, partial
+depth, and diff-depth sequence gaps. Capability remains snapshot-first for live
+strategy admission until a long-running public WS profile and REST replay loop
+are wired end to end. Source batch: [WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+
+## Private WebSocket Boundary
+
+The adapter can create, renew, and delete listen keys and has parser-only
+normalization for `ORDER_TRADE_UPDATE`, fills, `ACCOUNT_UPDATE`, balances,
+positions, and `listenKeyExpired`. Live private stream capability remains REST
+fallback until a long-running ready gate, reconnect, resubscribe, and REST
+resync loop are implemented and tested together.
 
 ## Unsupported Boundaries
 
 - Spot is 项目未实现 Spot for this adapter; COIN-M delivery, options, transfers and wallet funding are outside this adapter.
-- Quote-sized market orders, native order lists and amend are `Unsupported`.
+- Quote-sized market orders and native order lists are `Unsupported`.
 - No derivatives beyond Aster USDT perpetuals are exposed unless an official stable API is mapped later.
 
 ## Validation

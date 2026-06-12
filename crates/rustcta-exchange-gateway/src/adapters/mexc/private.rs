@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use rustcta_exchange_api::{
     BalancesRequest, BalancesResponse, CancelAllOrdersRequest, CancelAllOrdersResponse,
     CancelOrderRequest, CancelOrderResponse, ExchangeApiError, ExchangeApiResult, FeeRateSnapshot,
-    FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderState,
-    PlaceOrderRequest, PlaceOrderResponse, Position, PositionsRequest, PositionsResponse,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, TimeInForce,
+    FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderState, PageCursor,
+    PlaceOrderRequest, PlaceOrderResponse, Position, PositionMode, PositionsRequest,
+    PositionsResponse, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, SetLeverageRequest, SetLeverageResponse,
+    SetPositionModeRequest, SetPositionModeResponse, SymbolAccountConfig,
+    SymbolAccountConfigRequest, SymbolAccountConfigResponse, TimeInForce,
     EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
@@ -36,7 +38,7 @@ impl MexcGatewayAdapter {
             let value = self
                 .send_contract_signed_post(
                     "mexc.contract.place_order",
-                    "/api/v1/private/order/submit",
+                    "/api/v1/private/order/create",
                     &HashMap::new(),
                     Some(&body),
                 )
@@ -396,15 +398,31 @@ impl MexcGatewayAdapter {
                     message: "mexc contract open orders requires perpetual symbol".to_string(),
                 });
             }
-            let normalized = normalize_mexc_symbol_for_market(
-                &symbol.exchange_symbol.symbol,
-                symbol.market_type,
-            )?;
+            let page_size = request
+                .page
+                .as_ref()
+                .and_then(|page| page.limit)
+                .unwrap_or(100)
+                .min(100);
+            let page_num = request
+                .page
+                .as_ref()
+                .and_then(|page| page.cursor.as_ref())
+                .and_then(|cursor| match cursor {
+                    PageCursor::Offset { offset } => Some((offset / u64::from(page_size)) + 1),
+                    PageCursor::Token { token } => token.parse::<u64>().ok(),
+                    PageCursor::Id { id } => id.parse::<u64>().ok(),
+                    _ => None,
+                })
+                .unwrap_or(1);
+            let mut params = HashMap::new();
+            params.insert("page_num".to_string(), page_num.to_string());
+            params.insert("page_size".to_string(), page_size.to_string());
             let value = self
                 .send_contract_signed_get(
                     "mexc.contract.get_open_orders",
-                    &format!("/api/v1/private/order/list/open_orders/{normalized}"),
-                    &HashMap::new(),
+                    "/api/v1/private/order/list/open_orders",
+                    &params,
                 )
                 .await?;
             let orders = parse_contract_orders(&self.exchange_id, Some(symbol), &value)?;
@@ -618,6 +636,88 @@ impl MexcGatewayAdapter {
             ),
         })
     }
+
+    pub(super) async fn get_symbol_account_config_impl(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        if request.symbol.market_type != MarketType::Perpetual {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "mexc.get_symbol_account_config_non_perpetual",
+            });
+        }
+        let value = self
+            .send_contract_signed_get(
+                "mexc.contract.get_position_mode",
+                "/api/v1/private/position/position_mode",
+                &HashMap::new(),
+            )
+            .await?;
+        let position_mode = parse_mexc_position_mode(&value)?;
+        Ok(SymbolAccountConfigResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            config: SymbolAccountConfig {
+                symbol: request.symbol,
+                position_mode: Some(position_mode),
+                margin_mode: None,
+                leverage: None,
+                max_leverage: None,
+                updated_at: chrono::Utc::now(),
+            },
+        })
+    }
+
+    pub(super) async fn set_position_mode_impl(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "positionMode".to_string(),
+            mexc_position_mode_code(request.mode).to_string(),
+        );
+        self.send_contract_signed_post(
+            "mexc.contract.set_position_mode",
+            "/api/v1/private/position/change_position_mode",
+            &params,
+            None,
+        )
+        .await?;
+        let readback = self
+            .send_contract_signed_get(
+                "mexc.contract.get_position_mode_after_set",
+                "/api/v1/private/position/position_mode",
+                &HashMap::new(),
+            )
+            .await?;
+        let confirmed_mode = parse_mexc_position_mode(&readback)?;
+        if confirmed_mode != request.mode {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: format!(
+                    "mexc position mode readback mismatch after set: requested {:?}, got {:?}",
+                    request.mode, confirmed_mode
+                ),
+            });
+        }
+        Ok(SetPositionModeResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            mode: confirmed_mode,
+            accepted: true,
+            message: Some(
+                "mexc position mode change requires no active orders, plan orders, or unfinished positions"
+                    .to_string(),
+            ),
+        })
+    }
 }
 
 fn mexc_place_order_params(
@@ -739,6 +839,7 @@ fn mexc_contract_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Va
         "vol".to_string(),
         Value::String(non_empty("quantity", &request.quantity)?),
     );
+    ensure_mexc_contract_position_side_hint(request)?;
     body.insert(
         "side".to_string(),
         Value::Number(mexc_contract_side(request.side, request.reduce_only).into()),
@@ -810,6 +911,35 @@ fn mexc_contract_set_leverage_params(
     Ok(params)
 }
 
+fn mexc_position_mode_code(mode: PositionMode) -> i64 {
+    match mode {
+        PositionMode::Hedge => 1,
+        PositionMode::OneWay => 2,
+    }
+}
+
+fn parse_mexc_position_mode(value: &Value) -> ExchangeApiResult<PositionMode> {
+    let code = value
+        .get("data")
+        .and_then(|data| {
+            data.get("positionMode")
+                .or_else(|| data.get("position_mode"))
+                .or(Some(data))
+        })
+        .or_else(|| value.get("positionMode"))
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: format!("mexc position_mode response missing positionMode: {value}"),
+        })?;
+    match code {
+        1 => Ok(PositionMode::Hedge),
+        2 => Ok(PositionMode::OneWay),
+        _ => Err(ExchangeApiError::InvalidRequest {
+            message: format!("mexc unsupported positionMode {code}"),
+        }),
+    }
+}
+
 fn mexc_contract_side(side: OrderSide, reduce_only: bool) -> i64 {
     match (side, reduce_only) {
         (OrderSide::Buy, false) => 1,
@@ -817,6 +947,26 @@ fn mexc_contract_side(side: OrderSide, reduce_only: bool) -> i64 {
         (OrderSide::Sell, false) => 3,
         (OrderSide::Sell, true) => 4,
     }
+}
+
+fn ensure_mexc_contract_position_side_hint(request: &PlaceOrderRequest) -> ExchangeApiResult<()> {
+    let Some(position_side) = request.position_side else {
+        return Ok(());
+    };
+    let expected = match (request.side, request.reduce_only) {
+        (OrderSide::Buy, false) | (OrderSide::Sell, true) => PositionSide::Long,
+        (OrderSide::Sell, false) | (OrderSide::Buy, true) => PositionSide::Short,
+    };
+    if matches!(position_side, PositionSide::None | PositionSide::Net) || position_side == expected
+    {
+        return Ok(());
+    }
+    Err(ExchangeApiError::InvalidRequest {
+        message: format!(
+            "mexc contract order position_side {position_side:?} conflicts with side {:?} reduce_only={}; expected {expected:?}",
+            request.side, request.reduce_only
+        ),
+    })
 }
 
 fn mexc_contract_order_type(
@@ -954,8 +1104,24 @@ fn parse_contract_orders(
     })?;
     items
         .iter()
+        .filter(|item| contract_order_matches_symbol(item, symbol_hint))
         .map(|item| parse_contract_order_state(exchange_id, symbol_hint, item))
         .collect()
+}
+
+fn contract_order_matches_symbol(
+    item: &Value,
+    symbol_hint: Option<&rustcta_exchange_api::SymbolScope>,
+) -> bool {
+    let Some(symbol_hint) = symbol_hint else {
+        return true;
+    };
+    let item = contract_data_item(item).unwrap_or(item);
+    let Some(raw_symbol) = value_text(item.get("symbol")) else {
+        return true;
+    };
+    normalize_mexc_symbol_for_market(&raw_symbol, MarketType::Perpetual)
+        .is_ok_and(|normalized| normalized == symbol_hint.exchange_symbol.symbol)
 }
 
 fn parse_contract_balances(

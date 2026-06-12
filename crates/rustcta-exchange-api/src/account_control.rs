@@ -12,6 +12,7 @@ pub struct AccountControlCapabilities {
     pub exchange: ExchangeId,
     pub supports_symbol_account_config: bool,
     pub supports_leverage: bool,
+    pub supports_margin_mode_change: bool,
     pub supports_position_mode_change: bool,
     pub supports_close_position: bool,
     pub supports_countdown_cancel_all: bool,
@@ -23,6 +24,7 @@ impl AccountControlCapabilities {
             exchange,
             supports_symbol_account_config: false,
             supports_leverage: false,
+            supports_margin_mode_change: false,
             supports_position_mode_change: false,
             supports_close_position: false,
             supports_countdown_cancel_all: false,
@@ -111,6 +113,24 @@ pub struct SetPositionModeResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetMarginModeRequest {
+    pub schema_version: u16,
+    pub context: RequestContext,
+    pub symbol: SymbolScope,
+    pub mode: MarginMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetMarginModeResponse {
+    pub schema_version: u16,
+    pub metadata: ResponseMetadata,
+    pub symbol: SymbolScope,
+    pub mode: MarginMode,
+    pub accepted: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClosePositionRequest {
     pub schema_version: u16,
     pub context: RequestContext,
@@ -182,6 +202,13 @@ pub trait PerpAccountControlProvider: Send + Sync {
         _request: SetPositionModeRequest,
     ) -> ExchangeApiResult<SetPositionModeResponse> {
         Err(unsupported("set_position_mode"))
+    }
+
+    async fn set_margin_mode(
+        &self,
+        _request: SetMarginModeRequest,
+    ) -> ExchangeApiResult<SetMarginModeResponse> {
+        Err(unsupported("set_margin_mode"))
     }
 
     async fn close_position(

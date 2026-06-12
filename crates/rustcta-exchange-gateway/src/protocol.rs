@@ -11,8 +11,9 @@ use rustcta_exchange_api::{
     PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
     QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
     RecentFillsResponse, RequestContext, SetLeverageRequest, SetLeverageResponse,
-    SetPositionModeRequest, SetPositionModeResponse, SymbolAccountConfigRequest,
-    SymbolAccountConfigResponse, SymbolRulesRequest, SymbolRulesResponse,
+    SetMarginModeRequest, SetMarginModeResponse, SetPositionModeRequest, SetPositionModeResponse,
+    SymbolAccountConfigRequest, SymbolAccountConfigResponse, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, TenantId};
 use serde::{Deserialize, Serialize};
@@ -136,6 +137,7 @@ pub enum GatewayRequestPayload {
     GetRecentFills(RecentFillsRequest),
     GetSymbolAccountConfig(SymbolAccountConfigRequest),
     SetLeverage(SetLeverageRequest),
+    SetMarginMode(SetMarginModeRequest),
     SetPositionMode(SetPositionModeRequest),
     ClosePosition(ClosePositionRequest),
     SetCountdownCancelAll(CountdownCancelAllRequest),
@@ -167,6 +169,7 @@ impl GatewayRequestPayload {
             Self::GetRecentFills(_) => GatewayOperation::GetRecentFills,
             Self::GetSymbolAccountConfig(_) => GatewayOperation::GetSymbolAccountConfig,
             Self::SetLeverage(_) => GatewayOperation::SetLeverage,
+            Self::SetMarginMode(_) => GatewayOperation::SetMarginMode,
             Self::SetPositionMode(_) => GatewayOperation::SetPositionMode,
             Self::ClosePosition(_) => GatewayOperation::ClosePosition,
             Self::SetCountdownCancelAll(_) => GatewayOperation::SetCountdownCancelAll,
@@ -199,6 +202,7 @@ pub enum GatewayResponsePayload {
     RecentFills(RecentFillsResponse),
     SymbolAccountConfig(SymbolAccountConfigResponse),
     SetLeverage(SetLeverageResponse),
+    SetMarginMode(SetMarginModeResponse),
     SetPositionMode(SetPositionModeResponse),
     ClosePosition(ClosePositionResponse),
     CountdownCancelAll(CountdownCancelAllResponse),

@@ -11,11 +11,14 @@ use chrono::Utc;
 use rustcta_exchange_api::{
     AccountControlCapabilities, CancelOrderRequest, ClosePositionRequest, ClosePositionResponse,
     CountdownCancelAllRequest, CountdownCancelAllResponse, ExchangeApiError, ExchangeApiResult,
-    ExchangeClient, FundingRatesRequest, FundingRatesResponse, SetLeverageRequest,
-    SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
+    ExchangeClient, FundingRatesRequest, FundingRatesResponse, PlaceOrderRequest,
+    PlaceOrderResponse, SetLeverageRequest, SetLeverageResponse, SetMarginModeRequest,
+    SetMarginModeResponse, SetPositionModeRequest, SetPositionModeResponse,
     SymbolAccountConfigRequest, SymbolAccountConfigResponse, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::ExchangeId;
+use rustcta_types::{
+    ExchangeId, MarketType, OrderSide, OrderStatus, OrderType, PositionSide, TimeInForce,
+};
 
 use crate::{
     ensure_secret_free_serializable, BookSubscriptionAck, CredentialBoundary, GatewayError,
@@ -317,6 +320,15 @@ pub trait GatewayAdapter: ExchangeClient {
     ) -> ExchangeApiResult<SetPositionModeResponse> {
         Err(ExchangeApiError::Unsupported {
             operation: "set_position_mode",
+        })
+    }
+
+    async fn set_margin_mode(
+        &self,
+        _request: SetMarginModeRequest,
+    ) -> ExchangeApiResult<SetMarginModeResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "set_margin_mode",
         })
     }
 
@@ -3377,6 +3389,15 @@ impl LocalGateway for AdapterBackedGateway {
                         .map_err(exchange_api_error_to_gateway)?,
                 )
             }
+            GatewayRequestPayload::SetMarginMode(request) => {
+                let adapter = self.adapter_for(&request.symbol.exchange)?;
+                GatewayResponsePayload::SetMarginMode(
+                    adapter
+                        .set_margin_mode(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
             GatewayRequestPayload::ClosePosition(request) => {
                 let adapter = self.adapter_for(&request.symbol.exchange)?;
                 GatewayResponsePayload::ClosePosition(
@@ -3499,4 +3520,84 @@ pub(crate) fn ensure_exchange_api_schema(schema_version: u16) -> Result<(), Exch
         });
     }
     Ok(())
+}
+
+pub(crate) fn close_position_order_request(
+    request: &ClosePositionRequest,
+) -> ExchangeApiResult<PlaceOrderRequest> {
+    ensure_exchange_api_schema(request.schema_version)?;
+    if !matches!(
+        request.symbol.market_type,
+        MarketType::Perpetual | MarketType::Futures
+    ) {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "close_position requires a perpetual or futures symbol".to_string(),
+        });
+    }
+    let client_order_id = non_empty_close_field("client_order_id", &request.client_order_id)?;
+    let quantity = non_empty_close_field("quantity", &request.quantity)?;
+    if request
+        .max_slippage_pct
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "composed_close_position.max_slippage_pct",
+        });
+    }
+    let side = match request.position_side {
+        PositionSide::Long => OrderSide::Sell,
+        PositionSide::Short => OrderSide::Buy,
+        PositionSide::Net | PositionSide::None => {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: format!(
+                    "close_position requires long or short position_side, got {:?}",
+                    request.position_side
+                ),
+            });
+        }
+    };
+    let post_only = request.order_type == OrderType::PostOnly
+        || matches!(request.time_in_force, TimeInForce::GTX);
+    Ok(PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: request.context.clone(),
+        symbol: request.symbol.clone(),
+        client_order_id: Some(client_order_id),
+        side,
+        position_side: Some(request.position_side),
+        order_type: request.order_type,
+        time_in_force: Some(request.time_in_force),
+        quantity,
+        price: request.price.clone(),
+        quote_quantity: None,
+        reduce_only: true,
+        post_only,
+    })
+}
+
+pub(crate) fn close_position_response_from_place_order(
+    request: &ClosePositionRequest,
+    response: PlaceOrderResponse,
+) -> ClosePositionResponse {
+    let status = response.order.status;
+    ClosePositionResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata: response.metadata,
+        client_order_id: request.client_order_id.clone(),
+        exchange_order_id: response.order.exchange_order_id,
+        accepted: !matches!(status, OrderStatus::Rejected),
+        status: Some(status),
+        message: Some("submitted reduce-only close order".to_string()),
+    }
+}
+
+fn non_empty_close_field(field: &str, value: &str) -> ExchangeApiResult<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("close_position requires non-empty {field}"),
+        });
+    }
+    Ok(trimmed.to_string())
 }

@@ -21,6 +21,7 @@ impl SeenRequest {
         crate::request_spec::ActualHttpRequest::new(self.method.clone(), self.path.clone())
             .with_query(self.query.clone())
             .with_headers(self.headers.clone())
+            .with_body(self.body.clone())
     }
 }
 

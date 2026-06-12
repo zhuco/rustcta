@@ -5,6 +5,7 @@ use rustcta_exchange_api::{
 use rustcta_types::MarketType;
 use serde_json::json;
 
+use super::config::{MEXC_CONTRACT_REST_BASE_URL, MEXC_SPOT_REST_BASE_URL};
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{MexcGatewayAdapter, MexcGatewayConfig};
@@ -16,6 +17,41 @@ fn fixture(path: &str) -> serde_json::Value {
     );
     let text = std::fs::read_to_string(path).expect("fixture");
     serde_json::from_str(&text).expect("fixture json")
+}
+
+#[test]
+fn mexc_config_should_default_to_official_rest_hosts() {
+    let config = MexcGatewayConfig::from_env_lookup(|_| None);
+
+    assert_eq!(config.rest_base_url, MEXC_SPOT_REST_BASE_URL);
+    assert_eq!(config.contract_rest_base_url, MEXC_CONTRACT_REST_BASE_URL);
+    assert_eq!(config.contract_rest_base_url, "https://api.mexc.com");
+}
+
+#[test]
+fn mexc_config_should_prefer_contract_specific_env_names() {
+    let config = MexcGatewayConfig::from_env_lookup(|key| match key {
+        "MEXC_CONTRACT_REST_BASE_URL" => Some("https://contract-env.example".to_string()),
+        "MEXC_FUTURES_REST_BASE_URL" => Some("https://futures-env.example".to_string()),
+        "MEXC_CONTRACT_API_KEY" => Some("contract-key".to_string()),
+        "MEXC_FUTURES_API_KEY" => Some("futures-key".to_string()),
+        "MEXC_CONTRACT_API_SECRET" => Some("contract-secret".to_string()),
+        "MEXC_FUTURES_API_SECRET" => Some("futures-secret".to_string()),
+        "MEXC_CONTRACT_RECV_WINDOW_MS" => Some("7000".to_string()),
+        "MEXC_FUTURES_RECV_WINDOW_MS" => Some("8000".to_string()),
+        "MEXC_CONTRACT_PRIVATE_REST_ENABLED" => Some("false".to_string()),
+        "MEXC_FUTURES_PRIVATE_REST_ENABLED" => Some("true".to_string()),
+        _ => None,
+    });
+
+    assert_eq!(
+        config.contract_rest_base_url,
+        "https://contract-env.example"
+    );
+    assert_eq!(config.api_key.as_deref(), Some("contract-key"));
+    assert_eq!(config.api_secret.as_deref(), Some("contract-secret"));
+    assert_eq!(config.recv_window_ms, 7_000);
+    assert!(!config.enabled_private_rest);
 }
 
 #[test]
@@ -81,7 +117,7 @@ async fn mexc_adapter_should_load_perpetual_symbol_rules_from_contract_public_re
     let (base_url, seen) = spawn_rest_server(vec![json!({
         "success": true,
         "code": 0,
-        "data": [{
+        "data": {
             "symbol": "BTC_USDT",
             "baseCoin": "BTC",
             "quoteCoin": "USDT",
@@ -89,7 +125,7 @@ async fn mexc_adapter_should_load_perpetual_symbol_rules_from_contract_public_re
             "volUnit": "1",
             "minVol": "1",
             "state": 0
-        }]
+        }
     })])
     .await;
     let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
@@ -111,7 +147,11 @@ async fn mexc_adapter_should_load_perpetual_symbol_rules_from_contract_public_re
     assert_eq!(response.rules[0].symbol.market_type, MarketType::Perpetual);
     assert!(response.rules[0].supports_reduce_only);
     let request = seen.lock().unwrap()[0].clone();
-    assert_eq!(request.path, "/api/v1/contract/detail");
+    assert_eq!(request.path, "/api/v1/contract/detail/country");
+    assert_eq!(
+        request.query.get("symbol").map(String::as_str),
+        Some("BTC_USDT")
+    );
 }
 
 #[tokio::test]
@@ -158,6 +198,11 @@ async fn mexc_adapter_should_load_perpetual_funding_rate_from_contract_public_re
             "symbol": "BTC_USDT",
             "fundingRate": "0.0001",
             "nextSettleTime": 1700028800000_i64,
+            "idxPrice": "43120.5",
+            "fairPrice": "43118.9",
+            "holdVol": "12345",
+            "amount24": "9876543.21",
+            "volume24": "151.25",
             "timestamp": 1700000000000_i64
         }
     })])
@@ -183,6 +228,14 @@ async fn mexc_adapter_should_load_perpetual_funding_rate_from_contract_public_re
     assert_eq!(response.rates[0].funding_rate, "0.0001");
     assert!(response.rates[0].funding_time.is_some());
     assert!(response.rates[0].next_funding_time.is_some());
+    assert_eq!(response.rates[0].mark_price.as_deref(), Some("43118.9"));
+    assert_eq!(response.rates[0].index_price.as_deref(), Some("43120.5"));
+    assert_eq!(response.rates[0].open_interest.as_deref(), Some("12345"));
+    assert_eq!(
+        response.rates[0].turnover_24h.as_deref(),
+        Some("9876543.21")
+    );
+    assert_eq!(response.rates[0].volume_24h.as_deref(), Some("151.25"));
     let request = seen.lock().unwrap()[0].clone();
     assert_eq!(request.path, "/api/v1/contract/funding_rate/BTC_USDT");
 }

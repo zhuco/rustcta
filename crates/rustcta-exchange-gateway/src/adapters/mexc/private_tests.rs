@@ -1,10 +1,12 @@
 use rustcta_exchange_api::{
     BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest, CancelOrderRequest,
-    CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient, FeesRequest,
-    OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
-    RecentFillsRequest, SetLeverageRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    CapabilitySupport, ClosePositionRequest, CredentialScope, ExchangeApiError, ExchangeClient,
+    FeesRequest, OpenOrdersRequest, PageRequest, PlaceOrderRequest, PositionMode,
+    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, SetLeverageRequest,
+    SetPositionModeRequest, StreamHeartbeatDirection, SymbolAccountConfigRequest, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
 
 use super::test_support::{
@@ -56,8 +58,16 @@ fn mexc_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     ));
     assert!(matches!(
         &capabilities.capabilities_v2.private_streams,
-        CapabilitySupport::RestFallback { .. }
+        CapabilitySupport::Native
     ));
+    assert!(capabilities.supports_private_streams);
+    assert!(capabilities
+        .private_stream_capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.supports_orders
+            && capabilities.supports_fills
+            && capabilities.supports_balances
+            && capabilities.supports_positions));
     assert_eq!(
         capabilities.capabilities_v2.batch_place_orders.mode,
         BatchExecutionMode::ComposedSequential
@@ -74,20 +84,42 @@ fn mexc_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     );
     assert_eq!(
         capabilities.capabilities_v2.fills_history.max_limit,
-        Some(1000)
+        Some(100)
     );
+    assert!(capabilities.supports_reduce_only);
+    assert!(capabilities.supports_post_only);
     assert!(capabilities.supports_funding_rates);
     assert!(capabilities.capabilities_v2.funding_rates.is_supported());
     let account_control = GatewayAdapter::account_control_capabilities(&adapter);
+    assert!(account_control.supports_symbol_account_config);
     assert!(account_control.supports_leverage);
-    assert!(!account_control.supports_position_mode_change);
+    assert!(account_control.supports_position_mode_change);
+    assert!(account_control.supports_close_position);
     assert!(capabilities.capabilities_v2.fills_history.supports_since);
     assert!(capabilities.capabilities_v2.fills_history.supports_from_id);
     assert_eq!(
         capabilities.capabilities_v2.credential_scopes,
         vec![CredentialScope::ReadOnly, CredentialScope::Trade]
     );
-    assert!(capabilities.capabilities_v2.stream_runtime.resync.orders);
+    let runtime = &capabilities.capabilities_v2.stream_runtime;
+    assert!(runtime.public.is_supported());
+    assert!(runtime.private.is_supported());
+    assert!(runtime.supports_public_subscribe);
+    assert!(runtime.supports_private_subscribe);
+    assert!(runtime.heartbeat.required);
+    assert_eq!(
+        runtime.heartbeat.direction,
+        StreamHeartbeatDirection::ClientPing
+    );
+    assert!(runtime.reconnect.supported);
+    assert!(runtime.reconnect.requires_resubscribe);
+    assert!(runtime.resync.order_book);
+    assert!(runtime.resync.orders);
+    assert!(runtime.resync.positions);
+    assert!(runtime.resync.balances);
+    assert!(runtime.auth.required);
+    assert!(!runtime.auth.uses_listen_key);
+    assert!(runtime.auth.requires_relogin_on_reconnect);
 }
 
 #[tokio::test]
@@ -333,8 +365,11 @@ async fn mexc_adapter_should_place_perpetual_order_on_contract_api() {
 
     assert_eq!(response.order.market_type, MarketType::Perpetual);
     let request = seen.lock().unwrap()[0].clone();
+    load_request_spec("place_perpetual_order.json")
+        .assert_matches(&request.actual_http_request())
+        .expect("perpetual place order request spec");
     assert_eq!(request.method, "POST");
-    assert_eq!(request.path, "/api/v1/private/order/submit");
+    assert_eq!(request.path, "/api/v1/private/order/create");
     assert_eq!(
         request.headers.get("apikey").map(String::as_str),
         Some("key")
@@ -343,6 +378,10 @@ async fn mexc_adapter_should_place_perpetual_order_on_contract_api() {
         .headers
         .get("request-time")
         .is_some_and(|value| !value.is_empty()));
+    assert_eq!(
+        request.headers.get("recv-window").map(String::as_str),
+        Some("5000")
+    );
     assert!(request
         .headers
         .get("signature")
@@ -354,6 +393,383 @@ async fn mexc_adapter_should_place_perpetual_order_on_contract_api() {
     assert_eq!(body["vol"], "2");
     assert_eq!(body["price"], "65000");
     assert_eq!(body["externalOid"], "PERP1");
+}
+
+#[tokio::test]
+async fn mexc_contract_order_semantics_should_cover_direction_and_tif_variants() {
+    let responses = (0..8)
+        .map(|index| {
+            json!({
+                "success": true,
+                "code": 0,
+                "data": {
+                    "orderId": format!("30{index:02}"),
+                    "externalOid": format!("PERP{index}")
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let (base_url, seen) = spawn_rest_server(responses).await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let cases = [
+        (
+            "OPEN_LONG",
+            OrderSide::Buy,
+            false,
+            OrderType::Limit,
+            Some(TimeInForce::GTC),
+            1,
+            1,
+        ),
+        (
+            "OPEN_SHORT",
+            OrderSide::Sell,
+            false,
+            OrderType::Limit,
+            Some(TimeInForce::GTC),
+            3,
+            1,
+        ),
+        (
+            "CLOSE_SHORT",
+            OrderSide::Buy,
+            true,
+            OrderType::Limit,
+            Some(TimeInForce::GTC),
+            2,
+            1,
+        ),
+        (
+            "CLOSE_LONG",
+            OrderSide::Sell,
+            true,
+            OrderType::Limit,
+            Some(TimeInForce::GTC),
+            4,
+            1,
+        ),
+        (
+            "IOC",
+            OrderSide::Buy,
+            false,
+            OrderType::IOC,
+            Some(TimeInForce::IOC),
+            1,
+            3,
+        ),
+        (
+            "FOK",
+            OrderSide::Buy,
+            false,
+            OrderType::FOK,
+            Some(TimeInForce::FOK),
+            1,
+            4,
+        ),
+        (
+            "MARKET",
+            OrderSide::Buy,
+            false,
+            OrderType::Market,
+            None,
+            1,
+            5,
+        ),
+        (
+            "POST_ONLY",
+            OrderSide::Buy,
+            false,
+            OrderType::PostOnly,
+            Some(TimeInForce::GTX),
+            1,
+            2,
+        ),
+    ];
+
+    for (client_id, side, reduce_only, order_type, time_in_force, _, _) in cases {
+        adapter
+            .place_order(PlaceOrderRequest {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context: context(client_id),
+                symbol: perpetual_symbol_scope(),
+                client_order_id: Some(client_id.to_string()),
+                side,
+                position_side: None,
+                order_type,
+                time_in_force,
+                quantity: "2".to_string(),
+                price: if order_type == OrderType::Market {
+                    None
+                } else {
+                    Some("65000".to_string())
+                },
+                quote_quantity: None,
+                reduce_only,
+                post_only: order_type == OrderType::PostOnly,
+            })
+            .await
+            .expect("place order");
+    }
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), cases.len());
+    for (request, (client_id, _, _, _, _, expected_side, expected_type)) in
+        requests.iter().zip(cases)
+    {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/v1/private/order/create");
+        let body = request.body.as_ref().expect("contract order body");
+        assert_eq!(body["symbol"], "BTC_USDT");
+        assert_eq!(body["side"], expected_side);
+        assert_eq!(body["type"], expected_type);
+        assert_eq!(body["vol"], "2");
+        assert_eq!(body["externalOid"], client_id);
+    }
+}
+
+#[tokio::test]
+async fn mexc_close_position_should_submit_reduce_only_contract_order() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "success": true,
+        "code": 0,
+        "data": {"orderId": "3101", "externalOid": "CLOSE_LONG"}
+    })])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = GatewayAdapter::close_position(
+        &adapter,
+        ClosePositionRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("close-long"),
+            symbol: perpetual_symbol_scope(),
+            position_side: PositionSide::Long,
+            quantity: "2".to_string(),
+            price: Some("64950".to_string()),
+            order_type: OrderType::IOC,
+            time_in_force: TimeInForce::IOC,
+            client_order_id: "CLOSE_LONG".to_string(),
+            max_slippage_pct: None,
+        },
+    )
+    .await
+    .expect("close position");
+
+    assert!(response.accepted);
+    assert_eq!(response.exchange_order_id.as_deref(), Some("3101"));
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, "/api/v1/private/order/create");
+    assert_eq!(
+        request.headers.get("apikey").map(String::as_str),
+        Some("key")
+    );
+    assert_eq!(
+        request.headers.get("recv-window").map(String::as_str),
+        Some("5000")
+    );
+    assert!(request
+        .headers
+        .get("signature")
+        .is_some_and(|value| !value.is_empty()));
+    let body = request.body.as_ref().expect("contract order body");
+    assert_eq!(body["symbol"], "BTC_USDT");
+    assert_eq!(body["side"], 4);
+    assert_eq!(body["type"], 3);
+    assert_eq!(body["vol"], "2");
+    assert_eq!(body["price"], "64950");
+    assert_eq!(body["externalOid"], "CLOSE_LONG");
+}
+
+#[tokio::test]
+async fn mexc_adapter_should_query_current_contract_orders_from_official_endpoint() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "success": true,
+        "code": 0,
+        "data": [
+            {
+                "orderId": "5001",
+                "symbol": "BTC_USDT",
+                "price": "65000",
+                "vol": "2",
+                "dealVol": "0",
+                "side": 1,
+                "type": 1,
+                "state": 2,
+                "externalOid": "BTC_OPEN",
+                "createTime": 1700000000000_i64,
+                "updateTime": 1700000000100_i64
+            },
+            {
+                "orderId": "5002",
+                "symbol": "ETH_USDT",
+                "price": "2500",
+                "vol": "3",
+                "dealVol": "0",
+                "side": 3,
+                "type": 1,
+                "state": 2,
+                "externalOid": "ETH_OPEN",
+                "createTime": 1700000000000_i64,
+                "updateTime": 1700000000100_i64
+            }
+        ]
+    })])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("contract-open-orders"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbol: Some(perpetual_symbol_scope()),
+            page: Some(PageRequest::first_page(25)),
+        })
+        .await
+        .expect("contract open orders");
+
+    assert_eq!(response.orders.len(), 1);
+    assert_eq!(
+        response.orders[0].exchange_order_id.as_deref(),
+        Some("5001")
+    );
+    assert_eq!(response.orders[0].market_type, MarketType::Perpetual);
+    assert_eq!(response.orders[0].side, OrderSide::Buy);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, "/api/v1/private/order/list/open_orders");
+    assert_eq!(request.query.get("page_num").map(String::as_str), Some("1"));
+    assert_eq!(
+        request.query.get("page_size").map(String::as_str),
+        Some("25")
+    );
+    assert_eq!(
+        request.headers.get("recv-window").map(String::as_str),
+        Some("5000")
+    );
+}
+
+#[tokio::test]
+async fn mexc_contract_order_semantics_should_validate_explicit_position_side_hints() {
+    let responses = (0..4)
+        .map(|index| {
+            json!({
+                "success": true,
+                "code": 0,
+                "data": {
+                    "orderId": format!("40{index:02}"),
+                    "externalOid": format!("SIDE{index}")
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let (base_url, seen) = spawn_rest_server(responses).await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let cases = [
+        ("OPEN_LONG", OrderSide::Buy, false, PositionSide::Long, 1),
+        ("OPEN_SHORT", OrderSide::Sell, false, PositionSide::Short, 3),
+        ("CLOSE_SHORT", OrderSide::Buy, true, PositionSide::Short, 2),
+        ("CLOSE_LONG", OrderSide::Sell, true, PositionSide::Long, 4),
+    ];
+
+    for (client_id, side, reduce_only, position_side, _) in cases {
+        adapter
+            .place_order(PlaceOrderRequest {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context: context(client_id),
+                symbol: perpetual_symbol_scope(),
+                client_order_id: Some(client_id.to_string()),
+                side,
+                position_side: Some(position_side),
+                order_type: OrderType::Limit,
+                time_in_force: Some(TimeInForce::GTC),
+                quantity: "2".to_string(),
+                price: Some("65000".to_string()),
+                quote_quantity: None,
+                reduce_only,
+                post_only: false,
+            })
+            .await
+            .expect("place order");
+    }
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), cases.len());
+    for (request, (client_id, _, _, _, expected_side)) in requests.iter().zip(cases) {
+        let body = request.body.as_ref().expect("contract order body");
+        assert_eq!(body["side"], expected_side);
+        assert_eq!(body["externalOid"], client_id);
+    }
+}
+
+#[tokio::test]
+async fn mexc_contract_order_should_reject_conflicting_position_side_hint() {
+    let (base_url, seen) = spawn_rest_server(Vec::new()).await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let error = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("conflicting-position-side"),
+            symbol: perpetual_symbol_scope(),
+            client_order_id: Some("BAD_SIDE".to_string()),
+            side: OrderSide::Buy,
+            position_side: Some(PositionSide::Short),
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "2".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect_err("conflicting position side should fail before REST");
+
+    let ExchangeApiError::InvalidRequest { message } = error else {
+        panic!("expected InvalidRequest");
+    };
+    assert!(message.contains("position_side"));
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -421,6 +837,107 @@ async fn mexc_adapter_should_set_perpetual_leverage_for_both_position_types() {
         requests[1].query.get("positionType").map(String::as_str),
         Some("2")
     );
+}
+
+#[tokio::test]
+async fn mexc_adapter_should_read_and_set_position_mode() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({"success": true, "code": 0, "data": {"positionMode": 1}}),
+        json!({"success": true, "code": 0}),
+        json!({"success": true, "code": 0, "data": {"positionMode": 2}}),
+    ])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let config = GatewayAdapter::get_symbol_account_config(
+        &adapter,
+        SymbolAccountConfigRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("get-position-mode"),
+            symbol: perpetual_symbol_scope(),
+        },
+    )
+    .await
+    .expect("position mode");
+    assert_eq!(config.config.position_mode, Some(PositionMode::Hedge));
+
+    let changed = GatewayAdapter::set_position_mode(
+        &adapter,
+        SetPositionModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-position-mode"),
+            exchange: exchange_id(),
+            mode: PositionMode::OneWay,
+        },
+    )
+    .await
+    .expect("set position mode");
+    assert!(changed.accepted);
+    assert_eq!(changed.mode, PositionMode::OneWay);
+    assert!(changed
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("no active orders")));
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(requests[0].path, "/api/v1/private/position/position_mode");
+    assert_eq!(requests[1].method, "POST");
+    assert_eq!(
+        requests[1].path,
+        "/api/v1/private/position/change_position_mode"
+    );
+    assert_eq!(
+        requests[1].query.get("positionMode").map(String::as_str),
+        Some("2")
+    );
+    load_request_spec("set_position_mode.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("set position mode request spec");
+    assert_eq!(requests[2].method, "GET");
+    assert_eq!(requests[2].path, "/api/v1/private/position/position_mode");
+}
+
+#[tokio::test]
+async fn mexc_set_position_mode_should_fail_on_readback_mismatch() {
+    let (base_url, _seen) = spawn_rest_server(vec![
+        json!({"success": true, "code": 0}),
+        json!({"success": true, "code": 0, "data": {"positionMode": 1}}),
+    ])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let error = GatewayAdapter::set_position_mode(
+        &adapter,
+        SetPositionModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-position-mode-mismatch"),
+            exchange: exchange_id(),
+            mode: PositionMode::OneWay,
+        },
+    )
+    .await
+    .expect_err("mismatched readback should fail");
+
+    let ExchangeApiError::InvalidRequest { message } = error else {
+        panic!("expected InvalidRequest");
+    };
+    assert!(message.contains("readback mismatch"));
 }
 
 #[test]

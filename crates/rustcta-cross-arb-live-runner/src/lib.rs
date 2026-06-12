@@ -1,16 +1,18 @@
 #![recursion_limit = "256"]
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use futures_util::{stream::FuturesUnordered, SinkExt, StreamExt};
+#[cfg(test)]
+use rustcta_event_ledger::FundingSettlementLedgerRecord;
 use rustcta_event_ledger::{
     AuditActor, AuditActorType, AuditOutcome, AuditRecord, EventIdentity, EventKind,
     FillLedgerRecord, JsonlLedger, LedgerEvent, LedgerWriter, OrderLifecycleRecord,
@@ -35,6 +37,11 @@ use rustcta_strategy_cross_exchange_arbitrage::{
     SlippageCaptureOrderRole, SlippageCaptureStartupGate, SymbolPrecision, TakerOrderDraft,
     TakerOrderRole, STRATEGY_KIND,
 };
+#[cfg(test)]
+use rustcta_strategy_cross_exchange_arbitrage::{
+    FundingModel, FundingSettlement as StrategyFundingSettlement,
+    PositionSide as StrategyPositionSide,
+};
 use rustcta_strategy_sdk::{
     ExecutionCancelAck, ExecutionCancelCommand, ExecutionIntent, ExecutionIntentAck,
     ExecutionOrderAck, ExecutionOrderCommand, MarketType as SdkMarketType,
@@ -43,7 +50,7 @@ use rustcta_strategy_sdk::{
     TimeInForce as SdkTimeInForce,
 };
 use rustcta_tools_ops::private_ws_observe::{
-    spawn_private_ws_observe_tasks, PrivateWsObserveConfig, PrivateWsObserveEvent,
+    run_private_ws_observe_once, PrivateWsObserveConfig, PrivateWsObserveEvent,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId as GatewayExchangeId,
@@ -53,20 +60,26 @@ use rustcta_types::{
     PositionSide as GatewayPositionSide, RunId, StrategyId, TenantId,
     TimeInForce as GatewayTimeInForce,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinSet;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 type LocalGatewayClient = InProcessGatewayClient<AdapterBackedGateway>;
 type LocalExecutionRouter = ExecutionRouter<LocalGatewayClient>;
 type DisabledExchangeSymbols = BTreeMap<(String, String), String>;
 type DisabledOpenExchanges = BTreeMap<String, String>;
+type DirectBookStateHandle = Arc<Mutex<DirectWebsocketMarketDataState>>;
 const FAILED_OPEN_ROUTE_COOLDOWN_SECS: i64 = 900;
 const SLIPPAGE_UNFILLED_MAKER_ROUTE_COOLDOWN_SECS: i64 = 20;
 const LIVE_WS_BINANCE_CHUNK_SIZE: usize = 80;
 const LIVE_WS_BITGET_CHUNK_SIZE: usize = 50;
 const LIVE_WS_GATE_CHUNK_SIZE: usize = 30;
+const LIVE_WS_ASTER_CHUNK_SIZE: usize = 80;
+const LIVE_WS_MEXC_CHUNK_SIZE: usize = 30;
+const LIVE_WS_KUCOINFUTURES_CHUNK_SIZE: usize = 50;
+const LIVE_WS_BYBIT_CHUNK_SIZE: usize = 50;
 const LIVE_WS_CONNECT_TIMEOUT_MS: u64 = 15_000;
 const LIVE_WS_SUBSCRIBE_PAUSE_MS: u64 = 30;
 // Keep reader-level throttling disabled; dashboard refresh controls UI cadence.
@@ -77,6 +90,8 @@ const DEFAULT_PRIVATE_WS_TIMEOUT_MS: u64 = 15_000;
 const DEFAULT_PRIVATE_WS_RECONNECT_DELAY_MS: u64 = 2_000;
 const DEFAULT_DELAYED_REST_RECHECK_MS: u64 = 30_000;
 const OPEN_DECISION_AUDIT_SYMBOL_COOLDOWN_SECS: i64 = 300;
+const PROFIT_HISTORY_LOSS_GUARD_CACHE_TTL_MS: u64 = 1_000;
+const CONTROL_COMMAND_CACHE_TTL_MS: u64 = 500;
 
 #[derive(Debug, Clone)]
 pub struct LiveRunnerArgs {
@@ -99,6 +114,8 @@ pub struct LiveRunnerArgs {
     pub market_data_source: LiveMarketDataSource,
     pub enable_live_trading: bool,
     pub allow_rest_readback_confirmation: bool,
+    pub shard_id: Option<usize>,
+    pub shard_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +175,8 @@ impl Default for LiveRunnerArgs {
             market_data_source: LiveMarketDataSource::DirectWebsocket,
             enable_live_trading: false,
             allow_rest_readback_confirmation: false,
+            shard_id: None,
+            shard_count: None,
         }
     }
 }
@@ -228,6 +247,20 @@ impl LiveRunnerArgs {
                         .parse()
                         .context("--run-seconds must be a positive integer")?
                 }
+                "--shard-id" => {
+                    args.shard_id = Some(
+                        next_value(&mut values, "--shard-id")?
+                            .parse()
+                            .context("--shard-id must be a non-negative integer")?,
+                    )
+                }
+                "--shard-count" => {
+                    args.shard_count = Some(
+                        next_value(&mut values, "--shard-count")?
+                            .parse()
+                            .context("--shard-count must be a positive integer")?,
+                    )
+                }
                 "--market-data-snapshot-stale-ms" => {
                     bail!("--market-data-snapshot-stale-ms has been removed from the live runner; market data is direct websocket event driven.")
                 }
@@ -241,7 +274,7 @@ impl LiveRunnerArgs {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "cross-exchange-arbitrage-live-runner --config <path> [--enable-live-trading] [--dashboard-refresh-ms <ms>] [--dashboard-snapshot-path <path>] [--trade-ledger-path <path>] [--control-command-queue-path <path>] [--once] [--run-seconds <seconds>]"
+                        "cross-exchange-arbitrage-live-runner --config <path> [--enable-live-trading] [--dashboard-refresh-ms <ms>] [--dashboard-snapshot-path <path>] [--trade-ledger-path <path>] [--control-command-queue-path <path>] [--shard-id <id> --shard-count <count>] [--once] [--run-seconds <seconds>]"
                     );
                     std::process::exit(0);
                 }
@@ -555,6 +588,7 @@ impl LiveMarketDataProvider {
                 required_exchanges,
                 instrument_registry.ws_subscription_symbols.clone(),
                 instrument_registry.unsupported_symbols.clone(),
+                evaluator_workers_from_config(config_value),
             )?),
             LiveMarketDataSource::SnapshotFile => None,
         };
@@ -579,6 +613,7 @@ impl LiveMarketDataProvider {
         disabled_exchange_symbols: &DisabledExchangeSymbols,
         disabled_open_exchanges: &DisabledOpenExchanges,
         dashboard_tick: &mut tokio::time::Interval,
+        stale_sweep_tick: &mut tokio::time::Interval,
     ) -> Result<MarketDataSnapshot> {
         match self.source {
             LiveMarketDataSource::SnapshotFile => {
@@ -602,15 +637,29 @@ impl LiveMarketDataProvider {
                     .direct_ws
                     .as_mut()
                     .context("direct websocket market data provider is not started")?;
-                let trigger = direct_ws.next_trigger(dashboard_tick).await;
-                let mut dashboard = direct_ws.dashboard_data(
-                    strategy_config,
-                    required_exchanges,
-                    fee_model,
-                    precision_registry,
-                    disabled_exchange_symbols,
-                    disabled_open_exchanges,
-                )?;
+                let trigger = direct_ws
+                    .next_trigger(dashboard_tick, stale_sweep_tick)
+                    .await;
+                let build_display_rows = trigger == MarketDataTrigger::DashboardTick;
+                let rebuild_all_symbols = trigger == MarketDataTrigger::DashboardTick;
+                let dirty_symbol = match &trigger {
+                    MarketDataTrigger::BookEvent { symbol } => Some(symbol.as_str()),
+                    MarketDataTrigger::StaleSweep => None,
+                    MarketDataTrigger::DashboardTick => None,
+                };
+                let mut dashboard = direct_ws
+                    .dashboard_data(
+                        strategy_config,
+                        required_exchanges,
+                        fee_model,
+                        precision_registry,
+                        disabled_exchange_symbols,
+                        disabled_open_exchanges,
+                        dirty_symbol,
+                        build_display_rows,
+                        rebuild_all_symbols,
+                    )
+                    .await?;
                 self.private_ws.drain_into(&mut dashboard).await;
                 Ok(MarketDataSnapshot { dashboard, trigger })
             }
@@ -620,11 +669,18 @@ impl LiveMarketDataProvider {
     fn private_ws(&self) -> Arc<PrivateUserWsObserver> {
         Arc::clone(&self.private_ws)
     }
+
+    fn direct_ws_state(&self) -> Option<Arc<Mutex<DirectWebsocketMarketDataState>>> {
+        self.direct_ws
+            .as_ref()
+            .map(DirectWebsocketMarketData::state_handle)
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum MarketDataTrigger {
-    BookEvent,
+    BookEvent { symbol: String },
+    StaleSweep,
     DashboardTick,
 }
 
@@ -634,11 +690,53 @@ struct MarketDataSnapshot {
 }
 
 #[derive(Debug)]
+struct SymbolEvaluationResult {
+    symbol: String,
+    cache_entry: Option<CachedSymbolOpportunities>,
+    audit_rows: Vec<Value>,
+    route_health_rows: Vec<Value>,
+}
+
+#[derive(Debug)]
 struct DirectWebsocketMarketData {
-    rx: mpsc::Receiver<DirectWsEvent>,
+    trigger_rx: mpsc::Receiver<MarketDataTrigger>,
+    state: Arc<Mutex<DirectWebsocketMarketDataState>>,
+    opportunity_cache: BTreeMap<String, CachedSymbolOpportunities>,
+    evaluator_workers: usize,
+}
+
+#[derive(Debug, Clone)]
+struct CachedSymbolOpportunities {
+    valid_until: DateTime<Utc>,
+    typed_opportunities: Vec<DualTakerOpenOpportunity>,
+    slippage_capture_opportunities: Vec<SlippageCaptureOpenOpportunity>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DashboardOutputConfig {
+    pretty_json: bool,
+    max_opportunity_rows: usize,
+    max_market_snapshot_rows: usize,
+    max_route_health_rows: usize,
+}
+
+impl Default for DashboardOutputConfig {
+    fn default() -> Self {
+        Self {
+            pretty_json: false,
+            max_opportunity_rows: 200,
+            max_market_snapshot_rows: 2_000,
+            max_route_health_rows: 500,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DirectWebsocketMarketDataState {
     tops: BTreeMap<(String, String), OrderBookTop>,
     connected: BTreeMap<(String, usize), (usize, DateTime<Utc>)>,
     route_health: Vec<Value>,
+    dirty_symbols: BTreeSet<String>,
     subscribed_symbols: BTreeMap<String, BTreeSet<String>>,
     unsupported_symbols: BTreeMap<String, BTreeSet<String>>,
 }
@@ -667,7 +765,7 @@ impl PrivateUserWsObserver {
             .map(|exchange| gateway_exchange_id(exchange))
             .collect::<Vec<_>>();
         let (tx, rx) = mpsc::channel(exchanges.len().max(1) * 256);
-        spawn_private_ws_observe_tasks(&exchanges, config, tx);
+        spawn_private_ws_observe_loop(exchanges.clone(), config, tx);
         let observer = Arc::new(Self {
             state: Mutex::new(PrivateWsObserveState::new(exchanges)),
         });
@@ -783,6 +881,19 @@ impl PrivateWsObserveState {
     }
 }
 
+fn spawn_private_ws_observe_loop(
+    exchanges: Vec<String>,
+    config: PrivateWsObserveConfig,
+    tx: mpsc::Sender<PrivateWsObserveEvent>,
+) {
+    tokio::spawn(async move {
+        loop {
+            run_private_ws_observe_once(&exchanges, config.clone(), tx.clone()).await;
+            tokio::time::sleep(Duration::from_millis(config.reconnect_delay_ms.max(100))).await;
+        }
+    });
+}
+
 fn spawn_private_ws_event_collector(
     mut rx: mpsc::Receiver<PrivateWsObserveEvent>,
     observer: Arc<PrivateUserWsObserver>,
@@ -797,6 +908,7 @@ fn spawn_private_ws_event_collector(
 #[derive(Debug, Clone, Default)]
 struct LiveExecutionState {
     open_bundles: BTreeMap<String, LiveOpenBundle>,
+    pending_slippage_risk_flattens: BTreeMap<String, PendingSlippageRiskFlatten>,
     symbol_cooldowns: BTreeMap<String, DateTime<Utc>>,
     route_cooldowns: BTreeMap<String, RouteCooldown>,
     open_decision_audit_symbol_cooldowns: BTreeMap<String, DateTime<Utc>>,
@@ -808,6 +920,45 @@ struct LiveExecutionState {
     manual_intervention_reason: Option<String>,
     processed_control_commands: BTreeSet<String>,
     started_at: Option<DateTime<Utc>>,
+    loss_guard_cache: LossGuardCache,
+    control_command_cache: ControlCommandCache,
+    jsonl_runtime_caches: Option<JsonlRuntimeCaches>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LossGuardCache {
+    checked_at: Option<Instant>,
+    profit_history_path: Option<PathBuf>,
+    max_consecutive_losses: Option<u32>,
+    triggered: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ControlCommandCache {
+    checked_at: Option<Instant>,
+    queue_path: Option<PathBuf>,
+    commands: Vec<ManualCloseCommand>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct JsonlRuntimeCaches {
+    loss_guard: Arc<StdMutex<LossGuardSharedSnapshot>>,
+    control_commands: Arc<StdMutex<ControlCommandSharedSnapshot>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LossGuardSharedSnapshot {
+    profit_history_path: Option<PathBuf>,
+    max_consecutive_losses: Option<u32>,
+    checked_at: Option<Instant>,
+    triggered: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ControlCommandSharedSnapshot {
+    queue_path: Option<PathBuf>,
+    checked_at: Option<Instant>,
+    commands: Vec<ManualCloseCommand>,
 }
 
 #[derive(Debug, Clone)]
@@ -897,6 +1048,12 @@ impl LiveExecutionControls {
         }
         None
     }
+}
+
+fn hot_path_confirmation(confirmation: &LiveConfirmationPolicy) -> LiveConfirmationPolicy {
+    let mut confirmation = confirmation.clone();
+    confirmation.delayed_rest_recheck_ms = 0;
+    confirmation
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1059,6 +1216,19 @@ struct LiveOpenBundle {
     open_fee_usdt: f64,
 }
 
+#[derive(Debug, Clone)]
+struct PendingSlippageRiskFlatten {
+    bundle_id: String,
+    opportunity: SlippageCaptureOpenOpportunity,
+    synthetic_open: DualTakerOpenOpportunity,
+    execution: PairExecution,
+    opened_at: DateTime<Utc>,
+    deadline_at: DateTime<Utc>,
+    close_min_net_profit_pct: f64,
+    hedge_min_net_profit_pct: f64,
+    last_audit: SlippageHedgeDecisionAudit,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct ExternalPositionSnapshot {
     exchange: String,
@@ -1099,6 +1269,8 @@ struct ReconciledOrderLeg {
     actual_order_quantity: Option<f64>,
     actual_notional_usdt: Option<f64>,
     fee_usdt: f64,
+    fee_amount: Option<f64>,
+    fee_asset: Option<String>,
     submitted_at: Option<DateTime<Utc>>,
     acked_at: Option<DateTime<Utc>>,
     filled_at: Option<DateTime<Utc>>,
@@ -1123,15 +1295,20 @@ pub async fn run_live_runner(
     loaded_adapters: Vec<String>,
 ) -> Result<()> {
     let _singleton_guard = ProcessSingletonGuard::acquire(&args.lock_file)?;
-    let config_value = read_yaml_config(&args.config)?;
-    let strategy_config = CrossExchangeArbitrageConfig::from_runtime_value(&config_value);
-    validate_live_symbol_universe(&strategy_config)?;
+    let mut config_value = read_yaml_config(&args.config)?;
+    let mut strategy_config = CrossExchangeArbitrageConfig::from_runtime_value(&config_value);
     let execution_mode = LiveExecutionMode::from_config(&args, &config_value);
     execution_mode.validate()?;
+    apply_symbol_sharding(
+        &mut strategy_config,
+        &mut config_value,
+        execution_mode.live_orders_enabled,
+        SymbolShardingCliOverrides::from_args(&args),
+    )?;
+    validate_live_symbol_universe(&strategy_config)?;
     let sinks = LiveRuntimeSinks::start(&args, &config_value);
     let live_orders_enabled = execution_mode.live_orders_enabled;
     let execution_controls = live_execution_controls_from_config(&config_value);
-    let fee_model = fee_model_from_config(&config_value);
     let target_market_type = gateway_market_type(&strategy_config.market_type)?;
     let disabled_exchange_symbols =
         disabled_exchange_symbols_from_config(&config_value, &target_market_type);
@@ -1139,6 +1316,7 @@ pub async fn run_live_runner(
     let required_exchanges = gateway_exchange_ids(strategy_config.active_venues());
     let account_by_exchange =
         exchange_account_map(&config_value, &required_exchanges, &args.account_id);
+    let dashboard_output_config = dashboard_output_config_from_runtime(&config_value);
 
     let gateway = Arc::new(gateway);
     let gateway_client = InProcessGatewayClient::new(gateway);
@@ -1163,6 +1341,7 @@ pub async fn run_live_runner(
             None,
             false,
             true,
+            dashboard_output_config,
         )
         .await?;
         bail!(
@@ -1170,6 +1349,7 @@ pub async fn run_live_runner(
             capability_gate.missing_requirements.join("; ")
         );
     }
+    let fee_model = fee_model_from_config(&config_value);
     let instrument_registry =
         load_precision_registry(&gateway_client, &args, &strategy_config, target_market_type)
             .await
@@ -1191,8 +1371,11 @@ pub async fn run_live_runner(
         LiveExecutionQualityControls::from_config(&config_value, &strategy_config);
     validate_live_market_data_source(&args, live_orders_enabled)?;
     let ctx = strategy_context(&args, config_value.clone(), execution);
+    let jsonl_runtime_caches =
+        start_jsonl_runtime_pollers(&args, strategy_config.max_consecutive_losses, &config_value);
     let mut execution_state = LiveExecutionState {
         started_at: Some(Utc::now()),
+        jsonl_runtime_caches: Some(jsonl_runtime_caches),
         ..LiveExecutionState::default()
     };
     if restore_route_cooldowns_from_profit_history_enabled(&config_value) {
@@ -1224,6 +1407,7 @@ pub async fn run_live_runner(
         &config_value,
         &instrument_registry,
     )?;
+    let latest_direct_books = market_data_provider.direct_ws_state();
     let confirmation = LiveConfirmationPolicy {
         private_ws: market_data_provider.private_ws(),
         require_private_ws: execution_mode.private_ws_confirmation_required,
@@ -1233,8 +1417,13 @@ pub async fn run_live_runner(
         enforce_top_depth_on_open: enforce_top_depth_on_open(&config_value),
     };
     let dashboard_refresh_ms = dashboard_refresh_ms_from_config(&config_value, &args);
+    let stale_sweep_ms = stale_sweep_ms_from_config(&config_value);
     let mut dashboard_tick = tokio::time::interval(Duration::from_millis(dashboard_refresh_ms));
+    let mut stale_sweep_tick = tokio::time::interval(Duration::from_millis(stale_sweep_ms));
+    dashboard_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    stale_sweep_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     dashboard_tick.tick().await;
+    stale_sweep_tick.tick().await;
     let first_snapshot = market_data_provider
         .next_snapshot(
             &args,
@@ -1245,6 +1434,7 @@ pub async fn run_live_runner(
             &disabled_exchange_symbols,
             &disabled_open_exchanges,
             &mut dashboard_tick,
+            &mut stale_sweep_tick,
         )
         .await?;
     let mut dashboard_data = first_snapshot.dashboard;
@@ -1258,6 +1448,7 @@ pub async fn run_live_runner(
         target_market_type,
         &fee_model,
         &precision_registry,
+        latest_direct_books.clone(),
         live_orders_enabled,
         execution_controls.allow_new_entries(true),
         execution_controls.new_entries_block_reason(true),
@@ -1277,6 +1468,7 @@ pub async fn run_live_runner(
         Some(serde_json::to_value(runtime.snapshot().await?)?),
         live_orders_enabled,
         true,
+        dashboard_output_config,
     )
     .await?;
 
@@ -1299,6 +1491,7 @@ pub async fn run_live_runner(
                 &disabled_exchange_symbols,
                 &disabled_open_exchanges,
                 &mut dashboard_tick,
+                &mut stale_sweep_tick,
             )
             .await?;
         if run_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -1315,6 +1508,7 @@ pub async fn run_live_runner(
             target_market_type,
             &fee_model,
             &precision_registry,
+            latest_direct_books.clone(),
             live_orders_enabled,
             execution_controls.allow_new_entries(!stopping_new_entries),
             execution_controls.new_entries_block_reason(!stopping_new_entries),
@@ -1325,7 +1519,7 @@ pub async fn run_live_runner(
             &mut dashboard_data,
         )
         .await?;
-        if market_snapshot.trigger == MarketDataTrigger::DashboardTick {
+        if matches!(market_snapshot.trigger, MarketDataTrigger::DashboardTick) {
             emit_report(
                 &args,
                 &capability_gate,
@@ -1335,6 +1529,7 @@ pub async fn run_live_runner(
                 Some(serde_json::to_value(runtime.snapshot().await?)?),
                 live_orders_enabled,
                 true,
+                dashboard_output_config,
             )
             .await?;
         }
@@ -1393,11 +1588,318 @@ fn validate_live_symbol_universe(config: &CrossExchangeArbitrageConfig) -> Resul
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SymbolShardingMode {
+    HashSymbol,
+    ExplicitSymbols,
+}
+
+#[derive(Debug, Clone)]
+struct SymbolShardingConfig {
+    enabled: bool,
+    mode: SymbolShardingMode,
+    shard_id: usize,
+    shard_count: usize,
+    explicit_symbols: BTreeSet<String>,
+    require_global_risk_coordinator_when_live: bool,
+    global_risk_coordinator_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SymbolShardingCliOverrides {
+    shard_id: Option<usize>,
+    shard_count: Option<usize>,
+}
+
+impl SymbolShardingCliOverrides {
+    fn from_args(args: &LiveRunnerArgs) -> Self {
+        Self {
+            shard_id: args.shard_id,
+            shard_count: args.shard_count,
+        }
+    }
+
+    fn has_overrides(self) -> bool {
+        self.shard_id.is_some() || self.shard_count.is_some()
+    }
+}
+
+impl SymbolShardingConfig {
+    fn from_runtime_config(config: &Value) -> Result<Self> {
+        let enabled = bool_at_path(config, &["sharding", "enabled"]).unwrap_or(false);
+        let mode_text = text_at_path(config, &["sharding", "mode"]).unwrap_or("hash_symbol");
+        let mode = match mode_text.trim().to_ascii_lowercase().as_str() {
+            "hash" | "hash_symbol" | "hash-symbol" => SymbolShardingMode::HashSymbol,
+            "explicit" | "explicit_symbols" | "explicit-symbols" => {
+                SymbolShardingMode::ExplicitSymbols
+            }
+            other => {
+                bail!("unsupported sharding.mode {other}; use hash_symbol or explicit_symbols")
+            }
+        };
+        let shard_count = u64_at_path(config, &["sharding", "shard_count"])
+            .unwrap_or(1)
+            .try_into()
+            .context("sharding.shard_count is too large")?;
+        let shard_id = u64_at_path(config, &["sharding", "shard_id"])
+            .unwrap_or(0)
+            .try_into()
+            .context("sharding.shard_id is too large")?;
+        anyhow::ensure!(shard_count >= 1, "sharding.shard_count must be at least 1");
+        anyhow::ensure!(shard_count <= 1024, "sharding.shard_count must be <= 1024");
+        anyhow::ensure!(
+            shard_id < shard_count,
+            "sharding.shard_id must be smaller than sharding.shard_count"
+        );
+
+        let explicit_symbols = strings_at_path(config, &["sharding", "explicit_symbols"])
+            .into_iter()
+            .filter_map(|symbol| normalize_config_symbol(&symbol))
+            .collect::<BTreeSet<_>>();
+        if enabled && mode == SymbolShardingMode::ExplicitSymbols {
+            anyhow::ensure!(
+                !explicit_symbols.is_empty(),
+                "sharding.mode=explicit_symbols requires sharding.explicit_symbols"
+            );
+        }
+
+        Ok(Self {
+            enabled,
+            mode,
+            shard_id,
+            shard_count,
+            explicit_symbols,
+            require_global_risk_coordinator_when_live: bool_at_path(
+                config,
+                &["sharding", "require_global_risk_coordinator_when_live"],
+            )
+            .unwrap_or(true),
+            global_risk_coordinator_enabled: bool_at_path(
+                config,
+                &["sharding", "global_risk_coordinator_enabled"],
+            )
+            .or_else(|| bool_at_path(config, &["risk", "global_risk_coordinator_enabled"]))
+            .unwrap_or(false),
+        })
+    }
+}
+
+fn apply_symbol_sharding(
+    strategy_config: &mut CrossExchangeArbitrageConfig,
+    runtime_config: &mut Value,
+    live_orders_enabled: bool,
+    cli_overrides: SymbolShardingCliOverrides,
+) -> Result<()> {
+    let mut sharding = SymbolShardingConfig::from_runtime_config(runtime_config)?;
+    if cli_overrides.has_overrides() {
+        sharding.enabled = true;
+        sharding.mode = SymbolShardingMode::HashSymbol;
+        if let Some(shard_count) = cli_overrides.shard_count {
+            sharding.shard_count = shard_count;
+        }
+        if let Some(shard_id) = cli_overrides.shard_id {
+            sharding.shard_id = shard_id;
+        }
+        validate_symbol_sharding_config(&sharding)?;
+    }
+    if !sharding.enabled {
+        return Ok(());
+    }
+    if live_orders_enabled
+        && sharding.shard_count > 1
+        && sharding.require_global_risk_coordinator_when_live
+        && !sharding.global_risk_coordinator_enabled
+    {
+        bail!(
+            "live multi-shard execution requires a global risk coordinator; set sharding.global_risk_coordinator_enabled=true after wiring one, or set sharding.require_global_risk_coordinator_when_live=false only when account/risk limits are manually isolated per shard"
+        );
+    }
+
+    let active_symbols = strategy_config.active_symbols();
+    let filtered_symbols = active_symbols
+        .into_iter()
+        .filter(|symbol| match sharding.mode {
+            SymbolShardingMode::ExplicitSymbols => sharding.explicit_symbols.contains(symbol),
+            SymbolShardingMode::HashSymbol => {
+                (sharding.explicit_symbols.is_empty() || sharding.explicit_symbols.contains(symbol))
+                    && stable_symbol_shard(symbol, sharding.shard_count) == sharding.shard_id
+            }
+        })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        !filtered_symbols.is_empty(),
+        "sharding selected no symbols for shard_id={} shard_count={}",
+        sharding.shard_id,
+        sharding.shard_count
+    );
+
+    strategy_config.symbols = filtered_symbols;
+    set_runtime_config_symbols(runtime_config, &strategy_config.symbols);
+    Ok(())
+}
+
+fn validate_symbol_sharding_config(sharding: &SymbolShardingConfig) -> Result<()> {
+    anyhow::ensure!(
+        sharding.shard_count >= 1,
+        "sharding.shard_count must be at least 1"
+    );
+    anyhow::ensure!(
+        sharding.shard_count <= 1024,
+        "sharding.shard_count must be <= 1024"
+    );
+    anyhow::ensure!(
+        sharding.shard_id < sharding.shard_count,
+        "sharding.shard_id must be smaller than sharding.shard_count"
+    );
+    Ok(())
+}
+
+fn stable_symbol_shard(symbol: &str, shard_count: usize) -> usize {
+    debug_assert!(shard_count > 0);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in symbol.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (hash % shard_count as u64) as usize
+}
+
+fn set_runtime_config_symbols(config: &mut Value, symbols: &[String]) {
+    let symbols_value = Value::Array(symbols.iter().cloned().map(Value::String).collect());
+    if let Some(map) = config.as_object_mut() {
+        map.insert("symbols".to_string(), symbols_value.clone());
+        if let Some(universe) = map.get_mut("universe").and_then(Value::as_object_mut) {
+            universe.insert("symbols".to_string(), symbols_value);
+        }
+    }
+}
+
 fn dashboard_refresh_ms_from_config(config: &Value, args: &LiveRunnerArgs) -> u64 {
     u64_at_path(config, &["dashboard", "refresh_ms"])
         .or_else(|| u64_at_path(config, &["dashboard", "refresh_interval_ms"]))
         .unwrap_or(args.dashboard_refresh_ms)
         .max(250)
+}
+
+fn stale_sweep_ms_from_config(config: &Value) -> u64 {
+    u64_at_path(config, &["performance", "stale_sweep_ms"])
+        .unwrap_or(100)
+        .max(50)
+}
+
+fn evaluator_workers_from_config(config: &Value) -> usize {
+    usize_from_config(config, &["performance", "evaluator_workers"], 1).clamp(1, 32)
+}
+
+fn dashboard_output_config_from_runtime(config: &Value) -> DashboardOutputConfig {
+    let defaults = DashboardOutputConfig::default();
+    DashboardOutputConfig {
+        pretty_json: bool_at_path(config, &["dashboard", "pretty_json"])
+            .unwrap_or(defaults.pretty_json),
+        max_opportunity_rows: usize_from_config(
+            config,
+            &["dashboard", "max_opportunity_rows"],
+            defaults.max_opportunity_rows,
+        ),
+        max_market_snapshot_rows: usize_from_config(
+            config,
+            &["dashboard", "max_market_snapshot_rows"],
+            defaults.max_market_snapshot_rows,
+        ),
+        max_route_health_rows: usize_from_config(
+            config,
+            &["dashboard", "max_route_health_rows"],
+            defaults.max_route_health_rows,
+        ),
+    }
+}
+
+fn profit_history_tail_ms_from_config(config: &Value) -> u64 {
+    u64_at_path(config, &["persistence", "profit_history_tail_ms"])
+        .unwrap_or(1_000)
+        .max(250)
+}
+
+fn control_command_poll_ms_from_config(config: &Value) -> u64 {
+    u64_at_path(config, &["persistence", "control_command_poll_ms"])
+        .unwrap_or(CONTROL_COMMAND_CACHE_TTL_MS)
+        .max(100)
+}
+
+fn start_jsonl_runtime_pollers(
+    args: &LiveRunnerArgs,
+    max_consecutive_losses: u32,
+    config: &Value,
+) -> JsonlRuntimeCaches {
+    let caches = JsonlRuntimeCaches::default();
+    if args.profit_history_path.is_some() {
+        spawn_loss_guard_poller(
+            args.clone(),
+            max_consecutive_losses,
+            caches.clone(),
+            profit_history_tail_ms_from_config(config),
+        );
+    }
+    if args.control_command_queue_path.is_some() {
+        spawn_control_command_poller(
+            args.clone(),
+            caches.clone(),
+            control_command_poll_ms_from_config(config),
+        );
+    }
+    caches
+}
+
+fn spawn_loss_guard_poller(
+    args: LiveRunnerArgs,
+    max_consecutive_losses: u32,
+    caches: JsonlRuntimeCaches,
+    interval_ms: u64,
+) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if let Err(error) =
+                refresh_loss_guard_shared_snapshot(&args, max_consecutive_losses, &caches)
+            {
+                tracing::warn!(
+                    target: "rustcta::cross_arb_live_runner",
+                    error = %error,
+                    "profit history loss guard poller failed"
+                );
+            }
+        }
+    });
+}
+
+fn spawn_control_command_poller(
+    args: LiveRunnerArgs,
+    caches: JsonlRuntimeCaches,
+    interval_ms: u64,
+) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if let Err(error) = refresh_control_command_shared_snapshot(&args, &caches) {
+                tracing::warn!(
+                    target: "rustcta::cross_arb_live_runner",
+                    error = %error,
+                    "control command poller failed"
+                );
+            }
+        }
+    });
+}
+
+fn usize_from_config(config: &Value, path: &[&str], default: usize) -> usize {
+    u64_at_path(config, path)
+        .and_then(|value| value.try_into().ok())
+        .unwrap_or(default)
+        .max(1)
 }
 
 fn private_ws_confirmation_timeout_ms(config: &Value) -> u64 {
@@ -1448,6 +1950,7 @@ impl DirectWebsocketMarketData {
         required_exchanges: &[String],
         subscription_symbols: BTreeMap<String, Vec<String>>,
         unsupported_symbols: BTreeMap<String, Vec<String>>,
+        evaluator_workers: usize,
     ) -> Result<Self> {
         let connections = build_direct_ws_connections_for_exchange_symbols(
             required_exchanges,
@@ -1475,7 +1978,7 @@ impl DirectWebsocketMarketData {
                 )
             })
             .collect();
-        let (tx, rx) = mpsc::channel(connections.len().max(1) * 256);
+        let (tx, rx) = mpsc::channel(connections.len().max(1) * 4096);
         for (index, connection) in connections.into_iter().enumerate() {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -1483,17 +1986,25 @@ impl DirectWebsocketMarketData {
             });
         }
         drop(tx);
-        Ok(Self {
-            rx,
+        let (trigger_tx, trigger_rx) = mpsc::channel(1024);
+        let state = Arc::new(Mutex::new(DirectWebsocketMarketDataState {
             tops: BTreeMap::new(),
             connected: BTreeMap::new(),
             route_health: Vec::new(),
+            dirty_symbols: BTreeSet::new(),
             subscribed_symbols,
             unsupported_symbols,
+        }));
+        spawn_direct_ws_event_collector(rx, Arc::clone(&state), trigger_tx);
+        Ok(Self {
+            trigger_rx,
+            state,
+            opportunity_cache: BTreeMap::new(),
+            evaluator_workers,
         })
     }
 
-    fn dashboard_data(
+    async fn dashboard_data(
         &mut self,
         strategy_config: &CrossExchangeArbitrageConfig,
         required_exchanges: &[String],
@@ -1501,9 +2012,28 @@ impl DirectWebsocketMarketData {
         precision_registry: &PrecisionRegistry,
         disabled_exchange_symbols: &DisabledExchangeSymbols,
         disabled_open_exchanges: &DisabledOpenExchanges,
+        dirty_symbol: Option<&str>,
+        build_display_rows: bool,
+        rebuild_all_symbols: bool,
     ) -> Result<LiveDashboardData> {
-        self.drain_ready_events();
         let now = Utc::now();
+        let mut state = self.state.lock().await;
+        let mut dirty_symbols_to_rebuild = if build_display_rows {
+            state.dirty_symbols.clear();
+            Vec::new()
+        } else {
+            let symbols = state.dirty_symbols.iter().cloned().collect::<Vec<_>>();
+            state.dirty_symbols.clear();
+            symbols
+        };
+        if let Some(symbol) = dirty_symbol {
+            if !dirty_symbols_to_rebuild
+                .iter()
+                .any(|existing| existing == symbol)
+            {
+                dirty_symbols_to_rebuild.push(symbol.to_string());
+            }
+        }
         let active_symbols = strategy_config
             .active_symbols()
             .into_iter()
@@ -1512,23 +2042,31 @@ impl DirectWebsocketMarketData {
             .iter()
             .map(|exchange| gateway_exchange_id(exchange))
             .collect::<BTreeSet<_>>();
+        let mut has_relevant_tops = false;
         let mut display_tops = Vec::new();
         let mut fresh_tops = Vec::new();
         let mut market_rows = Vec::new();
-        let mut route_health = self.route_health.clone();
+        let mut route_health = if build_display_rows {
+            state.route_health.clone()
+        } else {
+            Vec::new()
+        };
 
-        for top in self.tops.values() {
+        for top in state.tops.values() {
             if !required_exchange_set.contains(top.exchange.as_str()) {
                 continue;
             }
             if !active_symbols.contains(&top.canonical_symbol.as_pair()) {
                 continue;
             }
-            market_rows.push(market_snapshot_row(top, now));
-            display_tops.push(top.clone());
+            has_relevant_tops = true;
+            if build_display_rows {
+                market_rows.push(market_snapshot_row(top, now));
+                display_tops.push(top.clone());
+            }
             if top.is_fresh(now, strategy_config.dual_taker.orderbook_stale_ms) {
                 fresh_tops.push(top.clone());
-            } else {
+            } else if build_display_rows {
                 route_health.push(json!({
                     "route_id": format!("direct_ws:{}:{}:book", top.exchange, top.canonical_symbol.as_pair()),
                     "exchange": top.exchange.as_str(),
@@ -1541,86 +2079,87 @@ impl DirectWebsocketMarketData {
             }
         }
 
-        route_health.extend(direct_ws_route_health_rows(
-            required_exchanges,
-            &self.subscribed_symbols,
-            &self.tops,
-            &self.connected,
-            now,
-            strategy_config.dual_taker.orderbook_stale_ms,
-        ));
-        route_health.extend(direct_ws_unsupported_route_health_rows(
-            required_exchanges,
-            &self.unsupported_symbols,
-            now,
-        ));
-
-        let audit_report = evaluate_dual_taker_open_opportunities_with_audit(
-            &fresh_tops,
-            precision_registry,
-            fee_model,
-            &strategy_config.dual_taker,
-            None,
-            now,
-        );
-        let open_decision_audits = audit_report
-            .audits
-            .iter()
-            .map(open_decision_audit_row)
-            .collect::<Vec<_>>();
-        let evaluated_opportunities = audit_report.opportunities;
-        let mut typed_opportunities = Vec::new();
-        for opportunity in evaluated_opportunities {
-            if let Some((exchange, symbol, reason)) =
-                opportunity_disabled_exchange_symbol(&opportunity, disabled_exchange_symbols)
-            {
-                route_health.push(json!({
-                    "route_id": format!("disabled_exchange_symbol:{}:{}:{}", exchange, symbol, opportunity.opportunity_id),
-                    "exchange": exchange,
-                    "symbol": symbol,
-                    "component": "live_runner_route_filter",
-                    "status": "disabled",
-                    "reason": reason,
-                    "observed_at": now,
-                }));
-                continue;
-            }
-            if let Some((exchange, reason)) =
-                opportunity_disabled_open_exchange(&opportunity, disabled_open_exchanges)
-            {
-                route_health.push(json!({
-                    "route_id": format!("disabled_open_exchange:{}:{}", exchange, opportunity.opportunity_id),
-                    "exchange": exchange,
-                    "symbol": opportunity.canonical_symbol.as_pair(),
-                    "component": "live_runner_route_filter",
-                    "status": "disabled",
-                    "reason": reason,
-                    "observed_at": now,
-                }));
-                continue;
-            }
-            typed_opportunities.push(opportunity);
+        if build_display_rows {
+            route_health.extend(direct_ws_route_health_rows(
+                required_exchanges,
+                &state.subscribed_symbols,
+                &state.tops,
+                &state.connected,
+                now,
+                strategy_config.dual_taker.orderbook_stale_ms,
+            ));
+            route_health.extend(direct_ws_unsupported_route_health_rows(
+                required_exchanges,
+                &state.unsupported_symbols,
+                now,
+            ));
         }
-        retain_best_opportunity_per_symbol(&mut typed_opportunities);
-        let slippage_capture_opportunities = evaluate_live_slippage_capture_opportunities(
+        drop(state);
+
+        self.opportunity_cache
+            .retain(|_, entry| entry.valid_until > now);
+        let rebuild_symbols = if rebuild_all_symbols {
+            active_symbols.iter().cloned().collect::<Vec<_>>()
+        } else {
+            dirty_symbols_to_rebuild
+                .into_iter()
+                .filter(|symbol| active_symbols.contains(symbol))
+                .collect::<Vec<_>>()
+        };
+        let mut fresh_tops_by_symbol = BTreeMap::<String, Vec<OrderBookTop>>::new();
+        for top in &fresh_tops {
+            fresh_tops_by_symbol
+                .entry(top.canonical_symbol.as_pair())
+                .or_default()
+                .push(top.clone());
+        }
+        let mut open_decision_audits = Vec::new();
+        let evaluation_results = evaluate_symbol_rebuilds(
+            self.evaluator_workers,
+            rebuild_symbols,
+            fresh_tops_by_symbol,
             strategy_config,
             precision_registry,
             fee_model,
-            &fresh_tops,
-            now,
-            None,
-        );
-        let opportunities = display_opportunity_rows(
-            strategy_config,
-            fee_model,
-            precision_registry,
-            &display_tops,
-            &typed_opportunities,
             disabled_exchange_symbols,
             disabled_open_exchanges,
+            build_display_rows,
             now,
-        );
-        let opportunities =
+        )
+        .await?;
+        for result in evaluation_results {
+            route_health.extend(result.route_health_rows);
+            if build_display_rows {
+                open_decision_audits.extend(result.audit_rows);
+            }
+            if let Some(cache_entry) = result.cache_entry {
+                self.opportunity_cache.insert(result.symbol, cache_entry);
+            } else {
+                self.opportunity_cache.remove(&result.symbol);
+            }
+        }
+        let mut typed_opportunities = self
+            .opportunity_cache
+            .values()
+            .flat_map(|entry| entry.typed_opportunities.iter().cloned())
+            .collect::<Vec<_>>();
+        retain_best_opportunity_per_symbol(&mut typed_opportunities);
+        let slippage_capture_opportunities = self
+            .opportunity_cache
+            .values()
+            .flat_map(|entry| entry.slippage_capture_opportunities.iter().cloned())
+            .collect::<Vec<_>>();
+        let opportunities = if build_display_rows {
+            let opportunities = display_opportunity_rows(
+                strategy_config,
+                fee_model,
+                precision_registry,
+                &display_tops,
+                &typed_opportunities,
+                disabled_exchange_symbols,
+                disabled_open_exchanges,
+                now,
+            );
             if strategy_config.execution_module == CrossArbExecutionModule::SlippageCapture {
                 display_slippage_capture_opportunity_rows(
                     strategy_config,
@@ -1629,10 +2168,13 @@ impl DirectWebsocketMarketData {
                 )
             } else {
                 opportunities
-            };
+            }
+        } else {
+            Vec::new()
+        };
 
         Ok(LiveDashboardData {
-            market_data_provider_connected: !display_tops.is_empty(),
+            market_data_provider_connected: has_relevant_tops,
             market_snapshots: market_rows,
             opportunities,
             route_health,
@@ -1653,37 +2195,303 @@ impl DirectWebsocketMarketData {
     async fn next_trigger(
         &mut self,
         dashboard_tick: &mut tokio::time::Interval,
+        stale_sweep_tick: &mut tokio::time::Interval,
     ) -> MarketDataTrigger {
-        loop {
-            tokio::select! {
-                event = self.rx.recv() => {
-                    if let Some(event) = event {
-                        let should_evaluate = self.apply_event(event) | self.drain_ready_events();
-                        if should_evaluate {
-                            return MarketDataTrigger::BookEvent;
-                        }
-                        continue;
-                    }
-                    dashboard_tick.tick().await;
-                    return MarketDataTrigger::DashboardTick;
+        tokio::select! {
+            event = self.trigger_rx.recv() => {
+                if let Some(trigger) = event {
+                    return trigger;
                 }
-                _ = dashboard_tick.tick() => {
-                    self.drain_ready_events();
-                    return MarketDataTrigger::DashboardTick;
-                }
+                dashboard_tick.tick().await;
+                MarketDataTrigger::DashboardTick
+            }
+            _ = dashboard_tick.tick() => {
+                MarketDataTrigger::DashboardTick
+            }
+            _ = stale_sweep_tick.tick() => {
+                MarketDataTrigger::StaleSweep
             }
         }
     }
 
-    fn drain_ready_events(&mut self) -> bool {
-        let mut should_evaluate = false;
-        while let Ok(event) = self.rx.try_recv() {
-            should_evaluate |= self.apply_event(event);
-        }
-        should_evaluate
+    fn state_handle(&self) -> Arc<Mutex<DirectWebsocketMarketDataState>> {
+        Arc::clone(&self.state)
+    }
+}
+
+async fn evaluate_symbol_rebuilds(
+    evaluator_workers: usize,
+    rebuild_symbols: Vec<String>,
+    mut fresh_tops_by_symbol: BTreeMap<String, Vec<OrderBookTop>>,
+    strategy_config: &CrossExchangeArbitrageConfig,
+    precision_registry: &PrecisionRegistry,
+    fee_model: &FeeModel,
+    disabled_exchange_symbols: &DisabledExchangeSymbols,
+    disabled_open_exchanges: &DisabledOpenExchanges,
+    collect_display_rows: bool,
+    now: DateTime<Utc>,
+) -> Result<Vec<SymbolEvaluationResult>> {
+    if rebuild_symbols.is_empty() {
+        return Ok(Vec::new());
+    }
+    let workers = evaluator_workers.max(1).min(rebuild_symbols.len());
+    if workers == 1 {
+        let mut results = rebuild_symbols
+            .into_iter()
+            .map(|symbol| {
+                let symbol_tops = fresh_tops_by_symbol.remove(&symbol).unwrap_or_default();
+                evaluate_symbol_rebuild(
+                    symbol,
+                    symbol_tops,
+                    strategy_config,
+                    precision_registry,
+                    fee_model,
+                    disabled_exchange_symbols,
+                    disabled_open_exchanges,
+                    collect_display_rows,
+                    now,
+                )
+            })
+            .collect::<Vec<_>>();
+        results.sort_by(|left, right| left.symbol.cmp(&right.symbol));
+        return Ok(results);
     }
 
-    fn apply_event(&mut self, event: DirectWsEvent) -> bool {
+    let strategy_config = Arc::new(strategy_config.clone());
+    let precision_registry = Arc::new(precision_registry.clone());
+    let fee_model = Arc::new(fee_model.clone());
+    let disabled_exchange_symbols = Arc::new(disabled_exchange_symbols.clone());
+    let disabled_open_exchanges = Arc::new(disabled_open_exchanges.clone());
+    let mut pending = rebuild_symbols.into_iter().collect::<VecDeque<_>>();
+    let mut join_set = JoinSet::new();
+
+    for _ in 0..workers {
+        if let Some(symbol) = pending.pop_front() {
+            let symbol_tops = fresh_tops_by_symbol.remove(&symbol).unwrap_or_default();
+            spawn_symbol_rebuild(
+                &mut join_set,
+                symbol,
+                symbol_tops,
+                Arc::clone(&strategy_config),
+                Arc::clone(&precision_registry),
+                Arc::clone(&fee_model),
+                Arc::clone(&disabled_exchange_symbols),
+                Arc::clone(&disabled_open_exchanges),
+                collect_display_rows,
+                now,
+            );
+        }
+    }
+
+    let mut results = Vec::new();
+    while let Some(joined) = join_set.join_next().await {
+        results.push(joined.context("symbol evaluator worker failed")?);
+        if let Some(symbol) = pending.pop_front() {
+            let symbol_tops = fresh_tops_by_symbol.remove(&symbol).unwrap_or_default();
+            spawn_symbol_rebuild(
+                &mut join_set,
+                symbol,
+                symbol_tops,
+                Arc::clone(&strategy_config),
+                Arc::clone(&precision_registry),
+                Arc::clone(&fee_model),
+                Arc::clone(&disabled_exchange_symbols),
+                Arc::clone(&disabled_open_exchanges),
+                collect_display_rows,
+                now,
+            );
+        }
+    }
+    results.sort_by(|left, right| left.symbol.cmp(&right.symbol));
+    Ok(results)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_symbol_rebuild(
+    join_set: &mut JoinSet<SymbolEvaluationResult>,
+    symbol: String,
+    symbol_tops: Vec<OrderBookTop>,
+    strategy_config: Arc<CrossExchangeArbitrageConfig>,
+    precision_registry: Arc<PrecisionRegistry>,
+    fee_model: Arc<FeeModel>,
+    disabled_exchange_symbols: Arc<DisabledExchangeSymbols>,
+    disabled_open_exchanges: Arc<DisabledOpenExchanges>,
+    collect_display_rows: bool,
+    now: DateTime<Utc>,
+) {
+    join_set.spawn_blocking(move || {
+        evaluate_symbol_rebuild(
+            symbol,
+            symbol_tops,
+            &strategy_config,
+            &precision_registry,
+            &fee_model,
+            &disabled_exchange_symbols,
+            &disabled_open_exchanges,
+            collect_display_rows,
+            now,
+        )
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_symbol_rebuild(
+    symbol: String,
+    symbol_tops: Vec<OrderBookTop>,
+    strategy_config: &CrossExchangeArbitrageConfig,
+    precision_registry: &PrecisionRegistry,
+    fee_model: &FeeModel,
+    disabled_exchange_symbols: &DisabledExchangeSymbols,
+    disabled_open_exchanges: &DisabledOpenExchanges,
+    collect_display_rows: bool,
+    now: DateTime<Utc>,
+) -> SymbolEvaluationResult {
+    let mut route_health_rows = Vec::new();
+    let (cache_entry, audit_rows) = evaluate_cached_symbol_opportunities(
+        strategy_config,
+        precision_registry,
+        fee_model,
+        &symbol,
+        &symbol_tops,
+        disabled_exchange_symbols,
+        disabled_open_exchanges,
+        collect_display_rows,
+        &mut route_health_rows,
+        now,
+    );
+    SymbolEvaluationResult {
+        symbol,
+        cache_entry,
+        audit_rows,
+        route_health_rows,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_cached_symbol_opportunities(
+    strategy_config: &CrossExchangeArbitrageConfig,
+    precision_registry: &PrecisionRegistry,
+    fee_model: &FeeModel,
+    symbol: &str,
+    symbol_tops: &[OrderBookTop],
+    disabled_exchange_symbols: &DisabledExchangeSymbols,
+    disabled_open_exchanges: &DisabledOpenExchanges,
+    collect_display_rows: bool,
+    route_health: &mut Vec<Value>,
+    now: DateTime<Utc>,
+) -> (Option<CachedSymbolOpportunities>, Vec<Value>) {
+    if symbol_tops.len() < 2 {
+        return (None, Vec::new());
+    }
+
+    let audit_report = evaluate_dual_taker_open_opportunities_with_audit(
+        symbol_tops,
+        precision_registry,
+        fee_model,
+        &strategy_config.dual_taker,
+        None,
+        now,
+    );
+    let open_decision_audits = if collect_display_rows {
+        audit_report
+            .audits
+            .iter()
+            .map(open_decision_audit_row)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let mut typed_opportunities = Vec::new();
+    for opportunity in audit_report.opportunities {
+        if let Some((exchange, symbol, reason)) =
+            opportunity_disabled_exchange_symbol(&opportunity, disabled_exchange_symbols)
+        {
+            if collect_display_rows {
+                route_health.push(json!({
+                    "route_id": format!("disabled_exchange_symbol:{}:{}:{}", exchange, symbol, opportunity.opportunity_id),
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "component": "live_runner_route_filter",
+                    "status": "disabled",
+                    "reason": reason,
+                    "observed_at": now,
+                }));
+            }
+            continue;
+        }
+        if let Some((exchange, reason)) =
+            opportunity_disabled_open_exchange(&opportunity, disabled_open_exchanges)
+        {
+            if collect_display_rows {
+                route_health.push(json!({
+                    "route_id": format!("disabled_open_exchange:{}:{}", exchange, opportunity.opportunity_id),
+                    "exchange": exchange,
+                    "symbol": opportunity.canonical_symbol.as_pair(),
+                    "component": "live_runner_route_filter",
+                    "status": "disabled",
+                    "reason": reason,
+                    "observed_at": now,
+                }));
+            }
+            continue;
+        }
+        typed_opportunities.push(opportunity);
+    }
+    retain_best_opportunity_per_symbol(&mut typed_opportunities);
+
+    let slippage_capture_opportunities = evaluate_live_slippage_capture_opportunities(
+        strategy_config,
+        precision_registry,
+        fee_model,
+        symbol_tops,
+        now,
+        None,
+    );
+    if typed_opportunities.is_empty() && slippage_capture_opportunities.is_empty() {
+        return (None, open_decision_audits);
+    }
+
+    let stale_ms = opportunity_cache_stale_ms(strategy_config);
+    let valid_until = symbol_tops
+        .iter()
+        .map(|top| top.received_at + ChronoDuration::milliseconds(stale_ms as i64))
+        .min()
+        .unwrap_or(now);
+    if valid_until <= now {
+        return (None, open_decision_audits);
+    }
+
+    tracing::trace!(
+        target: "rustcta::cross_arb_live_runner",
+        symbol = %symbol,
+        dual_taker_opportunities = typed_opportunities.len(),
+        slippage_capture_opportunities = slippage_capture_opportunities.len(),
+        valid_until = %valid_until,
+        "updated per-symbol opportunity cache"
+    );
+
+    (
+        Some(CachedSymbolOpportunities {
+            valid_until,
+            typed_opportunities,
+            slippage_capture_opportunities,
+        }),
+        open_decision_audits,
+    )
+}
+
+fn opportunity_cache_stale_ms(strategy_config: &CrossExchangeArbitrageConfig) -> u64 {
+    let dual_stale = strategy_config.dual_taker.orderbook_stale_ms;
+    if strategy_config.execution_module == CrossArbExecutionModule::SlippageCapture {
+        dual_stale.min(strategy_config.slippage_capture.orderbook_stale_ms)
+    } else {
+        dual_stale
+    }
+}
+
+impl DirectWebsocketMarketDataState {
+    fn apply_event(&mut self, event: DirectWsEvent) -> Option<String> {
         match event {
             DirectWsEvent::Connected {
                 exchange,
@@ -1695,7 +2503,7 @@ impl DirectWebsocketMarketData {
                     (gateway_exchange_id(&exchange), connection_index),
                     (symbols, at),
                 );
-                false
+                None
             }
             DirectWsEvent::Top(top) => self.apply_top(top),
             DirectWsEvent::RouteHealth(row) => {
@@ -1704,12 +2512,12 @@ impl DirectWebsocketMarketData {
                     let overflow = self.route_health.len() - 500;
                     self.route_health.drain(0..overflow);
                 }
-                false
+                None
             }
         }
     }
 
-    fn apply_top(&mut self, top: OrderBookTop) -> bool {
+    fn apply_top(&mut self, top: OrderBookTop) -> Option<String> {
         let key = (
             top.exchange.as_str().to_string(),
             top.canonical_symbol.as_pair(),
@@ -1717,13 +2525,35 @@ impl DirectWebsocketMarketData {
         let should_evaluate = self
             .tops
             .get(&key)
-            .map(|previous| top_of_book_improved(previous, &top))
+            .map(|previous| top_of_book_changed(previous, &top))
             .unwrap_or(true);
+        let symbol = top.canonical_symbol.as_pair();
         self.tops.insert(key, top);
-        should_evaluate
+        if should_evaluate {
+            self.dirty_symbols.insert(symbol.clone());
+            Some(symbol)
+        } else {
+            None
+        }
     }
 }
 
+fn spawn_direct_ws_event_collector(
+    mut rx: mpsc::Receiver<DirectWsEvent>,
+    state: Arc<Mutex<DirectWebsocketMarketDataState>>,
+    trigger_tx: mpsc::Sender<MarketDataTrigger>,
+) {
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let dirty_symbol = state.lock().await.apply_event(event);
+            if let Some(symbol) = dirty_symbol {
+                let _ = trigger_tx.try_send(MarketDataTrigger::BookEvent { symbol });
+            }
+        }
+    });
+}
+
+#[cfg(test)]
 fn top_of_book_improved(previous: &OrderBookTop, current: &OrderBookTop) -> bool {
     const EPSILON: f64 = 1e-12;
     current.best_bid_price > previous.best_bid_price + EPSILON
@@ -1732,6 +2562,13 @@ fn top_of_book_improved(previous: &OrderBookTop, current: &OrderBookTop) -> bool
         || current.best_ask_price + EPSILON < previous.best_ask_price
         || (prices_equal(current.best_ask_price, previous.best_ask_price)
             && current.best_ask_quantity > previous.best_ask_quantity + EPSILON)
+}
+
+fn top_of_book_changed(previous: &OrderBookTop, current: &OrderBookTop) -> bool {
+    !prices_equal(current.best_bid_price, previous.best_bid_price)
+        || !prices_equal(current.best_bid_quantity, previous.best_bid_quantity)
+        || !prices_equal(current.best_ask_price, previous.best_ask_price)
+        || !prices_equal(current.best_ask_quantity, previous.best_ask_quantity)
 }
 
 fn prices_equal(left: f64, right: f64) -> bool {
@@ -1774,7 +2611,13 @@ fn build_direct_ws_connections_for_exchange_symbols(
             "binance" => LIVE_WS_BINANCE_CHUNK_SIZE,
             "bitget" => LIVE_WS_BITGET_CHUNK_SIZE,
             "gate" => LIVE_WS_GATE_CHUNK_SIZE,
-            other => bail!("direct websocket source supports binance, bitget, gateio; got {other}"),
+            "aster" => LIVE_WS_ASTER_CHUNK_SIZE,
+            "mexc" => LIVE_WS_MEXC_CHUNK_SIZE,
+            "kucoinfutures" => LIVE_WS_KUCOINFUTURES_CHUNK_SIZE,
+            "bybit" => LIVE_WS_BYBIT_CHUNK_SIZE,
+            other => bail!(
+                "direct websocket source supports binance, bitget, gateio, aster, mexc, kucoinfutures, bybit; got {other}"
+            ),
         };
         for chunk in symbols.chunks(chunk_size.max(1)) {
             if chunk.is_empty() {
@@ -1784,6 +2627,10 @@ fn build_direct_ws_connections_for_exchange_symbols(
                 "binance" => direct_ws_binance_connection(chunk),
                 "bitget" => direct_ws_bitget_connection(chunk),
                 "gate" => direct_ws_gate_connection(chunk),
+                "aster" => direct_ws_aster_connection(chunk),
+                "mexc" => direct_ws_mexc_connection(chunk),
+                "kucoinfutures" => direct_ws_kucoinfutures_connection(chunk),
+                "bybit" => direct_ws_bybit_connection(chunk),
                 _ => unreachable!(),
             });
         }
@@ -1850,6 +2697,87 @@ fn direct_ws_gate_connection(symbols: &[String]) -> DirectWsConnection {
     }
 }
 
+fn direct_ws_aster_connection(symbols: &[String]) -> DirectWsConnection {
+    let streams = symbols
+        .iter()
+        .map(|symbol| {
+            format!(
+                "{}@depth5@100ms",
+                compact_ws_symbol(symbol).to_ascii_lowercase()
+            )
+        })
+        .collect::<Vec<_>>();
+    DirectWsConnection {
+        exchange: "aster".to_string(),
+        url: "wss://fstream.asterdex.com/ws".to_string(),
+        subscribe_messages: vec![json!({
+            "method": "SUBSCRIBE",
+            "params": streams,
+            "id": 1,
+        })
+        .to_string()],
+        symbols: symbols.to_vec(),
+    }
+}
+
+fn direct_ws_mexc_connection(symbols: &[String]) -> DirectWsConnection {
+    let subscribe_messages = symbols
+        .iter()
+        .map(|symbol| {
+            json!({
+                "method": "sub.depth.full",
+                "param": {
+                    "symbol": mexc_contract_ws_symbol(symbol),
+                    "limit": 20,
+                },
+            })
+            .to_string()
+        })
+        .collect::<Vec<_>>();
+    DirectWsConnection {
+        exchange: "mexc".to_string(),
+        url: "wss://contract.mexc.com/edge".to_string(),
+        subscribe_messages,
+        symbols: symbols.to_vec(),
+    }
+}
+
+fn direct_ws_kucoinfutures_connection(symbols: &[String]) -> DirectWsConnection {
+    let subscribe_messages = symbols
+        .iter()
+        .enumerate()
+        .map(|(index, symbol)| {
+            json!({
+                "id": format!("direct-ws-{index}"),
+                "type": "subscribe",
+                "topic": format!("/contractMarket/level2Depth5:{}", kucoinfutures_ws_symbol(symbol)),
+                "privateChannel": false,
+                "response": true,
+            })
+            .to_string()
+        })
+        .collect::<Vec<_>>();
+    DirectWsConnection {
+        exchange: "kucoinfutures".to_string(),
+        url: "wss://ws-api-futures.kucoin.com/endpoint".to_string(),
+        subscribe_messages,
+        symbols: symbols.to_vec(),
+    }
+}
+
+fn direct_ws_bybit_connection(symbols: &[String]) -> DirectWsConnection {
+    let args = symbols
+        .iter()
+        .map(|symbol| format!("orderbook.1.{}", compact_ws_symbol(symbol)))
+        .collect::<Vec<_>>();
+    DirectWsConnection {
+        exchange: "bybit".to_string(),
+        url: "wss://stream.bybit.com/v5/public/linear".to_string(),
+        subscribe_messages: vec![json!({ "op": "subscribe", "args": args }).to_string()],
+        symbols: symbols.to_vec(),
+    }
+}
+
 async fn run_direct_ws_connection_task(
     connection_index: usize,
     connection: DirectWsConnection,
@@ -1880,11 +2808,11 @@ async fn run_direct_ws_connection_once(
     tx: &mpsc::Sender<DirectWsEvent>,
 ) -> Result<()> {
     let timeout_duration = Duration::from_millis(LIVE_WS_CONNECT_TIMEOUT_MS);
-    let (mut ws, _) =
-        tokio::time::timeout(timeout_duration, connect_async(connection.url.as_str()))
-            .await
-            .context("connect timed out")?
-            .with_context(|| format!("connect {}", connection.url))?;
+    let connect_url = direct_ws_connect_url(connection).await?;
+    let (mut ws, _) = tokio::time::timeout(timeout_duration, connect_async(connect_url.as_str()))
+        .await
+        .context("connect timed out")?
+        .with_context(|| format!("connect {connect_url}"))?;
     tx.send(DirectWsEvent::Connected {
         exchange: connection.exchange.clone(),
         connection_index,
@@ -1946,40 +2874,147 @@ async fn run_direct_ws_connection_once(
     }
 }
 
+async fn direct_ws_connect_url(connection: &DirectWsConnection) -> Result<String> {
+    if connection.exchange == "kucoinfutures" {
+        kucoinfutures_public_ws_connect_url().await
+    } else {
+        Ok(connection.url.clone())
+    }
+}
+
+async fn kucoinfutures_public_ws_connect_url() -> Result<String> {
+    let response = reqwest::Client::new()
+        .post("https://api-futures.kucoin.com/api/v1/bullet-public")
+        .send()
+        .await
+        .context("request KuCoin Futures public websocket token")?;
+    let status = response.status();
+    let value = response
+        .json::<Value>()
+        .await
+        .context("decode KuCoin Futures public websocket token response")?;
+    anyhow::ensure!(
+        status.is_success(),
+        "KuCoin Futures public websocket token request failed: status={status} body={value}"
+    );
+    let data = value.get("data").unwrap_or(&value);
+    let token = data
+        .get("token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .context("KuCoin Futures public websocket token response missing data.token")?;
+    let endpoint = data
+        .get("instanceServers")
+        .and_then(Value::as_array)
+        .and_then(|servers| servers.first())
+        .and_then(|server| server.get("endpoint"))
+        .and_then(Value::as_str)
+        .filter(|endpoint| !endpoint.is_empty())
+        .unwrap_or("wss://ws-api-futures.kucoin.com/endpoint");
+    let separator = if endpoint.contains('?') { '&' } else { '?' };
+    Ok(format!(
+        "{endpoint}{separator}token={token}&connectId=direct-ws-{}",
+        Utc::now().timestamp_millis()
+    ))
+}
+
 fn parse_direct_ws_order_book_top(exchange: &str, text: &str) -> Option<OrderBookTop> {
-    let value = serde_json::from_str::<Value>(text).ok()?;
-    let symbol = direct_ws_message_symbol(exchange, &value)?;
-    let (book, exchange_timestamp) = match exchange {
-        "binance" => {
-            let data = value.get("data").unwrap_or(&value);
-            (
-                data,
-                millis_timestamp(data.get("E").or_else(|| data.get("T"))),
-            )
+    match exchange {
+        "binance" => parse_binance_order_book_top(text),
+        "bitget" => parse_bitget_order_book_top(text),
+        "gate" | "gateio" => parse_gate_order_book_top(text),
+        "aster" => parse_aster_order_book_top(text),
+        "mexc" => parse_mexc_order_book_top(text),
+        "kucoinfutures" => parse_kucoinfutures_order_book_top(text),
+        "bybit" => parse_bybit_order_book_top(text),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WsNumber {
+    Number(f64),
+    Text(String),
+}
+
+impl WsNumber {
+    fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Number(value) => Some(*value),
+            Self::Text(value) => value.trim().parse::<f64>().ok(),
         }
-        "bitget" => {
-            let data = value
-                .get("data")
-                .and_then(Value::as_array)
-                .and_then(|items| items.first())?;
-            (data, millis_timestamp(data.get("ts")))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WsMillis {
+    Integer(i64),
+    Unsigned(u64),
+    Number(f64),
+    Text(String),
+}
+
+impl WsMillis {
+    fn as_datetime(&self) -> Option<DateTime<Utc>> {
+        let millis = match self {
+            Self::Integer(value) => *value,
+            Self::Unsigned(value) => (*value).try_into().ok()?,
+            Self::Number(value) => *value as i64,
+            Self::Text(value) => value.trim().parse::<i64>().ok()?,
+        };
+        DateTime::<Utc>::from_timestamp_millis(millis)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WsBookLevel {
+    Array(Vec<WsNumber>),
+    Object(WsObjectBookLevel),
+}
+
+impl WsBookLevel {
+    fn price_quantity(&self) -> Option<(f64, f64)> {
+        match self {
+            Self::Array(values) => Some((values.first()?.as_f64()?, values.get(1)?.as_f64()?)),
+            Self::Object(level) => Some((level.price.as_f64()?, level.quantity.as_f64()?)),
         }
-        "gate" | "gateio" => {
-            let result = value.get("result")?;
-            (
-                result,
-                millis_timestamp(
-                    result
-                        .get("t")
-                        .or_else(|| result.get("time_ms"))
-                        .or_else(|| value.get("time_ms")),
-                ),
-            )
-        }
-        _ => return None,
-    };
-    let bid = first_book_level(book.get("b").or_else(|| book.get("bids"))?)?;
-    let ask = first_book_level(book.get("a").or_else(|| book.get("asks"))?)?;
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct WsObjectBookLevel {
+    #[serde(rename = "p", alias = "price", alias = "px")]
+    price: WsNumber,
+    #[serde(rename = "s", alias = "size", alias = "q", alias = "quantity")]
+    quantity: WsNumber,
+}
+
+fn first_typed_book_level(levels: &[WsBookLevel]) -> Option<(f64, f64)> {
+    levels.first()?.price_quantity()
+}
+
+fn first_nonzero_typed_book_level(levels: &[WsBookLevel]) -> Option<(f64, f64)> {
+    levels
+        .iter()
+        .filter_map(WsBookLevel::price_quantity)
+        .find(|(price, quantity)| *price > 0.0 && *quantity > 0.0)
+}
+
+fn typed_book_level_count(bids: &[WsBookLevel], asks: &[WsBookLevel]) -> usize {
+    bids.len().min(asks.len()).max(1)
+}
+
+fn order_book_top_from_parts(
+    exchange: &str,
+    symbol: &str,
+    bid: (f64, f64),
+    ask: (f64, f64),
+    levels: usize,
+    exchange_timestamp: Option<DateTime<Utc>>,
+) -> Option<OrderBookTop> {
     let (base, quote) = canonical_parts_from_exchange_symbol(&symbol)?;
     let now = Utc::now();
     Some(OrderBookTop {
@@ -1989,7 +3024,7 @@ fn parse_direct_ws_order_book_top(exchange: &str, text: &str) -> Option<OrderBoo
         best_bid_quantity: bid.1,
         best_ask_price: ask.0,
         best_ask_quantity: ask.1,
-        levels: book_level_count(book),
+        levels,
         exchange_timestamp,
         received_at: now,
         latency_ms: exchange_timestamp.and_then(|timestamp| {
@@ -2002,51 +3037,287 @@ fn parse_direct_ws_order_book_top(exchange: &str, text: &str) -> Option<OrderBoo
     .filter(|top| top.is_valid(1))
 }
 
-fn direct_ws_message_symbol(exchange: &str, value: &Value) -> Option<String> {
-    match exchange {
-        "binance" => value
-            .get("data")
-            .and_then(|data| data.get("s"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                value
-                    .get("stream")
-                    .and_then(Value::as_str)
-                    .and_then(|stream| stream.split('@').next())
-            })
-            .map(ToString::to_string),
-        "bitget" => value
-            .get("arg")
-            .and_then(|arg| arg.get("instId"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                value
-                    .get("data")
-                    .and_then(Value::as_array)
-                    .and_then(|items| items.first())
-                    .and_then(|item| item.get("instId"))
-                    .and_then(Value::as_str)
-            })
-            .map(ToString::to_string),
-        "gate" | "gateio" => value
-            .get("result")
-            .and_then(|result| {
-                result
-                    .get("contract")
-                    .or_else(|| result.get("s"))
-                    .or_else(|| result.get("currency_pair"))
-            })
-            .and_then(Value::as_str)
-            .or_else(|| {
-                value
-                    .get("payload")
-                    .and_then(Value::as_array)
-                    .and_then(|items| items.first())
-                    .and_then(Value::as_str)
-            })
-            .map(ToString::to_string),
-        _ => None,
-    }
+#[derive(Debug, Default, Deserialize)]
+struct BinanceDepthData {
+    #[serde(rename = "E")]
+    event_time: Option<WsMillis>,
+    #[serde(rename = "T")]
+    transaction_time: Option<WsMillis>,
+    #[serde(rename = "s")]
+    symbol: Option<String>,
+    #[serde(rename = "b", alias = "bids", default)]
+    bids: Vec<WsBookLevel>,
+    #[serde(rename = "a", alias = "asks", default)]
+    asks: Vec<WsBookLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BinanceDepthMessage {
+    stream: Option<String>,
+    data: Option<BinanceDepthData>,
+    #[serde(flatten)]
+    direct: BinanceDepthData,
+}
+
+fn parse_binance_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<BinanceDepthMessage>(text).ok()?;
+    let data = message.data.as_ref().unwrap_or(&message.direct);
+    let symbol = data.symbol.as_deref().or_else(|| {
+        message
+            .stream
+            .as_deref()
+            .and_then(|stream| stream.split('@').next())
+    })?;
+    let bid = first_typed_book_level(&data.bids)?;
+    let ask = first_typed_book_level(&data.asks)?;
+    let exchange_timestamp = data
+        .event_time
+        .as_ref()
+        .or(data.transaction_time.as_ref())
+        .and_then(WsMillis::as_datetime);
+    order_book_top_from_parts(
+        "binance",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&data.bids, &data.asks),
+        exchange_timestamp,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetBookArg {
+    #[serde(rename = "instId")]
+    inst_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetBookData {
+    #[serde(rename = "instId")]
+    inst_id: Option<String>,
+    ts: Option<WsMillis>,
+    #[serde(default)]
+    bids: Vec<WsBookLevel>,
+    #[serde(default)]
+    asks: Vec<WsBookLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetBookMessage {
+    arg: Option<BitgetBookArg>,
+    #[serde(default)]
+    data: Vec<BitgetBookData>,
+}
+
+fn parse_bitget_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<BitgetBookMessage>(text).ok()?;
+    let data = message.data.first()?;
+    let symbol = message
+        .arg
+        .as_ref()
+        .and_then(|arg| arg.inst_id.as_deref())
+        .or(data.inst_id.as_deref())?;
+    let bid = first_typed_book_level(&data.bids)?;
+    let ask = first_typed_book_level(&data.asks)?;
+    order_book_top_from_parts(
+        "bitget",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&data.bids, &data.asks),
+        data.ts.as_ref().and_then(WsMillis::as_datetime),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct GateBookResult {
+    #[serde(rename = "contract", alias = "s", alias = "currency_pair")]
+    symbol: Option<String>,
+    #[serde(rename = "t", alias = "time_ms")]
+    timestamp: Option<WsMillis>,
+    #[serde(rename = "b", alias = "bids", default)]
+    bids: Vec<WsBookLevel>,
+    #[serde(rename = "a", alias = "asks", default)]
+    asks: Vec<WsBookLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GateBookMessage {
+    result: Option<GateBookResult>,
+    time_ms: Option<WsMillis>,
+    payload: Option<Vec<String>>,
+}
+
+fn parse_gate_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<GateBookMessage>(text).ok()?;
+    let result = message.result.as_ref()?;
+    let symbol = result
+        .symbol
+        .as_deref()
+        .or_else(|| message.payload.as_ref()?.first().map(String::as_str))?;
+    let bid = first_typed_book_level(&result.bids)?;
+    let ask = first_typed_book_level(&result.asks)?;
+    let exchange_timestamp = result
+        .timestamp
+        .as_ref()
+        .or(message.time_ms.as_ref())
+        .and_then(WsMillis::as_datetime);
+    order_book_top_from_parts(
+        "gateio",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&result.bids, &result.asks),
+        exchange_timestamp,
+    )
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AsterDepthMessage {
+    #[serde(rename = "E")]
+    event_time: Option<WsMillis>,
+    #[serde(rename = "T")]
+    transaction_time: Option<WsMillis>,
+    #[serde(rename = "s")]
+    symbol: Option<String>,
+    #[serde(rename = "b", alias = "bids", default)]
+    bids: Vec<WsBookLevel>,
+    #[serde(rename = "a", alias = "asks", default)]
+    asks: Vec<WsBookLevel>,
+}
+
+fn parse_aster_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<AsterDepthMessage>(text).ok()?;
+    let symbol = message.symbol.as_deref()?;
+    let bid = first_typed_book_level(&message.bids)?;
+    let ask = first_typed_book_level(&message.asks)?;
+    let exchange_timestamp = message
+        .event_time
+        .as_ref()
+        .or(message.transaction_time.as_ref())
+        .and_then(WsMillis::as_datetime);
+    order_book_top_from_parts(
+        "aster",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&message.bids, &message.asks),
+        exchange_timestamp,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct MexcDepthData {
+    #[serde(default)]
+    bids: Vec<WsBookLevel>,
+    #[serde(default)]
+    asks: Vec<WsBookLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MexcDepthMessage {
+    symbol: Option<String>,
+    ts: Option<WsMillis>,
+    data: Option<MexcDepthData>,
+}
+
+fn parse_mexc_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<MexcDepthMessage>(text).ok()?;
+    let data = message.data.as_ref()?;
+    let symbol = message.symbol.as_deref()?;
+    let bid = first_nonzero_typed_book_level(&data.bids)?;
+    let ask = first_nonzero_typed_book_level(&data.asks)?;
+    order_book_top_from_parts(
+        "mexc",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&data.bids, &data.asks),
+        message.ts.as_ref().and_then(WsMillis::as_datetime),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct KuCoinFuturesDepthData {
+    #[serde(rename = "symbol")]
+    symbol: Option<String>,
+    #[serde(rename = "timestamp", alias = "time")]
+    timestamp: Option<WsMillis>,
+    #[serde(default)]
+    bids: Vec<WsBookLevel>,
+    #[serde(default)]
+    asks: Vec<WsBookLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KuCoinFuturesDepthMessage {
+    topic: Option<String>,
+    data: Option<KuCoinFuturesDepthData>,
+}
+
+fn parse_kucoinfutures_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<KuCoinFuturesDepthMessage>(text).ok()?;
+    let data = message.data.as_ref()?;
+    let symbol = data.symbol.as_deref().or_else(|| {
+        message
+            .topic
+            .as_deref()
+            .and_then(|topic| topic.rsplit_once(':').map(|(_, symbol)| symbol))
+    })?;
+    let bid = first_nonzero_typed_book_level(&data.bids)?;
+    let ask = first_nonzero_typed_book_level(&data.asks)?;
+    order_book_top_from_parts(
+        "kucoinfutures",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&data.bids, &data.asks),
+        data.timestamp.as_ref().and_then(WsMillis::as_datetime),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitBookData {
+    #[serde(rename = "s")]
+    symbol: Option<String>,
+    #[serde(default)]
+    b: Vec<WsBookLevel>,
+    #[serde(default)]
+    a: Vec<WsBookLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitBookMessage {
+    topic: Option<String>,
+    ts: Option<WsMillis>,
+    cts: Option<WsMillis>,
+    data: Option<BybitBookData>,
+}
+
+fn parse_bybit_order_book_top(text: &str) -> Option<OrderBookTop> {
+    let message = serde_json::from_str::<BybitBookMessage>(text).ok()?;
+    let data = message.data.as_ref()?;
+    let symbol = data.symbol.as_deref().or_else(|| {
+        message
+            .topic
+            .as_deref()
+            .and_then(|topic| topic.rsplit_once('.').map(|(_, symbol)| symbol))
+    })?;
+    let bid = first_nonzero_typed_book_level(&data.b)?;
+    let ask = first_nonzero_typed_book_level(&data.a)?;
+    let exchange_timestamp = message
+        .cts
+        .as_ref()
+        .or(message.ts.as_ref())
+        .and_then(WsMillis::as_datetime);
+    order_book_top_from_parts(
+        "bybit",
+        symbol,
+        bid,
+        ask,
+        typed_book_level_count(&data.b, &data.a),
+        exchange_timestamp,
+    )
 }
 
 fn fast_ws_message_symbol(exchange: &str, text: &str) -> Option<String> {
@@ -2058,45 +3329,17 @@ fn fast_ws_message_symbol(exchange: &str, text: &str) -> Option<String> {
         "gate" | "gateio" => {
             quoted_after(text, "\"contract\":\"").or_else(|| quoted_after(text, "\"payload\":[\""))
         }
+        "aster" => quoted_after(text, "\"s\":\""),
+        "mexc" => quoted_after(text, "\"symbol\":\""),
+        "kucoinfutures" => quoted_after(text, "\"topic\":\"")
+            .and_then(|topic| topic.rsplit_once(':').map(|(_, symbol)| symbol.to_string()))
+            .or_else(|| quoted_after(text, "\"symbol\":\"")),
+        "bybit" => quoted_after(text, "\"topic\":\"")
+            .and_then(|topic| topic.rsplit_once('.').map(|(_, symbol)| symbol.to_string()))
+            .or_else(|| quoted_after(text, "\"s\":\"")),
         _ => None,
     }?;
     Some(raw.replace('_', "").to_ascii_uppercase())
-}
-
-fn first_book_level(value: &Value) -> Option<(f64, f64)> {
-    let item = value.as_array()?.first()?;
-    if let Some(items) = item.as_array() {
-        return Some((number_at(items.first()?)?, number_at(items.get(1)?)?));
-    }
-    if let Some(object) = item.as_object() {
-        let price = object
-            .get("p")
-            .or_else(|| object.get("price"))
-            .or_else(|| object.get("px"))?;
-        let quantity = object
-            .get("s")
-            .or_else(|| object.get("size"))
-            .or_else(|| object.get("q"))
-            .or_else(|| object.get("quantity"))?;
-        return Some((number_at(price)?, number_at(quantity)?));
-    }
-    None
-}
-
-fn book_level_count(book: &Value) -> usize {
-    let bids = book
-        .get("b")
-        .or_else(|| book.get("bids"))
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or_default();
-    let asks = book
-        .get("a")
-        .or_else(|| book.get("asks"))
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or_default();
-    bids.min(asks).max(1)
 }
 
 fn market_snapshot_row(top: &OrderBookTop, now: DateTime<Utc>) -> Value {
@@ -2198,27 +3441,15 @@ fn direct_ws_unsupported_route_health_rows(
         .collect()
 }
 
-fn millis_timestamp(value: Option<&Value>) -> Option<DateTime<Utc>> {
-    let millis = value.and_then(|value| {
-        value
-            .as_i64()
-            .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
-    })?;
-    DateTime::<Utc>::from_timestamp_millis(millis)
-}
-
-fn number_at(value: &Value) -> Option<f64> {
-    value
-        .as_f64()
-        .or_else(|| value.as_str()?.trim().parse::<f64>().ok())
-}
-
 fn canonical_parts_from_exchange_symbol(symbol: &str) -> Option<(String, String)> {
     let compact = symbol.replace(['_', '-', '/'], "").to_ascii_uppercase();
-    let base = compact.strip_suffix("USDT")?;
+    let base = compact
+        .strip_suffix("USDTM")
+        .or_else(|| compact.strip_suffix("USDT"))?;
     if base.is_empty() {
         return None;
     }
+    let base = if base == "XBT" { "BTC" } else { base };
     Some((base.to_string(), "USDT".to_string()))
 }
 
@@ -2235,6 +3466,17 @@ fn compact_ws_symbol(symbol: &str) -> String {
 
 fn gate_ws_symbol(symbol: &str) -> String {
     symbol.replace('/', "_").to_ascii_uppercase()
+}
+
+fn mexc_contract_ws_symbol(symbol: &str) -> String {
+    symbol.replace('/', "_").to_ascii_uppercase()
+}
+
+fn kucoinfutures_ws_symbol(symbol: &str) -> String {
+    let compact = compact_ws_symbol(symbol);
+    let base = compact.strip_suffix("USDT").unwrap_or(compact.as_str());
+    let kucoin_base = if base == "BTC" { "XBT" } else { base };
+    format!("{kucoin_base}USDTM")
 }
 
 fn quoted_after(text: &str, needle: &str) -> Option<String> {
@@ -2457,6 +3699,7 @@ async fn emit_report(
     snapshot: Option<Value>,
     live_orders_enabled: bool,
     concrete_exchange_adapter_loaded: bool,
+    dashboard_output_config: DashboardOutputConfig,
 ) -> Result<()> {
     let report = LiveRunnerReport {
         generated_at: Utc::now(),
@@ -2476,14 +3719,15 @@ async fn emit_report(
         snapshot,
     };
     if let Some(path) = args.dashboard_snapshot_path.as_ref() {
-        let dashboard = legacy_dashboard_snapshot(
+        let mut dashboard = legacy_dashboard_snapshot(
             args,
             &report,
             strategy_config,
             dashboard_data,
             precision_registry,
         )?;
-        write_json_atomic(path, &dashboard)
+        apply_dashboard_output_limits(&mut dashboard, dashboard_output_config);
+        write_json_atomic(path, &dashboard, dashboard_output_config.pretty_json)
             .with_context(|| format!("write dashboard snapshot {}", path.display()))?;
     }
     tracing::debug!(
@@ -2513,6 +3757,56 @@ async fn emit_report(
         "cross-arb live runner report"
     );
     Ok(())
+}
+
+fn apply_dashboard_output_limits(snapshot: &mut Value, config: DashboardOutputConfig) {
+    truncate_array_at_path(snapshot, &["opportunities"], config.max_opportunity_rows);
+    truncate_array_at_path(
+        snapshot,
+        &["cross_arb_dashboard", "opportunities"],
+        config.max_opportunity_rows,
+    );
+    truncate_array_at_path(
+        snapshot,
+        &["cross_arb_dashboard", "arbitrage_opportunities"],
+        config.max_opportunity_rows,
+    );
+    truncate_array_at_path(
+        snapshot,
+        &["market_snapshots"],
+        config.max_market_snapshot_rows,
+    );
+    truncate_array_at_path(
+        snapshot,
+        &["cross_arb_dashboard", "market_snapshots"],
+        config.max_market_snapshot_rows,
+    );
+    truncate_array_at_path(snapshot, &["route_health"], config.max_route_health_rows);
+    truncate_array_at_path(
+        snapshot,
+        &["cross_arb_dashboard", "route_health"],
+        config.max_route_health_rows,
+    );
+}
+
+fn truncate_array_at_path(value: &mut Value, path: &[&str], limit: usize) {
+    let Some(target) = value_at_path_mut(value, path) else {
+        return;
+    };
+    let Some(items) = target.as_array_mut() else {
+        return;
+    };
+    if items.len() > limit {
+        items.truncate(limit);
+    }
+}
+
+fn value_at_path_mut<'a>(value: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
+    let mut current = value;
+    for segment in path {
+        current = current.get_mut(*segment)?;
+    }
+    Some(current)
 }
 
 fn legacy_dashboard_snapshot(
@@ -2645,6 +3939,9 @@ fn legacy_dashboard_snapshot(
                 "cancel_unfilled_maker": strategy_config.slippage_capture.cancel_unfilled_maker,
                 "hedge_taker_slippage_pct": strategy_config.slippage_capture.hedge_taker_slippage_pct,
                 "close_min_net_profit_pct": strategy_config.slippage_capture.close_min_net_profit_pct,
+                "risk_flatten_grace_secs": strategy_config.slippage_capture.risk_flatten_grace_secs,
+                "risk_flatten_close_min_net_profit_pct": strategy_config.slippage_capture.risk_flatten_close_min_net_profit_pct,
+                "risk_flatten_hedge_min_net_profit_pct": strategy_config.slippage_capture.risk_flatten_hedge_min_net_profit_pct,
                 "fee_model": "expected net profit subtracts maker+taker open and dual-taker close fees",
             },
             "execution": {
@@ -3227,6 +4524,17 @@ fn pending_manual_close_commands(
     args: &LiveRunnerArgs,
     state: &LiveExecutionState,
 ) -> Result<Vec<ManualCloseCommand>> {
+    Ok(all_manual_close_commands(args)?
+        .into_iter()
+        .filter(|command| {
+            !state
+                .processed_control_commands
+                .contains(&command.command_key)
+        })
+        .collect())
+}
+
+fn all_manual_close_commands(args: &LiveRunnerArgs) -> Result<Vec<ManualCloseCommand>> {
     let Some(path) = args.control_command_queue_path.as_ref() else {
         return Ok(Vec::new());
     };
@@ -3234,12 +4542,87 @@ fn pending_manual_close_commands(
     Ok(rows
         .iter()
         .filter_map(|row| manual_close_command_from_row(row, args))
+        .collect())
+}
+
+fn cached_pending_manual_close_commands(
+    args: &LiveRunnerArgs,
+    state: &mut LiveExecutionState,
+) -> Result<Vec<ManualCloseCommand>> {
+    if let Some(caches) = state.jsonl_runtime_caches.as_ref() {
+        if let Some(commands) = shared_pending_manual_close_commands(args, state, caches)? {
+            return Ok(commands);
+        }
+    }
+
+    let now = Instant::now();
+    let cache = &state.control_command_cache;
+    let cache_key_matches = cache.queue_path == args.control_command_queue_path;
+    let commands = if cache_key_matches
+        && cache.checked_at.is_some_and(|checked_at| {
+            now.duration_since(checked_at) < Duration::from_millis(CONTROL_COMMAND_CACHE_TTL_MS)
+        }) {
+        cache.commands.clone()
+    } else {
+        let commands = pending_manual_close_commands(args, state)?;
+        state.control_command_cache = ControlCommandCache {
+            checked_at: Some(now),
+            queue_path: args.control_command_queue_path.clone(),
+            commands: commands.clone(),
+        };
+        commands
+    };
+    Ok(commands
+        .into_iter()
         .filter(|command| {
             !state
                 .processed_control_commands
                 .contains(&command.command_key)
         })
         .collect())
+}
+
+fn shared_pending_manual_close_commands(
+    args: &LiveRunnerArgs,
+    state: &LiveExecutionState,
+    caches: &JsonlRuntimeCaches,
+) -> Result<Option<Vec<ManualCloseCommand>>> {
+    let snapshot = caches
+        .control_commands
+        .lock()
+        .map_err(|error| anyhow::anyhow!("control command cache poisoned: {error}"))?
+        .clone();
+    if snapshot.queue_path != args.control_command_queue_path || snapshot.checked_at.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(
+        snapshot
+            .commands
+            .into_iter()
+            .filter(|command| {
+                !state
+                    .processed_control_commands
+                    .contains(&command.command_key)
+            })
+            .collect(),
+    ))
+}
+
+fn refresh_control_command_shared_snapshot(
+    args: &LiveRunnerArgs,
+    caches: &JsonlRuntimeCaches,
+) -> Result<()> {
+    let commands = all_manual_close_commands(args)?;
+    let mut snapshot = caches
+        .control_commands
+        .lock()
+        .map_err(|error| anyhow::anyhow!("control command cache poisoned: {error}"))?;
+    *snapshot = ControlCommandSharedSnapshot {
+        queue_path: args.control_command_queue_path.clone(),
+        checked_at: Some(Instant::now()),
+        commands,
+    };
+    Ok(())
 }
 
 fn manual_close_bundle_keys_for_open_state(
@@ -3534,7 +4917,7 @@ fn optional_text_field(value: &Value, fields: &[&str]) -> Option<String> {
     text_field(value, fields).map(ToString::to_string)
 }
 
-fn write_json_atomic(path: &Path, value: &Value) -> Result<()> {
+fn write_json_atomic(path: &Path, value: &Value, pretty_json: bool) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
@@ -3546,8 +4929,13 @@ fn write_json_atomic(path: &Path, value: &Value) -> Result<()> {
     {
         let mut file =
             File::create(&tmp_path).with_context(|| format!("create {}", tmp_path.display()))?;
-        serde_json::to_writer_pretty(&mut file, value)
-            .with_context(|| format!("serialize {}", tmp_path.display()))?;
+        if pretty_json {
+            serde_json::to_writer_pretty(&mut file, value)
+                .with_context(|| format!("serialize {}", tmp_path.display()))?;
+        } else {
+            serde_json::to_writer(&mut file, value)
+                .with_context(|| format!("serialize {}", tmp_path.display()))?;
+        }
         writeln!(file)?;
     }
     std::fs::rename(&tmp_path, path)
@@ -4690,6 +6078,16 @@ fn slippage_capture_opportunity_row(opportunity: &SlippageCaptureOpenOpportunity
 }
 
 fn fee_model_from_config(config: &Value) -> FeeModel {
+    let (default, per_exchange) = fee_rates_from_config(config);
+    FeeModel::new(default, per_exchange)
+}
+
+fn fee_rates_from_config(
+    config: &Value,
+) -> (
+    ExchangeFeeRates,
+    HashMap<StrategyExchangeId, ExchangeFeeRates>,
+) {
     let default = ExchangeFeeRates {
         maker: f64_at_path(config, &["fees", "default_maker_fee_rate"]).unwrap_or(0.0002),
         taker: f64_at_path(config, &["fees", "default_taker_fee_rate"]).unwrap_or(0.0006),
@@ -4715,7 +6113,7 @@ fn fee_model_from_config(config: &Value) -> FeeModel {
             );
         }
     }
-    FeeModel::new(default, per_exchange)
+    (default, per_exchange)
 }
 
 async fn load_precision_registry(
@@ -4985,6 +6383,32 @@ fn text_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
         .filter(|text| !text.is_empty())
 }
 
+fn strings_at_path(value: &Value, path: &[&str]) -> Vec<String> {
+    let mut current = value;
+    for segment in path {
+        let Some(next) = current.get(*segment) else {
+            return Vec::new();
+        };
+        current = next;
+    }
+    match current {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| item.as_str())
+            .flat_map(split_config_string_list)
+            .collect(),
+        Value::String(text) => split_config_string_list(text).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn split_config_string_list(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+}
+
 fn value_as_f64(value: &Value) -> Option<f64> {
     value
         .as_f64()
@@ -5044,6 +6468,7 @@ async fn run_live_execution_cycle(
     target_market_type: GatewayMarketType,
     fee_model: &FeeModel,
     precision_registry: &PrecisionRegistry,
+    latest_direct_books: Option<DirectBookStateHandle>,
     live_orders_enabled: bool,
     allow_new_entries: bool,
     new_entries_block_reason: Option<&'static str>,
@@ -5075,8 +6500,12 @@ async fn run_live_execution_cycle(
         push_new_entries_control_event(state, reason);
     }
 
-    let loss_guard_triggered_before_close =
-        profit_history_loss_guard_triggered(args, strategy_config.max_consecutive_losses)?;
+    let loss_guard_triggered_before_close = cached_profit_history_loss_guard_triggered(
+        args,
+        strategy_config.max_consecutive_losses,
+        state,
+        false,
+    )?;
     if loss_guard_triggered_before_close {
         push_loss_guard_event(state);
         dashboard.runtime_new_entries_block_reason =
@@ -5104,7 +6533,7 @@ async fn run_live_execution_cycle(
         return Ok(());
     }
 
-    let manual_close_commands = pending_manual_close_commands(args, state)?;
+    let manual_close_commands = cached_pending_manual_close_commands(args, state)?;
     let manual_close_bundle_keys =
         manual_close_bundle_keys_for_open_state(state, &manual_close_commands);
     for command in &manual_close_commands {
@@ -5122,6 +6551,23 @@ async fn run_live_execution_cycle(
         }
     }
 
+    let pending_updates_may_have_updated_profit_history = process_pending_slippage_risk_flattens(
+        gateway,
+        ctx,
+        args,
+        strategy_config,
+        target_market_type,
+        fee_model,
+        precision_registry,
+        latest_direct_books.clone(),
+        confirmation,
+        sinks,
+        state,
+        dashboard,
+    )
+    .await?;
+
+    let open_bundle_count_before_close = state.open_bundles.len();
     let processed_close_commands = close_ready_bundles(
         gateway,
         ctx,
@@ -5138,12 +6584,21 @@ async fn run_live_execution_cycle(
         &manual_close_bundle_keys,
     )
     .await?;
+    let close_may_have_updated_profit_history = state.open_bundles.len()
+        != open_bundle_count_before_close
+        || !processed_close_commands.is_empty()
+        || pending_updates_may_have_updated_profit_history;
     state
         .processed_control_commands
         .extend(processed_close_commands);
 
     let loss_guard_blocks_new_entries = loss_guard_triggered_before_close
-        || profit_history_loss_guard_triggered(args, strategy_config.max_consecutive_losses)?;
+        || cached_profit_history_loss_guard_triggered(
+            args,
+            strategy_config.max_consecutive_losses,
+            state,
+            close_may_have_updated_profit_history,
+        )?;
     if loss_guard_blocks_new_entries {
         if !loss_guard_triggered_before_close {
             push_loss_guard_event(state);
@@ -5204,6 +6659,7 @@ async fn run_live_execution_cycle(
             target_market_type,
             fee_model,
             precision_registry,
+            latest_direct_books,
             quality_controls,
             confirmation,
             sinks,
@@ -5223,6 +6679,323 @@ async fn run_live_execution_cycle(
     );
     record_open_decision_audits(args, sinks, state, strategy_config, dashboard);
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_pending_slippage_risk_flattens(
+    gateway: &impl GatewayClient,
+    ctx: &StrategyContext,
+    args: &LiveRunnerArgs,
+    strategy_config: &CrossExchangeArbitrageConfig,
+    target_market_type: GatewayMarketType,
+    fee_model: &FeeModel,
+    precision_registry: &PrecisionRegistry,
+    latest_direct_books: Option<DirectBookStateHandle>,
+    confirmation: &LiveConfirmationPolicy,
+    sinks: &LiveRuntimeSinks,
+    state: &mut LiveExecutionState,
+    dashboard: &LiveDashboardData,
+) -> Result<bool> {
+    if state.pending_slippage_risk_flattens.is_empty() {
+        return Ok(false);
+    }
+    let now = Utc::now();
+    let mut updated_profit_history = false;
+    let bundle_ids = state
+        .pending_slippage_risk_flattens
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for bundle_id in bundle_ids {
+        let Some(pending) = state
+            .pending_slippage_risk_flattens
+            .get(&bundle_id)
+            .cloned()
+        else {
+            continue;
+        };
+        let symbol = pending.opportunity.canonical_symbol.as_pair();
+        let expired = now >= pending.deadline_at;
+
+        if let Some(candidate) = pending_slippage_close_candidate(
+            &pending,
+            strategy_config,
+            fee_model,
+            precision_registry,
+            &dashboard.tops,
+            now,
+        ) {
+            if candidate.projected_net_profit_pct >= pending.close_min_net_profit_pct {
+                let (open_leg, _) = pending_slippage_filled_leg_and_draft(&pending)
+                    .expect("pending close candidate requires a filled leg");
+                let (close_leg, fallback_close_leg) = execute_emergency_close_with_market_fallback(
+                    gateway,
+                    ctx,
+                    args,
+                    target_market_type,
+                    &bundle_id,
+                    "risk_flatten_profit_close",
+                    &candidate.draft,
+                    confirmation,
+                    sinks,
+                )
+                .await?;
+                let event = pending_slippage_profit_close_event(
+                    &pending,
+                    &candidate,
+                    open_leg,
+                    &close_leg,
+                    fallback_close_leg.as_ref(),
+                    now,
+                );
+                append_profit_event(args.profit_history_path.as_ref(), &event)?;
+                sinks.record_value_event(args, "cross_arb_slippage_pending_profit_close", &event);
+                state.recent_events.push(event);
+                updated_profit_history = true;
+                let final_close_leg = fallback_close_leg.as_ref().unwrap_or(&close_leg);
+                if final_close_leg.filled() {
+                    state.pending_slippage_risk_flattens.remove(&bundle_id);
+                    state.symbol_cooldowns.insert(
+                        symbol,
+                        now + ChronoDuration::seconds(
+                            strategy_config.slippage_capture.symbol_cooldown_secs.max(0),
+                        ),
+                    );
+                    continue;
+                }
+            }
+        }
+
+        let Some((maker_leg, _)) = pending_slippage_filled_leg_and_draft(&pending) else {
+            state.pending_slippage_risk_flattens.remove(&bundle_id);
+            continue;
+        };
+        let decision = slippage_latest_hedge_decision_for_fill(
+            &pending.opportunity,
+            maker_leg,
+            strategy_config,
+            Some(pending.hedge_min_net_profit_pct),
+            fee_model,
+            precision_registry,
+            latest_direct_books.clone(),
+            now,
+        )
+        .await;
+
+        if let Some(hedge_draft) = decision.draft.clone() {
+            tracing::info!(
+                target: "rustcta::cross_arb_live_runner",
+                bundle_id = bundle_id,
+                symbol = symbol,
+                mode = decision.audit.mode,
+                hedge_min_net_profit_pct = pending.hedge_min_net_profit_pct,
+                projected_net_profit_pct = decision.audit.projected_net_profit_pct,
+                "slippage pending risk flatten found profitable delayed hedge"
+            );
+            let fast_confirmation = hot_path_confirmation(confirmation);
+            let mut hedge_leg = execute_single_taker_order(
+                gateway,
+                ctx,
+                args,
+                target_market_type,
+                &bundle_id,
+                "slippage_capture_delayed_taker_hedge",
+                &hedge_draft,
+                &fast_confirmation,
+                sinks,
+            )
+            .await?;
+            if should_retry_slippage_hedge(&hedge_leg) {
+                if let Some(retry_draft) =
+                    slippage_hedge_retry_draft(&hedge_draft, strategy_config, precision_registry)
+                {
+                    hedge_leg = execute_single_taker_order(
+                        gateway,
+                        ctx,
+                        args,
+                        target_market_type,
+                        &bundle_id,
+                        "slippage_capture_delayed_taker_hedge_retry",
+                        &retry_draft,
+                        &fast_confirmation,
+                        sinks,
+                    )
+                    .await?;
+                }
+            }
+
+            let (first, second) =
+                order_pair_first_leg(&pending.opportunity, maker_leg.clone(), hedge_leg);
+            let execution = PairExecution {
+                first,
+                second,
+                requested_at: pending.execution.requested_at,
+                slippage_hedge_decision: Some(decision.audit),
+            };
+            let mut open_event =
+                slippage_capture_open_event(&bundle_id, &pending.opportunity, &execution, now);
+            open_event["lifecycle"] = json!("slippage_capture_delayed_hedge");
+            open_event["event_type"] = json!("slippage_capture_delayed_hedge");
+            open_event["pending_since"] = json!(pending.opened_at);
+            open_event["pending_deadline_at"] = json!(pending.deadline_at);
+            append_profit_event(args.profit_history_path.as_ref(), &open_event)?;
+            sinks.record_value_event(
+                args,
+                "cross_arb_slippage_capture_delayed_hedge",
+                &open_event,
+            );
+            state.recent_events.push(open_event);
+            updated_profit_history = true;
+
+            if execution.both_filled() {
+                if let Some(position) = open_position_from_execution(
+                    &bundle_id,
+                    &pending.synthetic_open,
+                    &execution,
+                    pending.opened_at,
+                ) {
+                    state.open_bundles.insert(
+                        bundle_id.clone(),
+                        LiveOpenBundle {
+                            bundle_id: bundle_id.clone(),
+                            position,
+                            open_fee_usdt: execution.total_fee_usdt(),
+                            open_long: execution.first.clone(),
+                            open_short: execution.second.clone(),
+                            opened_at: pending.opened_at,
+                        },
+                    );
+                    state.pending_slippage_risk_flattens.remove(&bundle_id);
+                    state.symbol_cooldowns.remove(&symbol);
+                    state.route_cooldowns.remove(&route_cooldown_key(
+                        &slippage_long_exchange(&pending.opportunity),
+                        &slippage_short_exchange(&pending.opportunity),
+                    ));
+                    continue;
+                }
+            }
+
+            let residual_event = incomplete_open_exposure_event(
+                &bundle_id,
+                &pending.synthetic_open,
+                &execution,
+                &pending.synthetic_open.orders[0],
+                &pending.synthetic_open.orders[1],
+                precision_registry,
+                now,
+            );
+            append_profit_event(args.profit_history_path.as_ref(), &residual_event)?;
+            sinks.record_value_event(
+                args,
+                "cross_arb_slippage_capture_delayed_hedge_incomplete",
+                &residual_event,
+            );
+            state.recent_events.push(residual_event);
+            updated_profit_history = true;
+
+            for emergency_event in emergency_close_unhedged_open_legs(
+                gateway,
+                ctx,
+                args,
+                target_market_type,
+                strategy_config,
+                precision_registry,
+                confirmation,
+                sinks,
+                &bundle_id,
+                &execution,
+                &pending.synthetic_open.orders[0],
+                &pending.synthetic_open.orders[1],
+            )
+            .await?
+            {
+                append_profit_event(args.profit_history_path.as_ref(), &emergency_event)?;
+                sinks.record_value_event(args, "cross_arb_emergency_close", &emergency_event);
+                state.recent_events.push(emergency_event);
+                updated_profit_history = true;
+            }
+            state.pending_slippage_risk_flattens.remove(&bundle_id);
+            state.symbol_cooldowns.insert(
+                symbol,
+                now + ChronoDuration::seconds(
+                    strategy_config.slippage_capture.symbol_cooldown_secs.max(0),
+                ),
+            );
+            continue;
+        }
+
+        if expired {
+            let timeout_event =
+                pending_slippage_grace_timeout_event(&pending, &decision.audit, now);
+            append_profit_event(args.profit_history_path.as_ref(), &timeout_event)?;
+            sinks.record_value_event(
+                args,
+                "cross_arb_slippage_pending_grace_timeout",
+                &timeout_event,
+            );
+            state.recent_events.push(timeout_event);
+            updated_profit_history = true;
+
+            for emergency_event in emergency_close_unhedged_open_legs(
+                gateway,
+                ctx,
+                args,
+                target_market_type,
+                strategy_config,
+                precision_registry,
+                confirmation,
+                sinks,
+                &bundle_id,
+                &pending.execution,
+                &pending.synthetic_open.orders[0],
+                &pending.synthetic_open.orders[1],
+            )
+            .await?
+            {
+                append_profit_event(args.profit_history_path.as_ref(), &emergency_event)?;
+                sinks.record_value_event(args, "cross_arb_emergency_close", &emergency_event);
+                state.recent_events.push(emergency_event);
+                updated_profit_history = true;
+            }
+            let flatten_events = market_flatten_symbol_positions(
+                gateway,
+                ctx,
+                args,
+                target_market_type,
+                strategy_config,
+                precision_registry,
+                confirmation,
+                sinks,
+                &bundle_id,
+                &pending.opportunity.canonical_symbol,
+                &[&pending.execution.first, &pending.execution.second],
+            )
+            .await?;
+            for flatten_event in &flatten_events {
+                append_profit_event(args.profit_history_path.as_ref(), flatten_event)?;
+                sinks.record_value_event(args, "cross_arb_residual_market_flatten", flatten_event);
+                state.recent_events.push(flatten_event.clone());
+                updated_profit_history = true;
+            }
+            state.pending_slippage_risk_flattens.remove(&bundle_id);
+            state.symbol_cooldowns.insert(
+                symbol,
+                now + ChronoDuration::seconds(
+                    strategy_config.slippage_capture.symbol_cooldown_secs.max(0),
+                ),
+            );
+        } else {
+            let wait_event = pending_slippage_wait_event(&pending, &decision.audit, now);
+            sinks.record_value_event(args, "cross_arb_slippage_pending_wait", &wait_event);
+            state.recent_events.push(wait_event);
+            if let Some(entry) = state.pending_slippage_risk_flattens.get_mut(&bundle_id) {
+                entry.last_audit = decision.audit;
+            }
+        }
+    }
+
+    Ok(updated_profit_history)
 }
 
 fn has_eligible_open_opportunity(
@@ -5746,6 +7519,8 @@ fn reconciled_leg_from_json(row: &Value) -> Option<ReconciledOrderLeg> {
         actual_order_quantity: f64_field(row, &["actual_order_quantity"]),
         actual_notional_usdt: f64_field(row, &["actual_notional_usdt"]),
         fee_usdt: f64_field(row, &["fee_usdt"]).unwrap_or(0.0).max(0.0),
+        fee_amount: f64_field(row, &["fee_amount"]),
+        fee_asset: optional_text_field(row, &["fee_asset"]),
         submitted_at: datetime_field(row, "submitted_at"),
         acked_at: datetime_field(row, "acked_at"),
         filled_at: datetime_field(row, "filled_at"),
@@ -5787,6 +7562,8 @@ fn recovered_leg_from_bundle_row(
         actual_order_quantity: Some(quantity),
         actual_notional_usdt: Some(notional),
         fee_usdt: 0.0,
+        fee_amount: None,
+        fee_asset: None,
         submitted_at: None,
         acked_at: None,
         filled_at: datetime_field(row, "opened_at"),
@@ -6153,6 +7930,8 @@ fn startup_takeover_leg(
         actual_order_quantity: Some(quantity),
         actual_notional_usdt: Some(quantity * price),
         fee_usdt: 0.0,
+        fee_amount: None,
+        fee_asset: None,
         submitted_at: None,
         acked_at: Some(position.observed_at),
         filled_at: Some(position.observed_at),
@@ -6427,8 +8206,9 @@ async fn open_best_opportunity(
     args: &LiveRunnerArgs,
     strategy_config: &CrossExchangeArbitrageConfig,
     target_market_type: GatewayMarketType,
-    _fee_model: &FeeModel,
+    fee_model: &FeeModel,
     precision_registry: &PrecisionRegistry,
+    latest_direct_books: Option<DirectBookStateHandle>,
     quality_controls: LiveExecutionQualityControls,
     confirmation: &LiveConfirmationPolicy,
     sinks: &LiveRuntimeSinks,
@@ -6442,7 +8222,9 @@ async fn open_best_opportunity(
             args,
             strategy_config,
             target_market_type,
+            fee_model,
             precision_registry,
+            latest_direct_books,
             confirmation,
             sinks,
             state,
@@ -6795,7 +8577,9 @@ async fn open_best_slippage_capture_opportunity(
     args: &LiveRunnerArgs,
     strategy_config: &CrossExchangeArbitrageConfig,
     target_market_type: GatewayMarketType,
+    fee_model: &FeeModel,
     precision_registry: &PrecisionRegistry,
+    latest_direct_books: Option<DirectBookStateHandle>,
     confirmation: &LiveConfirmationPolicy,
     sinks: &LiveRuntimeSinks,
     state: &mut LiveExecutionState,
@@ -6852,6 +8636,7 @@ async fn open_best_slippage_capture_opportunity(
     let mut tasks = FuturesUnordered::new();
     for opportunity in opportunities {
         let bundle_id = live_slippage_capture_bundle_id(ctx, &opportunity, now);
+        let latest_direct_books = latest_direct_books.clone();
         tasks.push(async move {
             let execution = execute_slippage_capture_open(
                 gateway,
@@ -6861,7 +8646,9 @@ async fn open_best_slippage_capture_opportunity(
                 &bundle_id,
                 &opportunity,
                 strategy_config,
+                fee_model,
                 precision_registry,
+                latest_direct_books,
                 confirmation,
                 sinks,
             )
@@ -6927,6 +8714,43 @@ async fn open_best_slippage_capture_opportunity(
                 "slippage_capture_incomplete_open",
                 now,
             );
+            if should_defer_slippage_risk_flatten(strategy_config, &execution) {
+                let deadline_at = now
+                    + ChronoDuration::seconds(
+                        strategy_config
+                            .slippage_capture
+                            .risk_flatten_grace_secs
+                            .max(0),
+                    );
+                let last_audit = execution
+                    .slippage_hedge_decision
+                    .clone()
+                    .expect("deferred slippage risk flatten requires a hedge decision audit");
+                let pending = PendingSlippageRiskFlatten {
+                    bundle_id: bundle_id.clone(),
+                    opportunity: opportunity.clone(),
+                    synthetic_open: synthetic.clone(),
+                    execution: execution.clone(),
+                    opened_at: now,
+                    deadline_at,
+                    close_min_net_profit_pct: strategy_config
+                        .slippage_capture
+                        .risk_flatten_close_min_net_profit_pct,
+                    hedge_min_net_profit_pct: strategy_config
+                        .slippage_capture
+                        .risk_flatten_hedge_min_net_profit_pct,
+                    last_audit,
+                };
+                let wait_event = pending_slippage_wait_event(&pending, &pending.last_audit, now);
+                append_profit_event(args.profit_history_path.as_ref(), &wait_event)?;
+                sinks.record_value_event(args, "cross_arb_slippage_pending_wait", &wait_event);
+                state.recent_events.push(wait_event);
+                state.symbol_cooldowns.insert(symbol.clone(), deadline_at);
+                state
+                    .pending_slippage_risk_flattens
+                    .insert(bundle_id.clone(), pending);
+                continue;
+            }
             for emergency_event in emergency_close_unhedged_open_legs(
                 gateway,
                 ctx,
@@ -6967,6 +8791,14 @@ async fn open_best_slippage_capture_opportunity(
                 state.recent_events.push(flatten_event.clone());
             }
         } else if execution.any_accepted() {
+            let timeout_alert =
+                slippage_maker_timeout_alert_event(&bundle_id, &opportunity, &execution, now);
+            sinks.record_value_event(
+                args,
+                "cross_arb_slippage_capture_maker_timeout_alert",
+                &timeout_alert,
+            );
+            state.recent_events.push(timeout_alert);
             record_failed_open_route_cooldown(
                 state,
                 &opportunity.canonical_symbol,
@@ -7179,6 +9011,8 @@ fn empty_reconciled_leg_from_draft(
         actual_order_quantity: None,
         actual_notional_usdt: None,
         fee_usdt: 0.0,
+        fee_amount: None,
+        fee_asset: None,
         submitted_at: Some(requested_at),
         acked_at: None,
         filled_at: None,
@@ -7251,6 +9085,325 @@ fn slippage_hedge_draft_for_fill(
     Some(draft)
 }
 
+#[derive(Debug, Clone)]
+struct SlippageLatestHedgeDecision {
+    draft: Option<TakerOrderDraft>,
+    audit: SlippageHedgeDecisionAudit,
+}
+
+#[derive(Debug, Clone)]
+struct SlippageHedgeCandidate {
+    draft: TakerOrderDraft,
+    book_received_at: DateTime<Utc>,
+    book_age_ms: i64,
+    projected_net_pnl_usdt: f64,
+    projected_net_profit_pct: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingSlippageCloseCandidate {
+    draft: TakerOrderDraft,
+    book_received_at: DateTime<Utc>,
+    book_age_ms: i64,
+    projected_net_pnl_usdt: f64,
+    projected_net_profit_pct: f64,
+}
+
+async fn slippage_latest_hedge_decision_for_fill(
+    opportunity: &SlippageCaptureOpenOpportunity,
+    maker_leg: &ReconciledOrderLeg,
+    strategy_config: &CrossExchangeArbitrageConfig,
+    min_profit_pct_override: Option<f64>,
+    fee_model: &FeeModel,
+    precision_registry: &PrecisionRegistry,
+    latest_direct_books: Option<DirectBookStateHandle>,
+    now: DateTime<Utc>,
+) -> SlippageLatestHedgeDecision {
+    let old_reference_price = opportunity.hedge_after_fill.order.reference_price;
+    let maker_fill_price = maker_leg.actual_fill_price;
+    let maker_fill_to_decision_ms = maker_leg.filled_at.map(|filled_at| {
+        now.signed_duration_since(filled_at)
+            .num_milliseconds()
+            .max(0)
+    });
+    let Some(filled_base_quantity) = maker_leg.actual_base_quantity.filter(|qty| *qty > 0.0) else {
+        return SlippageLatestHedgeDecision {
+            draft: None,
+            audit: SlippageHedgeDecisionAudit {
+                mode: "risk_flatten",
+                message_zh: "maker成交数量为空，未提交hedge，进入风险平仓".to_string(),
+                selected_exchange: None,
+                selected_side: None,
+                old_reference_price,
+                latest_reference_price: None,
+                hedge_book_received_at: None,
+                hedge_book_age_ms: None,
+                maker_fill_price,
+                maker_fill_to_decision_ms,
+                projected_net_pnl_usdt: None,
+                projected_net_profit_pct: None,
+                candidate_count: 0,
+            },
+        };
+    };
+
+    let Some(latest_direct_books) = latest_direct_books else {
+        let draft = slippage_hedge_draft_for_fill(
+            opportunity,
+            maker_leg,
+            strategy_config,
+            precision_registry,
+            &LiveRunnerArgs::default(),
+            GatewayMarketType::Perpetual,
+        );
+        return SlippageLatestHedgeDecision {
+            audit: SlippageHedgeDecisionAudit {
+                mode: "legacy_fallback_no_live_book_cache",
+                message_zh: "没有可用的实时订单簿cache，临时使用机会创建时的hedge计划".to_string(),
+                selected_exchange: draft.as_ref().map(|draft| draft.exchange.to_string()),
+                selected_side: draft
+                    .as_ref()
+                    .map(|draft| strategy_side_name(draft.side).to_string()),
+                old_reference_price,
+                latest_reference_price: draft.as_ref().map(|draft| draft.reference_price),
+                hedge_book_received_at: None,
+                hedge_book_age_ms: None,
+                maker_fill_price,
+                maker_fill_to_decision_ms,
+                projected_net_pnl_usdt: None,
+                projected_net_profit_pct: None,
+                candidate_count: usize::from(draft.is_some()),
+            },
+            draft,
+        };
+    };
+
+    let tops = {
+        let state = latest_direct_books.lock().await;
+        state
+            .tops
+            .values()
+            .filter(|top| top.canonical_symbol == opportunity.canonical_symbol)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let active_venues = strategy_config
+        .active_venues()
+        .into_iter()
+        .map(|exchange| gateway_exchange_id(&exchange))
+        .collect::<BTreeSet<_>>();
+    let (hedge_side, hedge_role) = match opportunity.maker_leg_kind {
+        MakerLegKind::LongMakerBuy => (
+            rustcta_strategy_cross_exchange_arbitrage::OrderSide::Sell,
+            TakerOrderRole::OpenShort,
+        ),
+        MakerLegKind::ShortMakerSell => (
+            rustcta_strategy_cross_exchange_arbitrage::OrderSide::Buy,
+            TakerOrderRole::OpenLong,
+        ),
+    };
+    let maker_exchange = gateway_exchange_id(opportunity.maker_exchange.as_str());
+    let maker_fill_price = maker_fill_price.unwrap_or(opportunity.maker_limit_price);
+    let mut best: Option<SlippageHedgeCandidate> = None;
+    let mut candidate_count = 0usize;
+    for top in tops {
+        let exchange = gateway_exchange_id(top.exchange.as_str());
+        if exchange == maker_exchange || !active_venues.contains(&exchange) {
+            continue;
+        }
+        if !top.is_valid(strategy_config.slippage_capture.min_orderbook_levels)
+            || !top.is_fresh(now, strategy_config.slippage_capture.orderbook_stale_ms)
+        {
+            continue;
+        }
+        let (reference_price, top_base_quantity) = match hedge_side {
+            rustcta_strategy_cross_exchange_arbitrage::OrderSide::Buy => {
+                (top.best_ask_price, top.best_ask_quantity)
+            }
+            rustcta_strategy_cross_exchange_arbitrage::OrderSide::Sell => {
+                (top.best_bid_price, top.best_bid_quantity)
+            }
+        };
+        if reference_price <= 0.0 || top_base_quantity <= 0.0 {
+            continue;
+        }
+        let precision = precision_registry.get(&top.exchange, &opportunity.canonical_symbol);
+        let order_quantity = precision.normalized_order_quantity_from_base(filled_base_quantity);
+        let base_quantity = precision.base_quantity_from_order_quantity(order_quantity);
+        if base_quantity <= 0.0
+            || base_quantity < precision.min_base_quantity()
+            || (precision.min_notional_usdt > 0.0
+                && base_quantity * reference_price < precision.min_notional_usdt)
+        {
+            continue;
+        }
+        if strategy_config.slippage_capture.enforce_hedge_top_depth {
+            let usable_top_base_quantity = top_base_quantity
+                * strategy_config
+                    .slippage_capture
+                    .hedge_top_of_book_capacity_ratio
+                    .clamp(0.0, 1.0);
+            if usable_top_base_quantity + 1e-12 < base_quantity {
+                continue;
+            }
+        }
+        let draft = TakerOrderDraft {
+            exchange: top.exchange.clone(),
+            canonical_symbol: opportunity.canonical_symbol.clone(),
+            side: hedge_side,
+            base_quantity,
+            quantity: order_quantity,
+            quantity_unit: precision.quantity_unit,
+            contract_size: precision.effective_contract_size(),
+            reference_price,
+            worst_acceptable_price: match hedge_side {
+                rustcta_strategy_cross_exchange_arbitrage::OrderSide::Buy => ceil_to_step(
+                    reference_price
+                        * (1.0
+                            + strategy_config
+                                .slippage_capture
+                                .hedge_taker_slippage_pct
+                                .max(0.0)),
+                    precision.price_tick,
+                ),
+                rustcta_strategy_cross_exchange_arbitrage::OrderSide::Sell => floor_to_step(
+                    reference_price
+                        * (1.0
+                            - strategy_config
+                                .slippage_capture
+                                .hedge_taker_slippage_pct
+                                .max(0.0)),
+                    precision.price_tick,
+                ),
+            },
+            reduce_only: false,
+            role: hedge_role,
+        };
+        let maker_notional_usdt = base_quantity * maker_fill_price;
+        let hedge_notional_usdt = base_quantity * reference_price;
+        let expected_gross_pnl_usdt = match opportunity.maker_leg_kind {
+            MakerLegKind::LongMakerBuy => base_quantity * (reference_price - maker_fill_price),
+            MakerLegKind::ShortMakerSell => base_quantity * (maker_fill_price - reference_price),
+        };
+        let expected_fee_usdt =
+            fee_model.fee_amount(
+                &opportunity.maker_exchange,
+                FeeRole::Maker,
+                maker_notional_usdt,
+            ) + fee_model.fee_amount(&top.exchange, FeeRole::Taker, hedge_notional_usdt)
+                + fee_model.fee_amount(
+                    &opportunity.maker_exchange,
+                    FeeRole::Taker,
+                    maker_notional_usdt,
+                )
+                + fee_model.fee_amount(&top.exchange, FeeRole::Taker, hedge_notional_usdt);
+        let projected_net_pnl_usdt = expected_gross_pnl_usdt - expected_fee_usdt;
+        let projected_net_profit_pct =
+            projected_net_pnl_usdt / maker_notional_usdt.max(hedge_notional_usdt).max(1.0);
+        let candidate = SlippageHedgeCandidate {
+            draft,
+            book_received_at: top.received_at,
+            book_age_ms: top.age_ms(now),
+            projected_net_pnl_usdt,
+            projected_net_profit_pct,
+        };
+        candidate_count += 1;
+        if best
+            .as_ref()
+            .map(|current| slippage_hedge_candidate_is_better(&candidate, current))
+            .unwrap_or(true)
+        {
+            best = Some(candidate);
+        }
+    }
+
+    let Some(best) = best else {
+        return SlippageLatestHedgeDecision {
+            draft: None,
+            audit: SlippageHedgeDecisionAudit {
+                mode: "risk_flatten",
+                message_zh:
+                    "maker已成交，但没有新鲜且深度足够的hedge订单簿，未提交hedge，进入风险平仓"
+                        .to_string(),
+                selected_exchange: None,
+                selected_side: None,
+                old_reference_price,
+                latest_reference_price: None,
+                hedge_book_received_at: None,
+                hedge_book_age_ms: None,
+                maker_fill_price: Some(maker_fill_price),
+                maker_fill_to_decision_ms,
+                projected_net_pnl_usdt: None,
+                projected_net_profit_pct: None,
+                candidate_count,
+            },
+        };
+    };
+
+    let min_profit_pct =
+        min_profit_pct_override.unwrap_or(strategy_config.slippage_capture.min_open_net_profit_pct);
+    if best.projected_net_profit_pct < min_profit_pct {
+        return SlippageLatestHedgeDecision {
+            draft: None,
+            audit: SlippageHedgeDecisionAudit {
+                mode: "risk_flatten_no_profit",
+                message_zh: format!(
+                    "maker已成交，但最新hedge净收益{}低于阈值{}，未提交hedge，进入风险平仓",
+                    format_float(best.projected_net_profit_pct),
+                    format_float(min_profit_pct)
+                ),
+                selected_exchange: Some(best.draft.exchange.to_string()),
+                selected_side: Some(strategy_side_name(best.draft.side).to_string()),
+                old_reference_price,
+                latest_reference_price: Some(best.draft.reference_price),
+                hedge_book_received_at: Some(best.book_received_at),
+                hedge_book_age_ms: Some(best.book_age_ms),
+                maker_fill_price: Some(maker_fill_price),
+                maker_fill_to_decision_ms,
+                projected_net_pnl_usdt: Some(best.projected_net_pnl_usdt),
+                projected_net_profit_pct: Some(best.projected_net_profit_pct),
+                candidate_count,
+            },
+        };
+    }
+
+    SlippageLatestHedgeDecision {
+        audit: SlippageHedgeDecisionAudit {
+            mode: "profit_hedge_latest_orderbook",
+            message_zh: "maker已成交，使用最新订单簿选择最优taker hedge".to_string(),
+            selected_exchange: Some(best.draft.exchange.to_string()),
+            selected_side: Some(strategy_side_name(best.draft.side).to_string()),
+            old_reference_price,
+            latest_reference_price: Some(best.draft.reference_price),
+            hedge_book_received_at: Some(best.book_received_at),
+            hedge_book_age_ms: Some(best.book_age_ms),
+            maker_fill_price: Some(maker_fill_price),
+            maker_fill_to_decision_ms,
+            projected_net_pnl_usdt: Some(best.projected_net_pnl_usdt),
+            projected_net_profit_pct: Some(best.projected_net_profit_pct),
+            candidate_count,
+        },
+        draft: Some(best.draft),
+    }
+}
+
+fn slippage_hedge_candidate_is_better(
+    candidate: &SlippageHedgeCandidate,
+    current: &SlippageHedgeCandidate,
+) -> bool {
+    const EPSILON: f64 = 1e-12;
+    candidate.projected_net_profit_pct > current.projected_net_profit_pct + EPSILON
+        || (prices_equal(
+            candidate.projected_net_profit_pct,
+            current.projected_net_profit_pct,
+        ) && candidate.book_received_at > current.book_received_at)
+        || (prices_equal(
+            candidate.projected_net_profit_pct,
+            current.projected_net_profit_pct,
+        ) && candidate.book_received_at == current.book_received_at
+            && candidate.book_age_ms < current.book_age_ms)
+}
+
 fn should_retry_slippage_hedge(leg: &ReconciledOrderLeg) -> bool {
     leg.accepted && !leg.filled() && !leg_has_fill_quantity(leg)
 }
@@ -7282,6 +9435,131 @@ fn slippage_hedge_retry_draft(
     let mut retry = original.clone();
     retry.worst_acceptable_price = retry_price;
     Some(retry)
+}
+
+fn should_defer_slippage_risk_flatten(
+    strategy_config: &CrossExchangeArbitrageConfig,
+    execution: &PairExecution,
+) -> bool {
+    strategy_config.slippage_capture.risk_flatten_grace_secs > 0
+        && execution
+            .slippage_hedge_decision
+            .as_ref()
+            .is_some_and(|audit| audit.mode == "risk_flatten_no_profit")
+}
+
+fn pending_slippage_filled_leg_and_draft(
+    pending: &PendingSlippageRiskFlatten,
+) -> Option<(&ReconciledOrderLeg, &TakerOrderDraft)> {
+    for (leg, draft) in [
+        (
+            &pending.execution.first,
+            pending.synthetic_open.orders.first(),
+        ),
+        (
+            &pending.execution.second,
+            pending.synthetic_open.orders.get(1),
+        ),
+    ] {
+        let Some(draft) = draft else {
+            continue;
+        };
+        if leg.filled() {
+            return Some((leg, draft));
+        }
+    }
+    None
+}
+
+fn pending_slippage_close_candidate(
+    pending: &PendingSlippageRiskFlatten,
+    strategy_config: &CrossExchangeArbitrageConfig,
+    fee_model: &FeeModel,
+    precision_registry: &PrecisionRegistry,
+    tops: &[OrderBookTop],
+    now: DateTime<Utc>,
+) -> Option<PendingSlippageCloseCandidate> {
+    let (filled_leg, original) = pending_slippage_filled_leg_and_draft(pending)?;
+    let top = find_top(tops, &original.exchange, &original.canonical_symbol)?;
+    if !top.is_valid(strategy_config.slippage_capture.min_orderbook_levels)
+        || !top.is_fresh(now, strategy_config.slippage_capture.orderbook_stale_ms)
+    {
+        return None;
+    }
+    let open_price = filled_leg.actual_fill_price?;
+    let actual_base_quantity = filled_leg.actual_base_quantity?;
+    if open_price <= 0.0 || actual_base_quantity <= 0.0 {
+        return None;
+    }
+    let (side, role, reference_price, gross_pnl_usdt) = match original.role {
+        TakerOrderRole::OpenLong => {
+            let reference_price = top.best_bid_price;
+            (
+                rustcta_strategy_cross_exchange_arbitrage::OrderSide::Sell,
+                TakerOrderRole::EmergencyCloseLong,
+                reference_price,
+                actual_base_quantity * (reference_price - open_price),
+            )
+        }
+        TakerOrderRole::OpenShort => {
+            let reference_price = top.best_ask_price;
+            (
+                rustcta_strategy_cross_exchange_arbitrage::OrderSide::Buy,
+                TakerOrderRole::EmergencyCloseShort,
+                reference_price,
+                actual_base_quantity * (open_price - reference_price),
+            )
+        }
+        _ => return None,
+    };
+    if reference_price <= 0.0 {
+        return None;
+    }
+    let precision = precision_registry.get(&original.exchange, &original.canonical_symbol);
+    let order_quantity = precision.normalized_order_quantity_from_base(actual_base_quantity);
+    let base_quantity = precision.base_quantity_from_order_quantity(order_quantity);
+    if order_quantity <= 0.0 || base_quantity <= 0.0 {
+        return None;
+    }
+    let slippage_pct = strategy_config
+        .slippage_capture
+        .close_taker_slippage_pct
+        .max(strategy_config.dual_taker.taker_slippage_pct)
+        .max(0.0);
+    let worst_acceptable_price = match side {
+        rustcta_strategy_cross_exchange_arbitrage::OrderSide::Buy => {
+            ceil_to_step(reference_price * (1.0 + slippage_pct), precision.price_tick)
+        }
+        rustcta_strategy_cross_exchange_arbitrage::OrderSide::Sell => {
+            floor_to_step(reference_price * (1.0 - slippage_pct), precision.price_tick)
+        }
+    };
+    let close_fee_usdt = fee_model.fee_amount(
+        &original.exchange,
+        FeeRole::Taker,
+        base_quantity * reference_price,
+    );
+    let projected_net_pnl_usdt = gross_pnl_usdt - filled_leg.fee_usdt - close_fee_usdt;
+    let projected_net_profit_pct = projected_net_pnl_usdt / (base_quantity * open_price).max(1e-12);
+    Some(PendingSlippageCloseCandidate {
+        draft: TakerOrderDraft {
+            exchange: original.exchange.clone(),
+            canonical_symbol: original.canonical_symbol.clone(),
+            side,
+            base_quantity,
+            quantity: order_quantity,
+            quantity_unit: precision.quantity_unit,
+            contract_size: precision.effective_contract_size(),
+            reference_price,
+            worst_acceptable_price,
+            reduce_only: true,
+            role,
+        },
+        book_received_at: top.received_at,
+        book_age_ms: top.age_ms(now),
+        projected_net_pnl_usdt,
+        projected_net_profit_pct,
+    })
 }
 
 async fn wait_for_slippage_capture_maker_fill(
@@ -7368,6 +9646,24 @@ struct PairExecution {
     first: ReconciledOrderLeg,
     second: ReconciledOrderLeg,
     requested_at: DateTime<Utc>,
+    slippage_hedge_decision: Option<SlippageHedgeDecisionAudit>,
+}
+
+#[derive(Debug, Clone)]
+struct SlippageHedgeDecisionAudit {
+    mode: &'static str,
+    message_zh: String,
+    selected_exchange: Option<String>,
+    selected_side: Option<String>,
+    old_reference_price: f64,
+    latest_reference_price: Option<f64>,
+    hedge_book_received_at: Option<DateTime<Utc>>,
+    hedge_book_age_ms: Option<i64>,
+    maker_fill_price: Option<f64>,
+    maker_fill_to_decision_ms: Option<i64>,
+    projected_net_pnl_usdt: Option<f64>,
+    projected_net_profit_pct: Option<f64>,
+    candidate_count: usize,
 }
 
 impl PairExecution {
@@ -7528,6 +9824,7 @@ async fn execute_taker_pair(
         first,
         second,
         requested_at,
+        slippage_hedge_decision: None,
     })
 }
 
@@ -7539,7 +9836,9 @@ async fn execute_slippage_capture_open(
     bundle_id: &str,
     opportunity: &SlippageCaptureOpenOpportunity,
     strategy_config: &CrossExchangeArbitrageConfig,
+    fee_model: &FeeModel,
     precision_registry: &PrecisionRegistry,
+    latest_direct_books: Option<DirectBookStateHandle>,
     confirmation: &LiveConfirmationPolicy,
     sinks: &LiveRuntimeSinks,
 ) -> Result<PairExecution> {
@@ -7639,18 +9938,66 @@ async fn execute_slippage_capture_open(
             first,
             second,
             requested_at,
+            slippage_hedge_decision: None,
         });
     }
 
-    let hedge_draft = slippage_hedge_draft_for_fill(
+    let decision = slippage_latest_hedge_decision_for_fill(
         opportunity,
         &maker_leg,
         strategy_config,
+        None,
+        fee_model,
         precision_registry,
-        args,
-        target_market_type,
+        latest_direct_books,
+        Utc::now(),
     )
-    .unwrap_or_else(|| opportunity.hedge_after_fill.order.clone());
+    .await;
+    if decision.draft.is_none() {
+        tracing::warn!(
+            target: "rustcta::cross_arb_live_runner",
+            bundle_id = bundle_id,
+            symbol = opportunity.canonical_symbol.as_pair(),
+            mode = decision.audit.mode,
+            message_zh = %decision.audit.message_zh,
+            old_reference_price = decision.audit.old_reference_price,
+            latest_reference_price = decision.audit.latest_reference_price,
+            hedge_book_age_ms = decision.audit.hedge_book_age_ms,
+            projected_net_profit_pct = decision.audit.projected_net_profit_pct,
+            "slippage capture hedge decision entered risk flatten mode"
+        );
+        let empty_hedge = empty_reconciled_leg_from_draft(
+            &opportunity.hedge_after_fill.order,
+            decision.audit.mode,
+            Utc::now(),
+        );
+        let (first, second) = order_pair_first_leg(opportunity, maker_leg, empty_hedge);
+        return Ok(PairExecution {
+            first,
+            second,
+            requested_at,
+            slippage_hedge_decision: Some(decision.audit),
+        });
+    }
+    tracing::info!(
+        target: "rustcta::cross_arb_live_runner",
+        bundle_id = bundle_id,
+        symbol = opportunity.canonical_symbol.as_pair(),
+        mode = decision.audit.mode,
+        message_zh = %decision.audit.message_zh,
+        selected_exchange = ?decision.audit.selected_exchange,
+        old_reference_price = decision.audit.old_reference_price,
+        latest_reference_price = decision.audit.latest_reference_price,
+        hedge_book_age_ms = decision.audit.hedge_book_age_ms,
+        projected_net_profit_pct = decision.audit.projected_net_profit_pct,
+        "slippage capture hedge selected from latest order book"
+    );
+    let hedge_draft = decision
+        .draft
+        .as_ref()
+        .expect("decision draft is checked above")
+        .clone();
+    let fast_confirmation = hot_path_confirmation(confirmation);
     let mut hedge_leg = execute_single_taker_order(
         gateway,
         ctx,
@@ -7659,7 +10006,7 @@ async fn execute_slippage_capture_open(
         bundle_id,
         "slippage_capture_taker_hedge",
         &hedge_draft,
-        confirmation,
+        &fast_confirmation,
         sinks,
     )
     .await?;
@@ -7675,7 +10022,7 @@ async fn execute_slippage_capture_open(
                 bundle_id,
                 "slippage_capture_taker_hedge_retry",
                 &retry_draft,
-                confirmation,
+                &fast_confirmation,
                 sinks,
             )
             .await?;
@@ -7686,6 +10033,7 @@ async fn execute_slippage_capture_open(
         first,
         second,
         requested_at,
+        slippage_hedge_decision: Some(decision.audit),
     })
 }
 
@@ -7709,6 +10057,7 @@ async fn delayed_recheck_pair_if_incomplete(
             first: first_leg.clone(),
             second: second_leg.clone(),
             requested_at,
+            slippage_hedge_decision: None,
         };
         execution.any_accepted() && !execution.both_filled()
     };
@@ -7811,6 +10160,7 @@ async fn execute_emergency_close_with_market_fallback(
     confirmation: &LiveConfirmationPolicy,
     sinks: &LiveRuntimeSinks,
 ) -> Result<(ReconciledOrderLeg, Option<ReconciledOrderLeg>)> {
+    let fast_confirmation = hot_path_confirmation(confirmation);
     let first_close = execute_single_taker_order(
         gateway,
         ctx,
@@ -7819,7 +10169,7 @@ async fn execute_emergency_close_with_market_fallback(
         bundle_id,
         lifecycle,
         close_draft,
-        confirmation,
+        &fast_confirmation,
         sinks,
     )
     .await?;
@@ -7838,7 +10188,7 @@ async fn execute_emergency_close_with_market_fallback(
         close_draft,
         SdkOrderType::Market,
         Some(SdkTimeInForce::ImmediateOrCancel),
-        confirmation,
+        &fast_confirmation,
         sinks,
     )
     .await?;
@@ -9346,6 +11696,8 @@ async fn reconcile_order_leg(
         actual_order_quantity: None,
         actual_notional_usdt: None,
         fee_usdt: 0.0,
+        fee_amount: None,
+        fee_asset: None,
         submitted_at: Some(requested_at),
         acked_at: None,
         filled_at: None,
@@ -9572,11 +11924,38 @@ fn apply_fills_to_leg(leg: &mut ReconciledOrderLeg, draft: &TakerOrderDraft, fil
     let mut quantity = 0.0;
     let mut notional = 0.0;
     let mut fee_usdt = 0.0;
+    let mut fee_amount = 0.0;
+    let mut fee_asset: Option<String> = None;
+    let mut mixed_fee_assets = false;
     let mut filled_at = leg.filled_at;
     for fill in fills {
         quantity += fill.quantity;
         notional += fill.price * fill.quantity;
-        fee_usdt += fill.fee_amount.unwrap_or_default();
+        if let Some(raw_fee) = fill.fee_amount {
+            let raw_fee = raw_fee.abs();
+            if let Some(asset) = fill
+                .fee_asset
+                .as_deref()
+                .map(str::trim)
+                .filter(|asset| !asset.is_empty())
+            {
+                match fee_asset.as_deref() {
+                    None => fee_asset = Some(asset.to_ascii_uppercase()),
+                    Some(current) if current.eq_ignore_ascii_case(asset) => {}
+                    Some(_) => mixed_fee_assets = true,
+                }
+            }
+            fee_amount += raw_fee;
+            if let Some(converted) = fee_amount_as_usdt(
+                raw_fee,
+                fill.fee_asset.as_deref(),
+                fill.price,
+                fill.canonical_symbol.base_asset(),
+                fill.canonical_symbol.quote_asset(),
+            ) {
+                fee_usdt += converted;
+            }
+        }
         filled_at = Some(filled_at.map_or(fill.filled_at, |current| current.max(fill.filled_at)));
     }
     if quantity > 0.0 {
@@ -9588,7 +11967,64 @@ fn apply_fills_to_leg(leg: &mut ReconciledOrderLeg, draft: &TakerOrderDraft, fil
         leg.actual_notional_usdt = Some(base_quantity * average_price);
     }
     leg.fee_usdt = fee_usdt;
+    leg.fee_amount = if mixed_fee_assets {
+        None
+    } else {
+        (fee_amount > 0.0).then_some(fee_amount)
+    };
+    leg.fee_asset = if mixed_fee_assets {
+        Some("MIXED".to_string())
+    } else {
+        fee_asset
+    };
     leg.filled_at = filled_at;
+}
+
+fn fee_amount_as_usdt(
+    fee_amount: f64,
+    fee_asset: Option<&str>,
+    fill_price: f64,
+    base_asset: &str,
+    quote_asset: &str,
+) -> Option<f64> {
+    let asset = fee_asset?.trim();
+    if asset.is_empty() {
+        return None;
+    }
+    if is_stable_quote_fee_asset(asset) || asset.eq_ignore_ascii_case(quote_asset) {
+        Some(fee_amount)
+    } else if asset.eq_ignore_ascii_case(base_asset) && fill_price.is_finite() && fill_price > 0.0 {
+        Some(fee_amount * fill_price)
+    } else {
+        None
+    }
+}
+
+fn private_ws_fee_amount_as_usdt(
+    fee_amount: f64,
+    fee_asset: Option<&str>,
+    quote_asset: &str,
+    exchange: Option<&str>,
+) -> Option<f64> {
+    match fee_asset.map(str::trim).filter(|asset| !asset.is_empty()) {
+        Some(asset)
+            if is_stable_quote_fee_asset(asset) || asset.eq_ignore_ascii_case(quote_asset) =>
+        {
+            Some(fee_amount)
+        }
+        Some(_) => None,
+        None if exchange.is_some_and(|exchange| exchange.eq_ignore_ascii_case("bitget")) => {
+            Some(fee_amount)
+        }
+        None => None,
+    }
+}
+
+fn is_stable_quote_fee_asset(asset: &str) -> bool {
+    matches!(
+        asset.trim().to_ascii_uppercase().as_str(),
+        "USDT" | "USD" | "USDC"
+    )
 }
 
 fn open_position_from_execution(
@@ -9602,8 +12038,8 @@ fn open_position_from_execution(
     Some(OpenArbitragePosition {
         bundle_id: bundle_id.to_string(),
         canonical_symbol: opportunity.canonical_symbol.clone(),
-        long_exchange: opportunity.long_exchange.clone(),
-        short_exchange: opportunity.short_exchange.clone(),
+        long_exchange: StrategyExchangeId::new(&long.exchange),
+        short_exchange: StrategyExchangeId::new(&short.exchange),
         quantity: long
             .actual_base_quantity?
             .min(short.actual_base_quantity?)
@@ -9658,6 +12094,8 @@ fn slippage_capture_open_event(
     execution: &PairExecution,
     recorded_at: DateTime<Utc>,
 ) -> Value {
+    let maker_order_leg = slippage_execution_maker_leg(opportunity, execution);
+    let taker_hedge_leg = slippage_execution_hedge_leg(opportunity, execution);
     json!({
         "event_kind": "cross_arb_price_audit",
         "event_type": "slippage_capture_open",
@@ -9679,13 +12117,205 @@ fn slippage_capture_open_event(
         "hedge_top_depth_usdt": opportunity.hedge_top_depth_usdt,
         "expected_net_profit_pct": opportunity.expected_net_profit_pct,
         "expected_net_pnl_usdt": opportunity.expected_net_pnl_usdt,
-        "maker_leg": leg_json(&execution.first),
-        "hedge_leg": leg_json(&execution.second),
+        "maker_leg": maker_order_leg.map(leg_json),
+        "hedge_leg": taker_hedge_leg.map(leg_json),
+        "maker_order_leg": maker_order_leg.map(leg_json),
+        "taker_hedge_leg": taker_hedge_leg.map(leg_json),
+        "execution_legs": [leg_json(&execution.first), leg_json(&execution.second)],
+        "slippage_hedge_decision": execution.slippage_hedge_decision.as_ref().map(slippage_hedge_decision_json),
         "both_legs_filled": execution.both_filled(),
-        "maker_filled": execution.first.filled() || execution.second.filled(),
+        "maker_filled": maker_order_leg.is_some_and(ReconciledOrderLeg::filled),
         "submit_parallel": false,
         "open_module": "slippage_capture",
         "recorded_at": recorded_at,
+    })
+}
+
+fn slippage_maker_timeout_alert_event(
+    bundle_id: &str,
+    opportunity: &SlippageCaptureOpenOpportunity,
+    execution: &PairExecution,
+    recorded_at: DateTime<Utc>,
+) -> Value {
+    let maker_order_leg = slippage_execution_maker_leg(opportunity, execution);
+    let elapsed_ms = maker_order_leg
+        .and_then(|leg| leg.submitted_at)
+        .map(|submitted_at| {
+            recorded_at
+                .signed_duration_since(submitted_at)
+                .num_milliseconds()
+                .max(0)
+        });
+    json!({
+        "event_kind": "cross_arb_alert",
+        "event_type": "slippage_capture_maker_timeout_alert",
+        "severity": "warning",
+        "bundle_id": bundle_id,
+        "canonical_symbol": opportunity.canonical_symbol.as_pair(),
+        "maker_exchange": opportunity.maker_exchange.to_string(),
+        "hedge_exchange": opportunity.hedge_exchange.to_string(),
+        "long_exchange": slippage_long_exchange(opportunity).to_string(),
+        "short_exchange": slippage_short_exchange(opportunity).to_string(),
+        "maker_leg_kind": format!("{:?}", opportunity.maker_leg_kind),
+        "maker_timeout_ms": opportunity.maker_order.auto_cancel_after_ms,
+        "maker_elapsed_ms": elapsed_ms,
+        "maker_order_leg": maker_order_leg.map(leg_json),
+        "message_zh": "maker单超时未成交，已撤单或保持未成交状态；本次不提交hedge，进入路线冷却",
+        "message_en": "Maker order timed out without a confirmed fill; hedge was not submitted and the route is cooling down.",
+        "recorded_at": recorded_at,
+    })
+}
+
+fn pending_slippage_wait_event(
+    pending: &PendingSlippageRiskFlatten,
+    audit: &SlippageHedgeDecisionAudit,
+    recorded_at: DateTime<Utc>,
+) -> Value {
+    json!({
+        "event_kind": "cross_arb_alert",
+        "event_type": "slippage_capture_pending_risk_flatten_wait",
+        "severity": "warning",
+        "bundle_id": pending.bundle_id,
+        "canonical_symbol": pending.opportunity.canonical_symbol.as_pair(),
+        "symbol": pending.opportunity.canonical_symbol.as_pair(),
+        "maker_exchange": pending.opportunity.maker_exchange.to_string(),
+        "hedge_exchange": pending.opportunity.hedge_exchange.to_string(),
+        "long_exchange": slippage_long_exchange(&pending.opportunity).to_string(),
+        "short_exchange": slippage_short_exchange(&pending.opportunity).to_string(),
+        "opened_at": pending.opened_at,
+        "deadline_at": pending.deadline_at,
+        "remaining_secs": pending.deadline_at.signed_duration_since(recorded_at).num_seconds().max(0),
+        "close_min_net_profit_pct": pending.close_min_net_profit_pct,
+        "hedge_min_net_profit_pct": pending.hedge_min_net_profit_pct,
+        "last_hedge_decision": slippage_hedge_decision_json(audit),
+        "open_legs": [leg_json(&pending.execution.first), leg_json(&pending.execution.second)],
+        "message_zh": "maker已成交但hedge净收益暂不达标，等待单边盈利平仓或盈利hedge机会，未立即强平",
+        "recorded_at": recorded_at,
+    })
+}
+
+fn pending_slippage_grace_timeout_event(
+    pending: &PendingSlippageRiskFlatten,
+    audit: &SlippageHedgeDecisionAudit,
+    recorded_at: DateTime<Utc>,
+) -> Value {
+    json!({
+        "event_kind": "cross_arb_alert",
+        "event_type": "slippage_capture_pending_risk_flatten_timeout",
+        "severity": "critical",
+        "bundle_id": pending.bundle_id,
+        "lifecycle": "risk_flatten_grace_timeout",
+        "canonical_symbol": pending.opportunity.canonical_symbol.as_pair(),
+        "symbol": pending.opportunity.canonical_symbol.as_pair(),
+        "maker_exchange": pending.opportunity.maker_exchange.to_string(),
+        "hedge_exchange": pending.opportunity.hedge_exchange.to_string(),
+        "opened_at": pending.opened_at,
+        "deadline_at": pending.deadline_at,
+        "close_min_net_profit_pct": pending.close_min_net_profit_pct,
+        "hedge_min_net_profit_pct": pending.hedge_min_net_profit_pct,
+        "last_hedge_decision": slippage_hedge_decision_json(audit),
+        "open_legs": [leg_json(&pending.execution.first), leg_json(&pending.execution.second)],
+        "message_zh": "单边等待已到期，仍未达到盈利平仓或盈利hedge条件，开始强制风险平仓",
+        "recorded_at": recorded_at,
+    })
+}
+
+fn pending_slippage_profit_close_event(
+    pending: &PendingSlippageRiskFlatten,
+    candidate: &PendingSlippageCloseCandidate,
+    open_leg: &ReconciledOrderLeg,
+    close_leg: &ReconciledOrderLeg,
+    fallback_close_leg: Option<&ReconciledOrderLeg>,
+    recorded_at: DateTime<Utc>,
+) -> Value {
+    let final_close_leg = fallback_close_leg.unwrap_or(close_leg);
+    let actual_pnl_usdt = emergency_close_pnl(open_leg, final_close_leg);
+    let actual_base_quantity = open_leg
+        .actual_base_quantity
+        .zip(final_close_leg.actual_base_quantity)
+        .map(|(open, close)| open.min(close).max(0.0));
+    let close_net_profit_pct =
+        actual_pnl_usdt
+            .zip(actual_base_quantity)
+            .and_then(|(pnl, quantity)| {
+                let notional = quantity * open_leg.actual_fill_price?;
+                Some(pnl / notional.max(1e-12))
+            });
+    json!({
+        "event_kind": "cross_arb_price_audit",
+        "event_type": "slippage_capture_pending_profit_close",
+        "lifecycle": "risk_flatten_profit_close",
+        "bundle_id": pending.bundle_id,
+        "canonical_symbol": pending.opportunity.canonical_symbol.as_pair(),
+        "symbol": pending.opportunity.canonical_symbol.as_pair(),
+        "exchange": candidate.draft.exchange.to_string(),
+        "quantity": actual_base_quantity,
+        "projected_net_pnl_usdt": candidate.projected_net_pnl_usdt,
+        "projected_net_profit_pct": candidate.projected_net_profit_pct,
+        "projected_close_book_received_at": candidate.book_received_at,
+        "projected_close_book_age_ms": candidate.book_age_ms,
+        "close_min_net_profit_pct": pending.close_min_net_profit_pct,
+        "actual_pnl_usdt": pnl_json(actual_pnl_usdt),
+        "realized_profit_usdt": pnl_json(actual_pnl_usdt),
+        "close_net_profit_pct": close_net_profit_pct,
+        "filled_open_leg": leg_json(open_leg),
+        "close_leg": leg_json(close_leg),
+        "fallback_close_leg": fallback_close_leg.map(leg_json),
+        "both_legs_filled": final_close_leg.filled(),
+        "failure_reason": if final_close_leg.filled() {
+            Value::Null
+        } else {
+            json!(final_close_leg.error.clone().unwrap_or_else(|| format!(
+                "profit close not filled; status={}",
+                final_close_leg.status
+            )))
+        },
+        "planned_at": pending.execution.requested_at,
+        "recorded_at": recorded_at,
+    })
+}
+
+fn slippage_execution_maker_leg<'a>(
+    opportunity: &SlippageCaptureOpenOpportunity,
+    execution: &'a PairExecution,
+) -> Option<&'a ReconciledOrderLeg> {
+    let maker_role = match opportunity.maker_leg_kind {
+        MakerLegKind::LongMakerBuy => "open_long",
+        MakerLegKind::ShortMakerSell => "open_short",
+    };
+    [&execution.first, &execution.second]
+        .into_iter()
+        .find(|leg| leg.exchange == opportunity.maker_exchange.as_str() && leg.role == maker_role)
+}
+
+fn slippage_execution_hedge_leg<'a>(
+    opportunity: &SlippageCaptureOpenOpportunity,
+    execution: &'a PairExecution,
+) -> Option<&'a ReconciledOrderLeg> {
+    let hedge_role = match opportunity.maker_leg_kind {
+        MakerLegKind::LongMakerBuy => "open_short",
+        MakerLegKind::ShortMakerSell => "open_long",
+    };
+    [&execution.first, &execution.second]
+        .into_iter()
+        .find(|leg| leg.exchange != opportunity.maker_exchange.as_str() && leg.role == hedge_role)
+}
+
+fn slippage_hedge_decision_json(decision: &SlippageHedgeDecisionAudit) -> Value {
+    json!({
+        "mode": decision.mode,
+        "message_zh": decision.message_zh.as_str(),
+        "selected_exchange": decision.selected_exchange.as_deref(),
+        "selected_side": decision.selected_side.as_deref(),
+        "old_reference_price": decision.old_reference_price,
+        "latest_reference_price": decision.latest_reference_price,
+        "hedge_book_received_at": decision.hedge_book_received_at,
+        "hedge_book_age_ms": decision.hedge_book_age_ms,
+        "maker_fill_price": decision.maker_fill_price,
+        "maker_fill_to_decision_ms": decision.maker_fill_to_decision_ms,
+        "projected_net_pnl_usdt": decision.projected_net_pnl_usdt,
+        "projected_net_profit_pct": decision.projected_net_profit_pct,
+        "candidate_count": decision.candidate_count,
     })
 }
 
@@ -9943,6 +12573,8 @@ fn leg_json(leg: &ReconciledOrderLeg) -> Value {
         "actual_order_quantity": leg.actual_order_quantity.map(format_float),
         "actual_notional_usdt": leg.actual_notional_usdt.map(format_float),
         "fee_usdt": format_float(leg.fee_usdt),
+        "fee_amount": leg.fee_amount.map(format_float),
+        "fee_asset": leg.fee_asset,
         "submitted_at": leg.submitted_at,
         "acked_at": leg.acked_at,
         "filled_at": leg.filled_at,
@@ -10001,7 +12633,7 @@ fn hydrate_dashboard_execution_state(
         if !has_executable_orders {
             push_reject_reason(
                 &mut market_reject_reasons,
-                "display-only row has no executable order drafts".to_string(),
+                "display-only opportunity: executable maker/hedge order drafts were not generated, so no maker order was submitted".to_string(),
             );
         }
         if raw_open_spread_pct < strategy_config.dual_taker.min_open_spread_pct {
@@ -10333,6 +12965,96 @@ fn profit_history_loss_guard_triggered(
         .unwrap_or(false))
 }
 
+fn cached_profit_history_loss_guard_triggered(
+    args: &LiveRunnerArgs,
+    max_consecutive_losses: u32,
+    state: &mut LiveExecutionState,
+    force_refresh: bool,
+) -> Result<bool> {
+    if !force_refresh {
+        if let Some(caches) = state.jsonl_runtime_caches.as_ref() {
+            if let Some(triggered) =
+                shared_profit_history_loss_guard_triggered(args, max_consecutive_losses, caches)?
+            {
+                return Ok(triggered);
+            }
+        }
+    }
+
+    let now = Instant::now();
+    let cache = &state.loss_guard_cache;
+    let cache_key_matches = cache.profit_history_path == args.profit_history_path
+        && cache.max_consecutive_losses == Some(max_consecutive_losses);
+    if !force_refresh
+        && cache_key_matches
+        && cache.checked_at.is_some_and(|checked_at| {
+            now.duration_since(checked_at)
+                < Duration::from_millis(PROFIT_HISTORY_LOSS_GUARD_CACHE_TTL_MS)
+        })
+    {
+        return Ok(cache.triggered);
+    }
+
+    let triggered = profit_history_loss_guard_triggered(args, max_consecutive_losses)?;
+    if let Some(caches) = state.jsonl_runtime_caches.as_ref() {
+        store_loss_guard_shared_snapshot(args, max_consecutive_losses, triggered, caches)?;
+    }
+    state.loss_guard_cache = LossGuardCache {
+        checked_at: Some(now),
+        profit_history_path: args.profit_history_path.clone(),
+        max_consecutive_losses: Some(max_consecutive_losses),
+        triggered,
+    };
+    Ok(triggered)
+}
+
+fn shared_profit_history_loss_guard_triggered(
+    args: &LiveRunnerArgs,
+    max_consecutive_losses: u32,
+    caches: &JsonlRuntimeCaches,
+) -> Result<Option<bool>> {
+    let snapshot = caches
+        .loss_guard
+        .lock()
+        .map_err(|error| anyhow::anyhow!("loss guard cache poisoned: {error}"))?
+        .clone();
+    let cache_key_matches = snapshot.profit_history_path == args.profit_history_path
+        && snapshot.max_consecutive_losses == Some(max_consecutive_losses);
+    if cache_key_matches && snapshot.checked_at.is_some() {
+        Ok(Some(snapshot.triggered))
+    } else {
+        Ok(None)
+    }
+}
+
+fn refresh_loss_guard_shared_snapshot(
+    args: &LiveRunnerArgs,
+    max_consecutive_losses: u32,
+    caches: &JsonlRuntimeCaches,
+) -> Result<()> {
+    let triggered = profit_history_loss_guard_triggered(args, max_consecutive_losses)?;
+    store_loss_guard_shared_snapshot(args, max_consecutive_losses, triggered, caches)
+}
+
+fn store_loss_guard_shared_snapshot(
+    args: &LiveRunnerArgs,
+    max_consecutive_losses: u32,
+    triggered: bool,
+    caches: &JsonlRuntimeCaches,
+) -> Result<()> {
+    let mut snapshot = caches
+        .loss_guard
+        .lock()
+        .map_err(|error| anyhow::anyhow!("loss guard cache poisoned: {error}"))?;
+    *snapshot = LossGuardSharedSnapshot {
+        profit_history_path: args.profit_history_path.clone(),
+        max_consecutive_losses: Some(max_consecutive_losses),
+        checked_at: Some(Instant::now()),
+        triggered,
+    };
+    Ok(())
+}
+
 fn append_profit_event(path: Option<&PathBuf>, event: &Value) -> Result<()> {
     let Some(path) = path else {
         return Ok(());
@@ -10492,8 +13214,8 @@ fn trade_fill_event(
     record.client_order_id = leg.client_order_id.clone();
     record.exchange_order_id = leg.exchange_order_id.clone();
     record.quote_quantity = leg.actual_notional_usdt;
-    record.fee_amount = Some(leg.fee_usdt).filter(|fee| fee.is_finite());
-    record.fee_asset = Some("USDT".to_string()).filter(|_| leg.fee_usdt > 0.0);
+    record.fee_amount = leg.fee_amount.filter(|fee| fee.is_finite());
+    record.fee_asset = leg.fee_asset.clone();
     record.metadata = json!({
         "bundle_id": bundle_id,
         "lifecycle": lifecycle,
@@ -10501,11 +13223,50 @@ fn trade_fill_event(
         "actual_base_quantity": leg.actual_base_quantity.map(format_float),
         "actual_order_quantity": leg.actual_order_quantity.map(format_float),
         "actual_notional_usdt": leg.actual_notional_usdt.map(format_float),
+        "fee_usdt": format_float(leg.fee_usdt),
         "submitted_at": leg.submitted_at,
         "acked_at": leg.acked_at,
         "filled_at": leg.filled_at,
     });
     Some(LedgerEvent::fill(record))
+}
+
+#[cfg(test)]
+fn trade_funding_settlement_event(
+    args: &LiveRunnerArgs,
+    settlement: &StrategyFundingSettlement,
+) -> Option<LedgerEvent> {
+    let exchange = GatewayExchangeId::new(settlement.exchange.as_str()).ok()?;
+    let symbol = CanonicalSymbol::parse(&settlement.canonical_symbol.as_pair()).ok()?;
+    let position_side = match settlement.position_side {
+        StrategyPositionSide::Long => GatewayPositionSide::Long,
+        StrategyPositionSide::Short => GatewayPositionSide::Short,
+    };
+    let mut record = FundingSettlementLedgerRecord::new(
+        trade_identity(
+            args,
+            "cross-exchange-arbitrage-live-runner",
+            settlement.settled_at,
+        )
+        .with_correlation_id(settlement.bundle_id.clone()),
+        settlement.bundle_id.clone(),
+        exchange,
+        GatewayMarketType::Perpetual,
+        symbol,
+        position_side,
+        settlement.notional_usdt,
+        settlement.funding_rate,
+        settlement.funding_pnl_usdt,
+        settlement.settled_at,
+    );
+    record.mark_price = settlement
+        .mark_price
+        .filter(|price| price.is_finite() && *price > 0.0);
+    record.metadata = json!({
+        "source": "cross_exchange_arbitrage_funding_model",
+        "position_side": format!("{:?}", settlement.position_side),
+    });
+    Some(LedgerEvent::funding_settlement(record))
 }
 
 fn ledger_order_side(side: &str) -> Option<GatewayOrderSide> {
@@ -10687,9 +13448,19 @@ fn apply_private_ws_event_to_leg(
             "n",
         ],
     ) {
-        let fee_asset = text_field(event, &["fee_asset", "fee_currency", "fillFeeCoin", "N"]);
-        if fee_asset.is_none_or(|asset| asset.eq_ignore_ascii_case("USDT")) {
-            leg.fee_usdt = fee.abs();
+        let raw_fee = fee.abs();
+        let fee_asset = text_field(event, &["fee_asset", "fee_currency", "fillFeeCoin", "N"])
+            .map(str::trim)
+            .filter(|asset| !asset.is_empty());
+        leg.fee_amount = Some(raw_fee);
+        leg.fee_asset = fee_asset.map(|asset| asset.to_ascii_uppercase());
+        if let Some(converted) = private_ws_fee_amount_as_usdt(
+            raw_fee,
+            fee_asset,
+            &draft.canonical_symbol.quote,
+            text_field(event, &["exchange"]).or(Some(leg.exchange.as_str())),
+        ) {
+            leg.fee_usdt = converted;
         }
     }
     leg.filled_at = datetime_any_field(event, &["observed_at"]).or(Some(Utc::now()));
@@ -11670,16 +14441,19 @@ fn process_is_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustcta_event_ledger::LedgerPayload;
     use rustcta_exchange_api::{OrderState, ResponseMetadata, EXCHANGE_API_SCHEMA_VERSION};
     use rustcta_exchange_gateway::{
+        AdapterBackedGateway, AsterGatewayConfig, BybitGatewayConfig, GatewayClient,
         GatewayOperation, GatewayProtocolRequest, GatewayProtocolResponse, GatewayRequestPayload,
-        GatewayResponsePayload,
+        GatewayResponsePayload, GetCapabilitiesRequest, InProcessGatewayClient,
+        KuCoinFuturesGatewayConfig, MexcGatewayConfig, GATEWAY_PROTOCOL_SCHEMA_VERSION,
     };
     use rustcta_strategy_cross_exchange_arbitrage::{
         DualTakerArbitrageConfig, OrderSide as StrategyOrderSide, QuantityUnit,
     };
     use rustcta_types::{FillStatus, LiquidityRole, SchemaVersion};
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     fn test_confirmation_policy() -> LiveConfirmationPolicy {
         LiveConfirmationPolicy {
@@ -11704,6 +14478,26 @@ mod tests {
         assert_eq!(
             gateway_market_type(&SdkMarketType::Futures).expect("futures"),
             GatewayMarketType::Futures
+        );
+    }
+
+    #[test]
+    fn fee_amount_as_usdt_should_convert_quote_and_base_only() {
+        assert_eq!(
+            fee_amount_as_usdt(0.2, Some("USDT"), 10.0, "GT", "USDT"),
+            Some(0.2)
+        );
+        assert_eq!(
+            fee_amount_as_usdt(0.01, Some("GT"), 10.0, "GT", "USDT"),
+            Some(0.1)
+        );
+        assert_eq!(
+            fee_amount_as_usdt(0.01, Some("BNB"), 300.0, "BTC", "USDT"),
+            None
+        );
+        assert_eq!(
+            fee_amount_as_usdt(0.01, Some("BGB"), 1.0, "BTC", "USDT"),
+            None
         );
     }
 
@@ -11744,6 +14538,43 @@ mod tests {
             LiveRunnerArgs::from_iter(["--no-trade-ledger".to_string()]).expect("args parse");
 
         assert_eq!(args.trade_ledger_path, None);
+    }
+
+    #[test]
+    fn funding_settlement_should_convert_to_shared_trade_ledger_event() {
+        let args =
+            LiveRunnerArgs::from_iter(["--no-trade-ledger".to_string()]).expect("args parse");
+        let settled_at = DateTime::parse_from_rfc3339("2026-06-12T00:00:00Z")
+            .expect("time")
+            .with_timezone(&Utc);
+        let settlement = FundingModel::settle_leg(
+            "bundle-funding-1",
+            StrategyExchangeId::new("bybit"),
+            StrategyCanonicalSymbol::new("BTC", "USDT"),
+            StrategyPositionSide::Short,
+            100.0,
+            0.0005,
+            Some(65_000.0),
+            settled_at,
+        );
+
+        let event =
+            trade_funding_settlement_event(&args, &settlement).expect("settlement ledger event");
+
+        assert_eq!(event.kind, EventKind::FundingSettlementEvent);
+        assert_eq!(
+            event.identity.correlation_id.as_deref(),
+            Some("bundle-funding-1")
+        );
+        let LedgerPayload::FundingSettlement(record) = event.payload else {
+            panic!("expected funding settlement payload");
+        };
+        assert_eq!(record.exchange_id.as_str(), "bybit");
+        assert_eq!(record.canonical_symbol.as_str(), "BTC/USDT");
+        assert_eq!(record.position_side, GatewayPositionSide::Short);
+        assert!((record.funding_pnl_usdt - 0.05).abs() < 1e-9);
+        assert_eq!(record.mark_price, Some(65_000.0));
+        record.validated().expect("valid record");
     }
 
     #[test]
@@ -11861,13 +14692,526 @@ mod tests {
     }
 
     #[test]
+    fn symbol_sharding_should_be_stable_and_disjoint() {
+        let symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT"];
+        let first_pass = symbols
+            .iter()
+            .map(|symbol| stable_symbol_shard(symbol, 3))
+            .collect::<Vec<_>>();
+        let second_pass = symbols
+            .iter()
+            .map(|symbol| stable_symbol_shard(symbol, 3))
+            .collect::<Vec<_>>();
+        assert_eq!(first_pass, second_pass);
+
+        for symbol in symbols {
+            let matching_shards = (0..3)
+                .filter(|shard_id| stable_symbol_shard(symbol, 3) == *shard_id)
+                .collect::<Vec<_>>();
+            assert_eq!(matching_shards.len(), 1);
+        }
+    }
+
+    #[test]
+    fn symbol_sharding_should_filter_strategy_and_runtime_config() {
+        let mut runtime_config = json!({
+            "symbols": ["EDGEUSDT", "DRIFT_USDT", "SAHARA/USDT"],
+            "universe": {
+                "symbols": ["EDGEUSDT", "DRIFT_USDT", "SAHARA/USDT"]
+            },
+            "sharding": {
+                "enabled": true,
+                "mode": "explicit_symbols",
+                "explicit_symbols": ["DRIFT/USDT"]
+            }
+        });
+        let mut strategy_config = CrossExchangeArbitrageConfig::from_runtime_value(&runtime_config);
+
+        apply_symbol_sharding(
+            &mut strategy_config,
+            &mut runtime_config,
+            false,
+            SymbolShardingCliOverrides::default(),
+        )
+        .expect("sharding applies");
+
+        assert_eq!(strategy_config.symbols, vec!["DRIFT/USDT".to_string()]);
+        assert_eq!(runtime_config["symbols"], json!(["DRIFT/USDT"]));
+        assert_eq!(runtime_config["universe"]["symbols"], json!(["DRIFT/USDT"]));
+    }
+
+    #[test]
+    fn symbol_sharding_should_reject_invalid_shard_id() {
+        let runtime_config = json!({
+            "sharding": {
+                "enabled": true,
+                "shard_id": 2,
+                "shard_count": 2
+            }
+        });
+
+        let error =
+            SymbolShardingConfig::from_runtime_config(&runtime_config).expect_err("invalid shard");
+
+        assert!(error.to_string().contains("sharding.shard_id"));
+    }
+
+    #[test]
+    fn symbol_sharding_should_guard_multi_shard_live_execution() {
+        let mut runtime_config = json!({
+            "symbols": ["BTC/USDT", "ETH/USDT"],
+            "sharding": {
+                "enabled": true,
+                "shard_id": 0,
+                "shard_count": 2
+            }
+        });
+        let mut strategy_config = CrossExchangeArbitrageConfig::from_runtime_value(&runtime_config);
+
+        let error = apply_symbol_sharding(
+            &mut strategy_config,
+            &mut runtime_config,
+            true,
+            SymbolShardingCliOverrides::default(),
+        )
+        .expect_err("multi-shard live needs coordination");
+
+        assert!(error.to_string().contains("global risk coordinator"));
+    }
+
+    #[test]
+    fn symbol_sharding_cli_overrides_should_enable_hash_shards() {
+        let mut runtime_config = json!({
+            "symbols": ["EDGE/USDT", "DRIFT/USDT", "SAHARA/USDT", "NEXT/USDT"]
+        });
+        let mut strategy_config = CrossExchangeArbitrageConfig::from_runtime_value(&runtime_config);
+        let selected_shard = stable_symbol_shard("EDGE/USDT", 2);
+
+        apply_symbol_sharding(
+            &mut strategy_config,
+            &mut runtime_config,
+            false,
+            SymbolShardingCliOverrides {
+                shard_id: Some(selected_shard),
+                shard_count: Some(2),
+            },
+        )
+        .expect("cli shard override applies");
+
+        assert!(!strategy_config.symbols.is_empty());
+        assert!(strategy_config
+            .symbols
+            .iter()
+            .all(|symbol| stable_symbol_shard(symbol, 2) == selected_shard));
+    }
+
+    #[test]
+    fn evaluator_workers_config_should_default_and_clamp() {
+        assert_eq!(evaluator_workers_from_config(&json!({})), 1);
+        assert_eq!(
+            evaluator_workers_from_config(&json!({"performance": {"evaluator_workers": 4}})),
+            4
+        );
+        assert_eq!(
+            evaluator_workers_from_config(&json!({"performance": {"evaluator_workers": 128}})),
+            32
+        );
+    }
+
+    #[test]
+    fn dashboard_output_limits_should_truncate_large_arrays() {
+        let mut snapshot = json!({
+            "opportunities": [1, 2, 3],
+            "market_snapshots": [1, 2, 3, 4],
+            "route_health": [1, 2, 3],
+            "cross_arb_dashboard": {
+                "opportunities": [1, 2, 3],
+                "arbitrage_opportunities": [1, 2, 3],
+                "market_snapshots": [1, 2, 3, 4],
+                "route_health": [1, 2, 3]
+            }
+        });
+
+        apply_dashboard_output_limits(
+            &mut snapshot,
+            DashboardOutputConfig {
+                pretty_json: false,
+                max_opportunity_rows: 2,
+                max_market_snapshot_rows: 1,
+                max_route_health_rows: 2,
+            },
+        );
+
+        assert_eq!(snapshot["opportunities"].as_array().unwrap().len(), 2);
+        assert_eq!(snapshot["market_snapshots"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot["route_health"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            snapshot["cross_arb_dashboard"]["arbitrage_opportunities"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_sweep_should_expire_cache_without_full_rebuild() {
+        let (_tx, trigger_rx) = mpsc::channel(1);
+        let mut provider = DirectWebsocketMarketData {
+            trigger_rx,
+            state: Arc::new(tokio::sync::Mutex::new(DirectWebsocketMarketDataState {
+                tops: BTreeMap::new(),
+                connected: BTreeMap::new(),
+                route_health: Vec::new(),
+                dirty_symbols: BTreeSet::new(),
+                subscribed_symbols: BTreeMap::new(),
+                unsupported_symbols: BTreeMap::new(),
+            })),
+            opportunity_cache: BTreeMap::from([(
+                "EDGE/USDT".to_string(),
+                CachedSymbolOpportunities {
+                    valid_until: Utc::now() - ChronoDuration::milliseconds(1),
+                    typed_opportunities: vec![open_opportunity_for_test("edge", "EDGE", 0.006)],
+                    slippage_capture_opportunities: Vec::new(),
+                },
+            )]),
+            evaluator_workers: 1,
+        };
+        let mut strategy_config = CrossExchangeArbitrageConfig::default();
+        strategy_config.symbols = vec!["EDGE/USDT".to_string()];
+
+        let dashboard = provider
+            .dashboard_data(
+                &strategy_config,
+                &[],
+                &FeeModel::default(),
+                &PrecisionRegistry::default(),
+                &DisabledExchangeSymbols::new(),
+                &DisabledOpenExchanges::new(),
+                None,
+                false,
+                false,
+            )
+            .await
+            .expect("stale sweep");
+
+        assert!(dashboard.typed_opportunities.is_empty());
+        assert!(provider.opportunity_cache.is_empty());
+    }
+
+    #[test]
+    fn synthetic_replay_symbol_delta_should_match_full_grouped_opportunities() {
+        let now = Utc::now();
+        let mut strategy_config = CrossExchangeArbitrageConfig::default();
+        strategy_config.venues = vec![
+            "binance".to_string(),
+            "bitget".to_string(),
+            "gateio".to_string(),
+        ];
+        strategy_config.symbols = (0..12)
+            .map(|index| format!("EDGE{index}/USDT"))
+            .collect::<Vec<_>>();
+        strategy_config.dual_taker = DualTakerArbitrageConfig {
+            target_notional_usdt: 10.0,
+            min_open_spread_pct: 0.001,
+            min_open_net_profit_pct: 0.0,
+            orderbook_stale_ms: 1_000,
+            ..DualTakerArbitrageConfig::default()
+        };
+        let mut precision_registry = PrecisionRegistry::default();
+        let mut books = Vec::new();
+        for index in 0..12 {
+            let base = format!("EDGE{index}");
+            let symbol = StrategyCanonicalSymbol::new(&base, "USDT");
+            for exchange in ["binance", "bitget", "gateio"] {
+                precision_registry.insert(
+                    StrategyExchangeId::new(exchange),
+                    symbol.clone(),
+                    SymbolPrecision {
+                        price_tick: 0.0001,
+                        quantity_step: 0.001,
+                        min_quantity: 0.001,
+                        min_notional_usdt: 5.0,
+                        quantity_unit: QuantityUnit::Base,
+                        contract_size: 1.0,
+                    },
+                );
+            }
+            let price_offset = index as f64;
+            books.push(replay_test_top(
+                "binance",
+                &base,
+                100.00 + price_offset,
+                100.10 + price_offset,
+                now,
+            ));
+            books.push(replay_test_top(
+                "bitget",
+                &base,
+                101.00 + price_offset,
+                101.10 + price_offset,
+                now,
+            ));
+            books.push(replay_test_top(
+                "gateio",
+                &base,
+                99.00 + price_offset,
+                99.10 + price_offset,
+                now,
+            ));
+        }
+
+        let fee_model = FeeModel::default();
+        let mut full_opportunities = evaluate_dual_taker_open_opportunities_with_audit(
+            &books,
+            &precision_registry,
+            &fee_model,
+            &strategy_config.dual_taker,
+            None,
+            now,
+        )
+        .opportunities;
+        retain_best_opportunity_per_symbol(&mut full_opportunities);
+
+        let mut delta_opportunities = Vec::new();
+        for symbol in strategy_config.active_symbols() {
+            let symbol_tops = books
+                .iter()
+                .filter(|top| top.canonical_symbol.as_pair() == symbol)
+                .cloned()
+                .collect::<Vec<_>>();
+            let (entry, _) = evaluate_cached_symbol_opportunities(
+                &strategy_config,
+                &precision_registry,
+                &fee_model,
+                &symbol,
+                &symbol_tops,
+                &DisabledExchangeSymbols::new(),
+                &DisabledOpenExchanges::new(),
+                false,
+                &mut Vec::new(),
+                now,
+            );
+            if let Some(entry) = entry {
+                delta_opportunities.extend(entry.typed_opportunities);
+            }
+        }
+        retain_best_opportunity_per_symbol(&mut delta_opportunities);
+
+        let mut full_ids = full_opportunities
+            .iter()
+            .map(|opportunity| opportunity.opportunity_id.clone())
+            .collect::<Vec<_>>();
+        let mut delta_ids = delta_opportunities
+            .iter()
+            .map(|opportunity| opportunity.opportunity_id.clone())
+            .collect::<Vec<_>>();
+        full_ids.sort();
+        delta_ids.sort();
+        assert_eq!(delta_ids, full_ids);
+    }
+
+    #[tokio::test]
+    async fn evaluator_worker_pool_should_match_single_worker_results() {
+        let now = Utc::now();
+        let mut strategy_config = CrossExchangeArbitrageConfig::default();
+        strategy_config.venues = vec![
+            "binance".to_string(),
+            "bitget".to_string(),
+            "gateio".to_string(),
+        ];
+        strategy_config.symbols = vec![
+            "EDGE/USDT".to_string(),
+            "DRIFT/USDT".to_string(),
+            "SAHARA/USDT".to_string(),
+            "NEXT/USDT".to_string(),
+        ];
+        strategy_config.dual_taker = DualTakerArbitrageConfig {
+            target_notional_usdt: 10.0,
+            min_open_spread_pct: 0.001,
+            min_open_net_profit_pct: 0.0,
+            orderbook_stale_ms: 1_000,
+            ..DualTakerArbitrageConfig::default()
+        };
+        let mut precision_registry = PrecisionRegistry::default();
+        let mut tops_by_symbol = BTreeMap::<String, Vec<OrderBookTop>>::new();
+        for (index, base) in ["EDGE", "DRIFT", "SAHARA", "NEXT"].iter().enumerate() {
+            let symbol = StrategyCanonicalSymbol::new(*base, "USDT");
+            for exchange in ["binance", "bitget", "gateio"] {
+                precision_registry.insert(
+                    StrategyExchangeId::new(exchange),
+                    symbol.clone(),
+                    SymbolPrecision {
+                        price_tick: 0.0001,
+                        quantity_step: 0.001,
+                        min_quantity: 0.001,
+                        min_notional_usdt: 5.0,
+                        quantity_unit: QuantityUnit::Base,
+                        contract_size: 1.0,
+                    },
+                );
+            }
+            let price_offset = index as f64;
+            tops_by_symbol.insert(
+                format!("{base}/USDT"),
+                vec![
+                    replay_test_top(
+                        "binance",
+                        base,
+                        100.00 + price_offset,
+                        100.10 + price_offset,
+                        now,
+                    ),
+                    replay_test_top(
+                        "bitget",
+                        base,
+                        101.00 + price_offset,
+                        101.10 + price_offset,
+                        now,
+                    ),
+                    replay_test_top(
+                        "gateio",
+                        base,
+                        99.00 + price_offset,
+                        99.10 + price_offset,
+                        now,
+                    ),
+                ],
+            );
+        }
+        let symbols = strategy_config.active_symbols();
+
+        let single = evaluate_symbol_rebuilds(
+            1,
+            symbols.clone(),
+            tops_by_symbol.clone(),
+            &strategy_config,
+            &precision_registry,
+            &FeeModel::default(),
+            &DisabledExchangeSymbols::new(),
+            &DisabledOpenExchanges::new(),
+            false,
+            now,
+        )
+        .await
+        .expect("single worker");
+        let parallel = evaluate_symbol_rebuilds(
+            4,
+            symbols,
+            tops_by_symbol,
+            &strategy_config,
+            &precision_registry,
+            &FeeModel::default(),
+            &DisabledExchangeSymbols::new(),
+            &DisabledOpenExchanges::new(),
+            false,
+            now,
+        )
+        .await
+        .expect("parallel workers");
+
+        let single_ids = single
+            .iter()
+            .flat_map(|result| {
+                result
+                    .cache_entry
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|entry| entry.typed_opportunities.iter())
+                    .map(|opportunity| opportunity.opportunity_id.clone())
+            })
+            .collect::<Vec<_>>();
+        let parallel_ids = parallel
+            .iter()
+            .flat_map(|result| {
+                result
+                    .cache_entry
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|entry| entry.typed_opportunities.iter())
+                    .map(|opportunity| opportunity.opportunity_id.clone())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(parallel_ids, single_ids);
+    }
+
+    #[test]
+    fn shared_control_command_cache_should_avoid_file_read_and_filter_processed() {
+        let args = LiveRunnerArgs {
+            control_command_queue_path: Some(PathBuf::from("missing-control-commands.jsonl")),
+            ..LiveRunnerArgs::default()
+        };
+        let caches = JsonlRuntimeCaches::default();
+        *caches.control_commands.lock().unwrap() = ControlCommandSharedSnapshot {
+            queue_path: args.control_command_queue_path.clone(),
+            checked_at: Some(Instant::now()),
+            commands: vec![
+                ManualCloseCommand {
+                    command_key: "processed".to_string(),
+                    bundle_id: "bundle-1".to_string(),
+                },
+                ManualCloseCommand {
+                    command_key: "pending".to_string(),
+                    bundle_id: "bundle-2".to_string(),
+                },
+            ],
+        };
+        let mut state = LiveExecutionState {
+            jsonl_runtime_caches: Some(caches),
+            ..LiveExecutionState::default()
+        };
+        state
+            .processed_control_commands
+            .insert("processed".to_string());
+
+        let commands =
+            cached_pending_manual_close_commands(&args, &mut state).expect("shared cache");
+
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].command_key, "pending");
+    }
+
+    #[test]
+    fn shared_loss_guard_cache_should_avoid_file_read() {
+        let args = LiveRunnerArgs {
+            profit_history_path: Some(PathBuf::from("missing-profit-history.jsonl")),
+            ..LiveRunnerArgs::default()
+        };
+        let caches = JsonlRuntimeCaches::default();
+        *caches.loss_guard.lock().unwrap() = LossGuardSharedSnapshot {
+            profit_history_path: args.profit_history_path.clone(),
+            max_consecutive_losses: Some(3),
+            checked_at: Some(Instant::now()),
+            triggered: true,
+        };
+        let mut state = LiveExecutionState {
+            jsonl_runtime_caches: Some(caches),
+            ..LiveExecutionState::default()
+        };
+
+        let triggered = cached_profit_history_loss_guard_triggered(&args, 3, &mut state, false)
+            .expect("shared cache");
+
+        assert!(triggered);
+    }
+
+    #[test]
     fn direct_ws_connections_should_chunk_enabled_symbols_by_exchange() {
         let symbols = (0..85)
             .map(|index| format!("SYM{index}/USDT"))
             .collect::<Vec<_>>();
-        let connections =
-            build_direct_ws_connections(&["binance".to_string(), "gateio".to_string()], &symbols)
-                .expect("connections");
+        let connections = build_direct_ws_connections(
+            &[
+                "binance".to_string(),
+                "gateio".to_string(),
+                "aster".to_string(),
+                "mexc".to_string(),
+                "kucoinfutures".to_string(),
+                "bybit".to_string(),
+            ],
+            &symbols,
+        )
+        .expect("connections");
 
         let binance = connections
             .iter()
@@ -11879,6 +15223,34 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(binance.len(), 2);
         assert_eq!(gate.len(), 3);
+        assert_eq!(
+            connections
+                .iter()
+                .filter(|connection| connection.exchange == "aster")
+                .count(),
+            2
+        );
+        assert_eq!(
+            connections
+                .iter()
+                .filter(|connection| connection.exchange == "mexc")
+                .count(),
+            3
+        );
+        assert_eq!(
+            connections
+                .iter()
+                .filter(|connection| connection.exchange == "kucoinfutures")
+                .count(),
+            2
+        );
+        assert_eq!(
+            connections
+                .iter()
+                .filter(|connection| connection.exchange == "bybit")
+                .count(),
+            2
+        );
         assert!(binance[0].url.contains("fstream.binance.com"));
         assert_eq!(gate[0].subscribe_messages.len(), 30);
     }
@@ -11892,28 +15264,44 @@ mod tests {
             ),
             ("gateio".to_string(), vec!["EDGE/USDT".to_string()]),
             ("bitget".to_string(), Vec::new()),
+            ("aster".to_string(), vec!["EDGE/USDT".to_string()]),
+            ("mexc".to_string(), vec!["EDGE/USDT".to_string()]),
+            ("kucoinfutures".to_string(), vec!["BTC/USDT".to_string()]),
+            ("bybit".to_string(), vec!["EDGE/USDT".to_string()]),
         ]);
         let connections = build_direct_ws_connections_for_exchange_symbols(
             &[
                 "binance".to_string(),
                 "gateio".to_string(),
                 "bitget".to_string(),
+                "aster".to_string(),
+                "mexc".to_string(),
+                "kucoinfutures".to_string(),
+                "bybit".to_string(),
             ],
             &subscription_symbols,
         )
         .expect("connections");
 
-        assert_eq!(connections.len(), 2);
+        assert_eq!(connections.len(), 6);
         assert_eq!(connections[0].exchange, "binance");
         assert!(connections[0].url.contains("edgeusdt@depth5@100ms"));
         assert!(connections[0].url.contains("saharausdt@depth5@100ms"));
         assert_eq!(connections[1].exchange, "gate");
         assert_eq!(connections[1].subscribe_messages.len(), 1);
         assert!(connections[1].subscribe_messages[0].contains("EDGE_USDT"));
+        assert_eq!(connections[2].exchange, "aster");
+        assert!(connections[2].subscribe_messages[0].contains("edgeusdt@depth5@100ms"));
+        assert_eq!(connections[3].exchange, "mexc");
+        assert!(connections[3].subscribe_messages[0].contains("EDGE_USDT"));
+        assert_eq!(connections[4].exchange, "kucoinfutures");
+        assert!(connections[4].subscribe_messages[0].contains("XBTUSDTM"));
+        assert_eq!(connections[5].exchange, "bybit");
+        assert!(connections[5].subscribe_messages[0].contains("orderbook.1.EDGEUSDT"));
     }
 
     #[test]
-    fn direct_ws_parsers_should_extract_binance_bitget_and_gate_tops() {
+    fn direct_ws_parsers_should_extract_supported_exchange_tops() {
         let binance = r#"{"stream":"edgeusdt@depth5@100ms","data":{"E":1780940000000,"s":"EDGEUSDT","b":[["0.1","12"]],"a":[["0.2","13"]]}}"#;
         let top = parse_direct_ws_order_book_top("binance", binance).expect("binance");
         assert_eq!(top.exchange.as_str(), "binance");
@@ -11930,6 +15318,27 @@ mod tests {
         let top = parse_direct_ws_order_book_top("gate", gate).expect("gate");
         assert_eq!(top.exchange.as_str(), "gateio");
         assert_eq!(top.best_ask_price, 0.6);
+
+        let aster = r#"{"e":"depthUpdate","E":1780940000000,"s":"EDGEUSDT","b":[["0.7","18"]],"a":[["0.8","19"]]}"#;
+        let top = parse_direct_ws_order_book_top("aster", aster).expect("aster");
+        assert_eq!(top.exchange.as_str(), "aster");
+        assert_eq!(top.best_bid_quantity, 18.0);
+
+        let mexc = r#"{"channel":"push.depth.full","symbol":"EDGE_USDT","ts":1780940000000,"data":{"bids":[[0.9,20,2.0]],"asks":[[1.0,21,2.1]],"version":100}}"#;
+        let top = parse_direct_ws_order_book_top("mexc", mexc).expect("mexc");
+        assert_eq!(top.exchange.as_str(), "mexc");
+        assert_eq!(top.best_ask_quantity, 21.0);
+
+        let kucoin = r#"{"type":"message","topic":"/contractMarket/level2Depth5:XBTUSDTM","data":{"bids":[["65000","2"]],"asks":[["65001","3"]],"timestamp":1780940000000}}"#;
+        let top = parse_direct_ws_order_book_top("kucoinfutures", kucoin).expect("kucoin");
+        assert_eq!(top.exchange.as_str(), "kucoinfutures");
+        assert_eq!(top.canonical_symbol.as_pair(), "BTC/USDT");
+        assert_eq!(top.best_bid_quantity, 2.0);
+
+        let bybit = r#"{"topic":"orderbook.1.EDGEUSDT","type":"snapshot","ts":1780940000000,"data":{"s":"EDGEUSDT","b":[["1.1","22"]],"a":[["1.2","23"]]},"cts":1780940000000}"#;
+        let top = parse_direct_ws_order_book_top("bybit", bybit).expect("bybit");
+        assert_eq!(top.exchange.as_str(), "bybit");
+        assert_eq!(top.best_ask_price, 1.2);
     }
 
     #[test]
@@ -11963,6 +15372,32 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn top_of_book_change_should_trigger_on_worse_prices_or_depth() {
+        let previous = direct_test_top(100.0, 10.0, 100.2, 10.0);
+
+        assert!(top_of_book_changed(
+            &previous,
+            &direct_test_top(99.9, 10.0, 100.2, 10.0)
+        ));
+        assert!(top_of_book_changed(
+            &previous,
+            &direct_test_top(100.0, 9.0, 100.2, 10.0)
+        ));
+        assert!(top_of_book_changed(
+            &previous,
+            &direct_test_top(100.0, 10.0, 100.3, 10.0)
+        ));
+        assert!(top_of_book_changed(
+            &previous,
+            &direct_test_top(100.0, 10.0, 100.2, 9.0)
+        ));
+        assert!(!top_of_book_changed(
+            &previous,
+            &direct_test_top(100.0, 10.0, 100.2, 10.0)
+        ));
+    }
+
     fn direct_test_top(
         best_bid_price: f64,
         best_bid_quantity: f64,
@@ -11980,6 +15415,27 @@ mod tests {
             exchange_timestamp: None,
             received_at: Utc::now(),
             latency_ms: None,
+        }
+    }
+
+    fn replay_test_top(
+        exchange: &str,
+        base: &str,
+        best_bid_price: f64,
+        best_ask_price: f64,
+        received_at: DateTime<Utc>,
+    ) -> OrderBookTop {
+        OrderBookTop {
+            exchange: StrategyExchangeId::new(exchange),
+            canonical_symbol: StrategyCanonicalSymbol::new(base, "USDT"),
+            best_bid_price,
+            best_bid_quantity: 100.0,
+            best_ask_price,
+            best_ask_quantity: 100.0,
+            levels: 5,
+            exchange_timestamp: Some(received_at),
+            received_at,
+            latency_ms: Some(1),
         }
     }
 
@@ -12669,7 +16125,7 @@ mod tests {
         assert!(row["reject_reasons"]
             .as_str()
             .expect("reject reason")
-            .contains("display-only row"));
+            .contains("display-only opportunity"));
     }
 
     #[test]
@@ -12706,7 +16162,7 @@ mod tests {
             .as_str()
             .expect("reject reason");
         assert!(reason.contains("new entries disabled on gateio"));
-        assert!(reason.contains("display-only row has no executable order drafts"));
+        assert!(reason.contains("no maker order was submitted"));
         assert_eq!(reason.matches("new entries disabled on gateio").count(), 1);
     }
 
@@ -12803,7 +16259,7 @@ mod tests {
             .as_str()
             .expect("reject reason");
         assert!(reason.contains("same symbol already has an active open bundle"));
-        assert!(reason.contains("display-only row"));
+        assert!(reason.contains("display-only opportunity"));
         assert!(reason.contains("below min open raw spread"));
         assert!(reason.contains("below min open net edge"));
     }
@@ -13314,6 +16770,8 @@ mod tests {
             actual_order_quantity: Some(81.0),
             actual_notional_usdt: Some(5.44887),
             fee_usdt: 0.00272443,
+            fee_amount: Some(0.00272443),
+            fee_asset: Some("USDT".to_string()),
             submitted_at: None,
             acked_at: None,
             filled_at: Some(Utc::now()),
@@ -13417,6 +16875,8 @@ mod tests {
             actual_order_quantity: Some(50.0),
             actual_notional_usdt: Some(5.2925),
             fee_usdt: 0.0010585,
+            fee_amount: Some(0.0010585),
+            fee_asset: Some("USDT".to_string()),
             submitted_at: None,
             acked_at: None,
             filled_at: Some(Utc::now()),
@@ -13489,6 +16949,8 @@ mod tests {
             actual_order_quantity: None,
             actual_notional_usdt: None,
             fee_usdt: 0.0,
+            fee_amount: None,
+            fee_asset: None,
             submitted_at: None,
             acked_at: Some(Utc::now()),
             filled_at: None,
@@ -13609,6 +17071,7 @@ mod tests {
         };
         let execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: filled_leg("binance", "close_long", "sell", "long", 100.8, 0.05),
             second: filled_leg("bitget", "close_short", "buy", "short", 100.2, 0.05),
         };
@@ -13657,6 +17120,7 @@ mod tests {
         };
         let execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: close_long,
             second: close_short,
         };
@@ -13705,6 +17169,7 @@ mod tests {
         };
         let execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: close_long,
             second: close_short,
         };
@@ -13754,6 +17219,8 @@ mod tests {
             actual_order_quantity: None,
             actual_notional_usdt: None,
             fee_usdt: 0.0,
+            fee_amount: None,
+            fee_asset: None,
             submitted_at: None,
             acked_at: None,
             filled_at: None,
@@ -13835,6 +17302,8 @@ mod tests {
             actual_order_quantity: None,
             actual_notional_usdt: None,
             fee_usdt: 0.0,
+            fee_amount: None,
+            fee_asset: None,
             submitted_at: None,
             acked_at: None,
             filled_at: None,
@@ -13896,6 +17365,8 @@ mod tests {
             actual_order_quantity: None,
             actual_notional_usdt: None,
             fee_usdt: 0.0,
+            fee_amount: None,
+            fee_asset: None,
             submitted_at: None,
             acked_at: None,
             filled_at: None,
@@ -14019,6 +17490,7 @@ mod tests {
             first: rechecked.clone(),
             second: other,
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
         };
         assert!(execution.both_filled());
         assert_eq!(rechecked.actual_base_quantity, Some(62.0));
@@ -14064,6 +17536,7 @@ mod tests {
             requested_at,
             first: close_long,
             second: close_short,
+            slippage_hedge_decision: None,
         };
 
         let event = close_profit_event(&bundle, &execution, 0.08, requested_at);
@@ -14129,6 +17602,53 @@ mod tests {
     }
 
     #[test]
+    fn slippage_maker_timeout_alert_should_include_chinese_message_and_maker_leg() {
+        let opportunity = test_slippage_capture_opportunity("ALERT");
+        let requested_at = Utc::now();
+        let mut maker = filled_leg("bitget", "open_short", "sell", "short", 0.10611, 50.0);
+        maker.status = "maker_cancel_accepted_unfilled".to_string();
+        maker.actual_fill_price = None;
+        maker.actual_base_quantity = None;
+        maker.actual_order_quantity = None;
+        maker.actual_notional_usdt = None;
+        maker.submitted_at = Some(requested_at);
+        let hedge = empty_reconciled_leg_from_draft(
+            &opportunity.hedge_after_fill.order,
+            "not_submitted_maker_unfilled",
+            requested_at,
+        );
+        let execution = PairExecution {
+            first: hedge,
+            second: maker,
+            requested_at,
+            slippage_hedge_decision: None,
+        };
+
+        let alert = slippage_maker_timeout_alert_event(
+            "bundle-alert",
+            &opportunity,
+            &execution,
+            requested_at + ChronoDuration::milliseconds(3000),
+        );
+
+        assert_eq!(
+            alert["event_type"],
+            json!("slippage_capture_maker_timeout_alert")
+        );
+        assert_eq!(alert["severity"], json!("warning"));
+        assert!(alert["message_zh"]
+            .as_str()
+            .expect("message_zh")
+            .contains("maker单超时未成交"));
+        assert_eq!(alert["maker_order_leg"]["exchange"], json!("bitget"));
+        assert_eq!(
+            alert["maker_order_leg"]["status"],
+            json!("maker_cancel_accepted_unfilled")
+        );
+        assert_eq!(alert["maker_elapsed_ms"], json!(3000));
+    }
+
+    #[test]
     fn emergency_trigger_reason_should_describe_unfilled_exchange_leg() {
         let mut failed_gate = filled_leg("gateio", "open_long", "buy", "long", 0.006536, 800.0);
         failed_gate.actual_fill_price = None;
@@ -14143,6 +17663,7 @@ mod tests {
             first: failed_gate,
             second: filled_binance,
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
         };
 
         let reason = emergency_trigger_reason(&execution);
@@ -14162,6 +17683,7 @@ mod tests {
             first: long,
             second: short,
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
         };
 
         assert!(!execution.both_filled());
@@ -14229,6 +17751,7 @@ mod tests {
             first: filled_leg("binance", "open_long", "buy", "long", 0.07487, 73.0),
             second: filled_leg("bitget", "open_short", "sell", "short", 0.07569, 27.0),
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
         };
         let mut precision_registry = PrecisionRegistry::default();
         for exchange in ["binance", "bitget"] {
@@ -14316,6 +17839,7 @@ mod tests {
         };
         let close_execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: ReconciledOrderLeg {
                 exchange: "binance".to_string(),
                 symbol: "TEST/USDT".to_string(),
@@ -14334,6 +17858,8 @@ mod tests {
                 actual_order_quantity: None,
                 actual_notional_usdt: None,
                 fee_usdt: 0.0,
+                fee_amount: None,
+                fee_asset: None,
                 submitted_at: None,
                 acked_at: None,
                 filled_at: None,
@@ -14433,6 +17959,7 @@ mod tests {
         close_short.exchange_order_id = Some("move-close-short-eid".to_string());
         let close_execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: close_long,
             second: close_short,
         };
@@ -14580,6 +18107,7 @@ mod tests {
         };
         let close_execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: normal_close_long,
             second: failed_close_short,
         };
@@ -14655,6 +18183,7 @@ mod tests {
         };
         let close_execution = PairExecution {
             requested_at: Utc::now(),
+            slippage_hedge_decision: None,
             first: failed_close_long,
             second: normal_close_short,
         };
@@ -15241,6 +18770,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &precision_registry,
+            None,
             true,
             true,
             None,
@@ -15385,6 +18915,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &precision_registry,
+            None,
             true,
             false,
             Some("close-only control is enabled"),
@@ -15510,6 +19041,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &precision_registry,
+            None,
             true,
             true,
             None,
@@ -15688,6 +19220,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &precision_registry,
+            None,
             true,
             true,
             None,
@@ -15828,6 +19361,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &precision_registry,
+            None,
             true,
             true,
             None,
@@ -15914,6 +19448,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &PrecisionRegistry::default(),
+            None,
             true,
             true,
             None,
@@ -15958,6 +19493,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &PrecisionRegistry::default(),
+            None,
             true,
             true,
             None,
@@ -16076,6 +19612,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &PrecisionRegistry::default(),
+            None,
             true,
             true,
             None,
@@ -16146,6 +19683,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &PrecisionRegistry::default(),
+            None,
             true,
             false,
             Some("close-only control is enabled"),
@@ -16236,6 +19774,7 @@ mod tests {
             GatewayMarketType::Perpetual,
             &FeeModel::default(),
             &PrecisionRegistry::default(),
+            None,
             true,
             true,
             None,
@@ -16522,6 +20061,8 @@ mod tests {
             actual_order_quantity: Some(quantity),
             actual_notional_usdt: Some(price * quantity),
             fee_usdt: price * quantity * 0.0005,
+            fee_amount: Some(price * quantity * 0.0005),
+            fee_asset: Some("USDT".to_string()),
             submitted_at: None,
             acked_at: None,
             filled_at: Some(Utc::now()),
@@ -16646,6 +20187,99 @@ mod tests {
             },
             close_orders_are_dual_taker: true,
         }
+    }
+
+    #[tokio::test]
+    async fn slippage_latest_hedge_should_pick_best_fresh_orderbook_after_maker_fill() {
+        let now = Utc::now();
+        let opportunity = test_slippage_capture_opportunity("EDGE");
+        let mut maker_leg = filled_leg("bitget", "open_short", "sell", "short", 0.10611, 50.0);
+        maker_leg.filled_at = Some(now);
+        let symbol = StrategyCanonicalSymbol::new("EDGE", "USDT");
+        let latest_books = Arc::new(tokio::sync::Mutex::new(DirectWebsocketMarketDataState {
+            tops: BTreeMap::from([
+                (
+                    ("binance".to_string(), symbol.as_pair()),
+                    OrderBookTop {
+                        exchange: StrategyExchangeId::new("binance"),
+                        canonical_symbol: symbol.clone(),
+                        best_bid_price: 0.10280,
+                        best_bid_quantity: 200.0,
+                        best_ask_price: 0.10320,
+                        best_ask_quantity: 200.0,
+                        levels: 5,
+                        exchange_timestamp: Some(now),
+                        received_at: now,
+                        latency_ms: Some(2),
+                    },
+                ),
+                (
+                    ("gateio".to_string(), symbol.as_pair()),
+                    OrderBookTop {
+                        exchange: StrategyExchangeId::new("gateio"),
+                        canonical_symbol: symbol.clone(),
+                        best_bid_price: 0.10180,
+                        best_bid_quantity: 200.0,
+                        best_ask_price: 0.10200,
+                        best_ask_quantity: 200.0,
+                        levels: 5,
+                        exchange_timestamp: Some(now),
+                        received_at: now + ChronoDuration::milliseconds(5),
+                        latency_ms: Some(1),
+                    },
+                ),
+            ]),
+            connected: BTreeMap::new(),
+            route_health: Vec::new(),
+            dirty_symbols: BTreeSet::new(),
+            subscribed_symbols: BTreeMap::new(),
+            unsupported_symbols: BTreeMap::new(),
+        }));
+        let mut strategy_config = CrossExchangeArbitrageConfig::default();
+        strategy_config.venues = vec![
+            "bitget".to_string(),
+            "binance".to_string(),
+            "gateio".to_string(),
+        ];
+        strategy_config.symbols = vec!["EDGE/USDT".to_string()];
+        strategy_config.slippage_capture.min_open_net_profit_pct = 0.0;
+        strategy_config.slippage_capture.orderbook_stale_ms = 500;
+        let mut precision_registry = PrecisionRegistry::default();
+        for exchange in ["bitget", "binance", "gateio"] {
+            precision_registry.insert(
+                StrategyExchangeId::new(exchange),
+                symbol.clone(),
+                SymbolPrecision {
+                    price_tick: 0.00001,
+                    quantity_step: 1.0,
+                    min_quantity: 1.0,
+                    min_notional_usdt: 5.0,
+                    quantity_unit: QuantityUnit::Base,
+                    contract_size: 1.0,
+                },
+            );
+        }
+
+        let decision = slippage_latest_hedge_decision_for_fill(
+            &opportunity,
+            &maker_leg,
+            &strategy_config,
+            None,
+            &FeeModel::default(),
+            &precision_registry,
+            Some(latest_books),
+            now,
+        )
+        .await;
+
+        let draft = decision.draft.expect("latest hedge draft");
+        assert_eq!(draft.exchange, StrategyExchangeId::new("gateio"));
+        assert_eq!(draft.reference_price, 0.102);
+        assert_eq!(decision.audit.mode, "profit_hedge_latest_orderbook");
+        assert_eq!(
+            decision.audit.message_zh,
+            "maker已成交，使用最新订单簿选择最优taker hedge"
+        );
     }
 
     struct AckExecutionClient {
@@ -17927,5 +21561,87 @@ mod tests {
         assert!(requirements
             .iter()
             .all(|requirement| !requirement.contains("GTX")));
+    }
+
+    #[tokio::test]
+    async fn four_perp_venues_should_satisfy_cross_arb_trade_capability_gate_with_private_rest() {
+        let gateway = AdapterBackedGateway::new("capability-test");
+        gateway
+            .register_aster_adapter(AsterGatewayConfig {
+                enabled_private_rest: true,
+                user_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+                signer_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+                signer_private_key: Some(
+                    "0000000000000000000000000000000000000000000000000000000000000001".to_string(),
+                ),
+                ..AsterGatewayConfig::default()
+            })
+            .expect("aster");
+        gateway
+            .register_mexc_adapter(MexcGatewayConfig {
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                enabled_private_rest: true,
+                ..MexcGatewayConfig::default()
+            })
+            .expect("mexc");
+        gateway
+            .register_kucoinfutures_adapter(KuCoinFuturesGatewayConfig {
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                api_passphrase: Some("passphrase".to_string()),
+                enabled_private_rest: true,
+                ..KuCoinFuturesGatewayConfig::default()
+            })
+            .expect("kucoinfutures");
+        gateway
+            .register_bybit_adapter(BybitGatewayConfig {
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                enabled_private_rest: true,
+                ..BybitGatewayConfig::default()
+            })
+            .expect("bybit");
+
+        let tenant_id = TenantId::new("tenant-a").expect("tenant");
+        let account_id = AccountId::new("account-a").expect("account");
+        let mut context = RequestContext::new(Utc::now());
+        context.tenant_id = Some(tenant_id.clone());
+        context.account_id = Some(account_id.clone());
+        context.request_id = Some("four-perp-capability-gate".to_string());
+        let exchanges = ["aster", "mexc", "kucoinfutures", "bybit"]
+            .into_iter()
+            .map(|exchange| GatewayExchangeId::new(exchange).expect("exchange"))
+            .collect::<Vec<_>>();
+
+        let gateway_client = InProcessGatewayClient::new(Arc::new(gateway));
+        let response = gateway_client
+            .get_capabilities(
+                "four-perp-capability-gate".to_string(),
+                tenant_id,
+                Some(account_id),
+                GetCapabilitiesRequest {
+                    schema_version: GATEWAY_PROTOCOL_SCHEMA_VERSION,
+                    context,
+                    exchanges,
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 4);
+        for capability in response.capabilities {
+            for execution_module in [
+                CrossArbExecutionModule::DualTaker,
+                CrossArbExecutionModule::SlippageCapture,
+            ] {
+                let requirements = trade_capability_requirements(&capability, execution_module);
+                assert!(
+                    requirements.is_empty(),
+                    "{} {execution_module:?} requirements: {requirements:?}",
+                    capability.exchange
+                );
+            }
+        }
     }
 }

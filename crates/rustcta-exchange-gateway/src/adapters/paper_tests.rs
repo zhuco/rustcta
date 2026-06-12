@@ -3,9 +3,10 @@ use std::sync::Arc;
 use chrono::Utc;
 use rustcta_exchange_api::{
     BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelAllOrdersRequest,
-    CancelOrderRequest, ExchangeClient, OrderBookRequest, OrderSide, OrderType, PlaceOrderRequest,
-    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
-    RequestContext, SymbolScope, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    CancelOrderRequest, ExchangeClient, MarginMode, OrderBookRequest, OrderSide, OrderType,
+    PlaceOrderRequest, PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind,
+    PublicStreamSubscription, RequestContext, SetMarginModeRequest, SymbolScope, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, AssetBalance, CanonicalSymbol, ExchangeBalance, ExchangeId, ExchangeSymbol,
@@ -14,8 +15,8 @@ use rustcta_types::{
 
 use super::paper::PaperGatewayAdapter;
 use crate::{
-    AdapterBackedGateway, GatewayOperation, GatewayProtocolRequest, GatewayRequestPayload,
-    GatewayResponsePayload, LocalGateway, GATEWAY_PROTOCOL_SCHEMA_VERSION,
+    AdapterBackedGateway, GatewayError, GatewayOperation, GatewayProtocolRequest,
+    GatewayRequestPayload, GatewayResponsePayload, LocalGateway, GATEWAY_PROTOCOL_SCHEMA_VERSION,
 };
 
 fn tenant_id() -> TenantId {
@@ -431,5 +432,33 @@ async fn adapter_backed_gateway_should_route_batch_and_cancel_all_to_paper_adapt
     assert!(matches!(
         response.payload,
         GatewayResponsePayload::CancelAllOrders(response) if response.cancelled_count == 1
+    ));
+}
+
+#[tokio::test]
+async fn adapter_backed_gateway_should_route_margin_mode_to_adapter_boundary() {
+    let gateway = AdapterBackedGateway::paper_only("gateway").expect("paper gateway");
+
+    let error = gateway
+        .handle_typed(GatewayProtocolRequest {
+            schema_version: GATEWAY_PROTOCOL_SCHEMA_VERSION,
+            request_id: "gateway-set-margin-mode".to_string(),
+            tenant_id: tenant_id(),
+            account_id: Some(account_id()),
+            operation: GatewayOperation::SetMarginMode,
+            payload: GatewayRequestPayload::SetMarginMode(SetMarginModeRequest {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context: context("gateway-set-margin-mode"),
+                symbol: symbol_scope(),
+                mode: MarginMode::Isolated,
+            }),
+            requested_at: Utc::now(),
+        })
+        .await
+        .expect_err("paper margin mode should stay unsupported");
+
+    assert!(matches!(
+        error,
+        GatewayError::UnsupportedOperation { operation } if operation == "set_margin_mode"
     ));
 }

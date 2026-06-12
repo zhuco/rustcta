@@ -87,14 +87,16 @@ impl KuCoinFuturesGatewayAdapter {
             });
         }
         let mut rates = Vec::with_capacity(request.symbols.len());
+        let contracts = self
+            .rest
+            .send_public_request("/api/v1/contracts/active", &HashMap::new())
+            .await?;
         for symbol in request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
             self.ensure_perpetual(symbol.market_type)?;
+            let normalized_symbol = normalize_kucoinfutures_symbol(&symbol.exchange_symbol.symbol)?;
             let mut params = HashMap::new();
-            params.insert(
-                "symbol".to_string(),
-                normalize_kucoinfutures_symbol(&symbol.exchange_symbol.symbol)?,
-            );
+            params.insert("symbol".to_string(), normalized_symbol);
             params.insert("pageSize".to_string(), "1".to_string());
             let value = self
                 .rest
@@ -104,6 +106,7 @@ impl KuCoinFuturesGatewayAdapter {
                 &self.exchange_id,
                 symbol,
                 &value,
+                Some(&contracts),
             )?);
         }
         Ok(FundingRatesResponse {

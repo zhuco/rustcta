@@ -748,6 +748,7 @@ mod tests {
                 "2026-06-07T12:00:00Z INFO strategy booted",
                 "2026-06-07T12:00:01Z DEBUG heartbeat ok",
                 "\u{1b}[2m2026-06-07T12:00:02.000000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::cross_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m cross-arb live runner status strategy_id=cross_arb_live",
+                "2026-06-07T12:00:02.250000Z INFO rustcta::cross_arb_live_runner: cross-arb trade event action=cross_arb_open_decision_audit lifecycle=cross_arb_open_decision_audit symbol=ESPORTS/USDT failure_reason=\"display-only row has no executable order drafts\"",
                 "\u{1b}[2m2026-06-07T12:00:02.500000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::cross_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m cross-arb trade event action=cross_arb_open lifecycle=open symbol=ESPORTS/USDT",
                 "2026-06-07 12:00:02.123 WARN stale book",
                 "2026-06-07T12:00:03Z ERROR token appeared in source log",
@@ -758,7 +759,7 @@ mod tests {
         let app = router(
             ControlApiState::empty_local()
                 .with_strategy_log_path(&path)
-                .with_strategy_log_tail_limits(3, 4096),
+                .with_strategy_log_tail_limits(4, 4096),
         );
 
         let response = app
@@ -778,27 +779,37 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["configured"], true);
         assert_eq!(value["readable"], true);
-        assert_eq!(value["event_count"], 3);
+        assert_eq!(value["event_count"], 4);
+        assert_eq!(value["counts"]["all"], 4);
+        assert_eq!(value["counts"]["trade"], 1);
+        assert_eq!(value["counts"]["warn"], 1);
+        assert_eq!(value["counts"]["error"], 1);
+        assert_eq!(value["counts"]["info"], 1);
         assert_eq!(value["events"][0]["level"], "info");
+        assert_eq!(value["events"][0]["category"], "info");
+        assert_eq!(value["events"][1]["level"], "info");
+        assert_eq!(value["events"][1]["category"], "trade");
         assert_eq!(
-            value["events"][0]["message"],
+            value["events"][1]["message"],
             "2026-06-07T12:00:02.500000Z  INFO rustcta::cross_arb_live_runner: cross-arb trade event action=cross_arb_open lifecycle=open symbol=ESPORTS/USDT"
         );
         assert_eq!(
-            value["events"][0]["occurred_at"],
+            value["events"][1]["occurred_at"],
             "2026-06-07T12:00:02.500Z"
         );
-        assert_eq!(value["events"][1]["level"], "warn");
+        assert_eq!(value["events"][2]["level"], "warn");
+        assert_eq!(value["events"][2]["category"], "warn");
         assert_eq!(
-            value["events"][1]["message"],
+            value["events"][2]["message"],
             "2026-06-07 12:00:02.123 WARN stale book"
         );
         assert_eq!(
-            value["events"][1]["occurred_at"],
+            value["events"][2]["occurred_at"],
             "2026-06-07T12:00:02.123Z"
         );
-        assert_eq!(value["events"][2]["level"], "error");
-        assert_eq!(value["events"][2]["message"], "[redacted log line]");
+        assert_eq!(value["events"][3]["level"], "error");
+        assert_eq!(value["events"][3]["category"], "error");
+        assert_eq!(value["events"][3]["message"], "[redacted log line]");
         let text = value.to_string();
         assert!(!text.contains("token appeared"));
         assert!(!text.contains(path.to_string_lossy().as_ref()));
@@ -1884,6 +1895,63 @@ mod tests {
             spot_futures["detail"]["active_symbols"][0],
             serde_json::json!("ORDI/USDT")
         );
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn extra_snapshot_paths_should_aggregate_cross_arb_shard_dashboards() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-cross-arb-shards-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let shard0 = temp_dir.join("cross_arb_shard_0.json");
+        let shard1 = temp_dir.join("cross_arb_shard_1.json");
+        for (path, shard_id, symbol) in [(&shard0, 0, "EDGE/USDT"), (&shard1, 1, "DRIFT/USDT")] {
+            std::fs::write(
+                path,
+                serde_json::json!({
+                    "generated_at": "2026-06-11T10:00:00Z",
+                    "opportunities": [{
+                        "opportunity_id": format!("opp-{shard_id}"),
+                        "symbol": symbol
+                    }],
+                    "market_snapshots": [{
+                        "exchange": "binance",
+                        "symbol": symbol
+                    }],
+                    "cross_arb_dashboard": {
+                        "summary": {
+                            "strategy_id": format!("cross_arb_live_shard_{shard_id}")
+                        },
+                        "opportunities": [{
+                            "opportunity_id": format!("opp-{shard_id}"),
+                            "symbol": symbol
+                        }]
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+
+        let snapshot = ControlApiState::empty_local()
+            .with_extra_strategy_snapshot_paths([&shard0, &shard1])
+            .snapshot()
+            .await;
+
+        assert_eq!(snapshot.opportunities.recent.len(), 2);
+        assert_eq!(snapshot.books.rows.len(), 0);
+        assert_eq!(snapshot.strategy_snapshots.len(), 2);
+        assert!(snapshot
+            .strategy_snapshots
+            .iter()
+            .any(|snapshot| snapshot.strategy_id == "cross_arb_live_shard_0"));
+        assert!(snapshot
+            .strategy_snapshots
+            .iter()
+            .any(|snapshot| snapshot.strategy_id == "cross_arb_live_shard_1"));
 
         std::fs::remove_dir_all(temp_dir).ok();
     }

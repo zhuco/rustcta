@@ -5,15 +5,17 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchItemResult, BatchOperationReport,
     BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    QueryOrderRequest, QueryOrderResponse, RecentFillsRequest, RecentFillsResponse, ReconcilePlan,
-    ReconcileTrigger, RetryReconcilePolicy, SetLeverageRequest, SetLeverageResponse,
-    SetPositionModeRequest, SetPositionModeResponse, EXCHANGE_API_SCHEMA_VERSION,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CountdownCancelAllRequest,
+    CountdownCancelAllResponse, ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse,
+    PositionsRequest, PositionsResponse, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
+    RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy, SetLeverageRequest,
+    SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     ExchangeError, ExchangeErrorClass, MarketType, OrderSide, OrderStatus, OrderType, PositionSide,
+    TimeInForce,
 };
 use serde_json::{json, Value};
 
@@ -508,12 +510,63 @@ impl BybitGatewayAdapter {
             message: None,
         })
     }
+
+    pub(super) async fn set_countdown_cancel_all_impl(
+        &self,
+        request: CountdownCancelAllRequest,
+    ) -> ExchangeApiResult<CountdownCancelAllResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if !(3..=300).contains(&request.timeout_secs) {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "bybit DCP timeWindow must be between 3 and 300 seconds".to_string(),
+            });
+        }
+        if let Some(symbol) = &request.symbol {
+            self.ensure_supported_market_type(symbol.market_type)?;
+        }
+        let operation = self.profile_operation(
+            "bybit.set_countdown_cancel_all",
+            "bybiteu.set_countdown_cancel_all",
+        );
+        let body = bybit_countdown_cancel_all_body(&request);
+        self.send_signed_post_json(operation, "/v5/order/disconnected-cancel-all", &body)
+            .await?;
+        Ok(CountdownCancelAllResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            symbol: request.symbol,
+            timeout_secs: request.timeout_secs,
+            trigger_time: None,
+            accepted: true,
+            message: Some(
+                "Bybit DCP configured; private websocket must subscribe dcp topic to trigger"
+                    .to_string(),
+            ),
+        })
+    }
 }
 
 fn bybit_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
     let mut body = bybit_place_order_batch_item(request)?;
     body["category"] = Value::String(bybit_category(request.symbol.market_type).to_string());
     Ok(body)
+}
+
+fn bybit_countdown_cancel_all_body(request: &CountdownCancelAllRequest) -> Value {
+    let product = request
+        .symbol
+        .as_ref()
+        .map(|symbol| match symbol.market_type {
+            MarketType::Spot => "SPOT",
+            MarketType::Perpetual | MarketType::Futures => "DERIVATIVES",
+            _ => "DERIVATIVES",
+        })
+        .unwrap_or("DERIVATIVES");
+    json!({
+        "product": product,
+        "timeWindow": request.timeout_secs
+    })
 }
 
 fn bybit_place_order_batch_item(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
@@ -534,6 +587,10 @@ fn bybit_place_order_batch_item(request: &PlaceOrderRequest) -> ExchangeApiResul
     }
     if request.post_only || request.order_type == OrderType::PostOnly {
         body["timeInForce"] = Value::String("PostOnly".to_string());
+    } else if let Some(time_in_force) =
+        bybit_time_in_force(request.order_type, request.time_in_force)
+    {
+        body["timeInForce"] = Value::String(time_in_force.to_string());
     }
     if let Some(position_side) = request.position_side {
         body["positionIdx"] = Value::Number(bybit_position_idx(position_side).into());
@@ -630,6 +687,22 @@ fn bybit_order_type(order_type: OrderType) -> &'static str {
     match order_type {
         OrderType::Market => "Market",
         _ => "Limit",
+    }
+}
+
+fn bybit_time_in_force(
+    order_type: OrderType,
+    time_in_force: Option<TimeInForce>,
+) -> Option<&'static str> {
+    match order_type {
+        OrderType::IOC => Some("IOC"),
+        OrderType::FOK => Some("FOK"),
+        _ => time_in_force.map(|time_in_force| match time_in_force {
+            TimeInForce::GTC => "GTC",
+            TimeInForce::IOC => "IOC",
+            TimeInForce::FOK => "FOK",
+            TimeInForce::GTX => "PostOnly",
+        }),
     }
 }
 

@@ -106,7 +106,7 @@ struct HttpProxy {
     source: &'static str,
 }
 
-pub(crate) async fn connect_websocket<R>(
+pub async fn connect_websocket<R>(
     request: R,
 ) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Response), Error>
 where
@@ -134,6 +134,19 @@ where
 
     let stream = connect_http_tunnel(&proxy, &host, port).await?;
     client_async_tls_with_config(request, stream, None, None).await
+}
+
+pub fn reqwest_client_builder_with_ws_proxy() -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder();
+    if let Ok(proxy_url) = std::env::var("RUSTCTA_WS_PROXY") {
+        let proxy_url = proxy_url.trim();
+        if !proxy_url.is_empty() {
+            if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+                builder = builder.proxy(proxy);
+            }
+        }
+    }
+    builder
 }
 
 async fn connect_http_tunnel(

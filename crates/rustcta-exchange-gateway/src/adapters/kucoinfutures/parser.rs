@@ -128,6 +128,7 @@ pub fn parse_funding_rate_snapshot(
     exchange_id: &ExchangeId,
     symbol: SymbolScope,
     value: &Value,
+    contracts: Option<&Value>,
 ) -> ExchangeApiResult<FundingRateSnapshot> {
     let row = value
         .get("data")
@@ -149,19 +150,82 @@ pub fn parse_funding_rate_snapshot(
             row,
         )
     })?;
+    let contract = contracts
+        .and_then(|contracts| find_contract_snapshot(contracts, &symbol.exchange_symbol.symbol));
     Ok(FundingRateSnapshot {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         symbol,
-        funding_rate,
-        predicted_funding_rate: None,
+        funding_rate: contract
+            .and_then(|contract| string_or_number(contract.get("fundingFeeRate")))
+            .unwrap_or(funding_rate),
+        predicted_funding_rate: contract.and_then(|contract| {
+            string_or_number(
+                contract
+                    .get("predictedFundingFeeRate")
+                    .or_else(|| contract.get("predictedFundingRate")),
+            )
+        }),
         funding_time: row
             .get("timePoint")
             .and_then(value_as_i64)
             .and_then(DateTime::<Utc>::from_timestamp_millis),
-        next_funding_time: None,
-        mark_price: None,
-        source: Some("kucoinfutures.private.funding-history".to_string()),
+        next_funding_time: contract
+            .and_then(|contract| {
+                contract
+                    .get("nextFundingRateDateTime")
+                    .or_else(|| contract.get("nextFundingTime"))
+            })
+            .and_then(value_as_i64)
+            .and_then(DateTime::<Utc>::from_timestamp_millis),
+        mark_price: contract.and_then(|contract| string_or_number(contract.get("markPrice"))),
+        index_price: contract.and_then(|contract| {
+            string_or_number(
+                contract
+                    .get("indexPrice")
+                    .or_else(|| contract.get("index_price")),
+            )
+        }),
+        open_interest: contract.and_then(|contract| {
+            string_or_number(
+                contract
+                    .get("openInterest")
+                    .or_else(|| contract.get("openInterestValue")),
+            )
+        }),
+        turnover_24h: contract.and_then(|contract| {
+            string_or_number(
+                contract
+                    .get("turnoverOf24h")
+                    .or_else(|| contract.get("turnover24h")),
+            )
+        }),
+        volume_24h: contract.and_then(|contract| {
+            string_or_number(
+                contract
+                    .get("volumeOf24h")
+                    .or_else(|| contract.get("volume24h")),
+            )
+        }),
+        source: Some("kucoinfutures.contracts_active_and_funding_history".to_string()),
         updated_at: Utc::now(),
+    })
+}
+
+fn find_contract_snapshot<'a>(value: &'a Value, symbol: &str) -> Option<&'a Value> {
+    let normalized = normalize_kucoinfutures_symbol(symbol).ok()?;
+    let data = value.get("data").unwrap_or(value);
+    if data
+        .get("symbol")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case(&normalized))
+    {
+        return Some(data);
+    }
+    data.as_array()?.iter().find(|contract| {
+        contract
+            .get("symbol")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.eq_ignore_ascii_case(&normalized))
     })
 }
 

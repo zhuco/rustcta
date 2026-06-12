@@ -121,15 +121,22 @@ impl BybitGatewayAdapter {
                 "symbol".to_string(),
                 normalize_bybit_symbol(&symbol.exchange_symbol.symbol)?,
             );
-            params.insert("limit".to_string(), "1".to_string());
-            let value = self
+            let ticker_value = self
                 .rest
-                .send_public_get("/v5/market/funding/history", &params)
+                .send_public_get("/v5/market/tickers", &params)
                 .await?;
+            let mut history_params = params.clone();
+            history_params.insert("limit".to_string(), "1".to_string());
+            let history_value = self
+                .rest
+                .send_public_get("/v5/market/funding/history", &history_params)
+                .await
+                .ok();
             rates.push(parse_funding_rate_snapshot(
                 &self.exchange_id,
                 symbol,
-                &value,
+                &ticker_value,
+                history_value.as_ref(),
             )?);
         }
         Ok(FundingRatesResponse {

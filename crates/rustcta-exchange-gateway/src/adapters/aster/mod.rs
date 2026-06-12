@@ -3,13 +3,18 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AccountControlCapabilities, AmendOrderRequest, AmendOrderResponse, BalancesRequest,
+    BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelOrderRequest, CancelOrderResponse, ClosePositionRequest,
+    ClosePositionResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
+    FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
+    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
+    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
+    SetPositionModeResponse, SymbolAccountConfigRequest, SymbolAccountConfigResponse,
+    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -146,6 +151,25 @@ impl AsterGatewayAdapter {
             .await
     }
 
+    async fn send_signed_put(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (user_address, signer_address, signer_private_key) =
+            self.private_credentials(operation)?;
+        self.rest
+            .send_signed_put(
+                endpoint,
+                params,
+                user_address,
+                signer_address,
+                signer_private_key,
+            )
+            .await
+    }
+
     async fn send_signed_delete(
         &self,
         operation: &'static str,
@@ -203,6 +227,51 @@ impl GatewayAdapter for AsterGatewayAdapter {
             message: Some("aster perpetual REST gateway adapter".to_string()),
         }
     }
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        let private = self.config.private_rest_enabled();
+        AccountControlCapabilities {
+            exchange: self.exchange_id.clone(),
+            supports_symbol_account_config: private,
+            supports_leverage: private,
+            supports_margin_mode_change: false,
+            supports_position_mode_change: private,
+            supports_close_position: private,
+            supports_countdown_cancel_all: false,
+        }
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        self.get_symbol_account_config_impl(request).await
+    }
+
+    async fn set_leverage(
+        &self,
+        request: SetLeverageRequest,
+    ) -> ExchangeApiResult<SetLeverageResponse> {
+        self.set_leverage_impl(request).await
+    }
+
+    async fn set_position_mode(
+        &self,
+        request: SetPositionModeRequest,
+    ) -> ExchangeApiResult<SetPositionModeResponse> {
+        self.set_position_mode_impl(request).await
+    }
+
+    async fn close_position(
+        &self,
+        request: ClosePositionRequest,
+    ) -> ExchangeApiResult<ClosePositionResponse> {
+        let place_request = super::close_position_order_request(&request)?;
+        let response = self.place_order_impl(place_request).await?;
+        Ok(super::close_position_response_from_place_order(
+            &request, response,
+        ))
+    }
 }
 
 #[async_trait]
@@ -219,10 +288,12 @@ impl ExchangeClient for AsterGatewayAdapter {
         capabilities.supports_public_streams = self.config.enabled_public_streams;
         capabilities.supports_private_streams =
             self.config.enabled_private_streams && self.config.private_rest_enabled();
-        capabilities.private_stream_capabilities =
-            Some(streams::aster_private_stream_capabilities());
+        capabilities.private_stream_capabilities = Some(
+            streams::aster_private_stream_capabilities(capabilities.supports_private_streams),
+        );
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
+        capabilities.supports_funding_rates = true;
         capabilities.supports_balances = self.config.private_rest_enabled();
         capabilities.supports_positions = self.config.private_rest_enabled();
         capabilities.supports_fees = self.config.private_rest_enabled();
@@ -233,8 +304,10 @@ impl ExchangeClient for AsterGatewayAdapter {
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
         capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
         capabilities.supports_quote_market_order = false;
-        capabilities.supports_amend_order = false;
+        capabilities.supports_amend_order = self.config.private_rest_enabled();
         capabilities.supports_order_list = false;
+        capabilities.supports_batch_place_order = self.config.private_rest_enabled();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_client_order_id = true;
         capabilities.supports_reduce_only = true;
         capabilities.supports_post_only = true;
@@ -248,11 +321,12 @@ impl ExchangeClient for AsterGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(20);
-        capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(20));
+        capabilities.order_book = rustcta_exchange_api::OrderBookCapability::strict_delta(Some(20));
+        let supports_private_streams = capabilities.supports_private_streams;
         toolchain::apply_toolchain_capabilities(
             &mut capabilities,
             self.config.private_rest_enabled(),
+            supports_private_streams,
         );
         capabilities
     }
@@ -286,11 +360,39 @@ impl ExchangeClient for AsterGatewayAdapter {
         self.get_fees_impl(request).await
     }
 
+    async fn get_funding_rates(
+        &self,
+        request: FundingRatesRequest,
+    ) -> ExchangeApiResult<FundingRatesResponse> {
+        self.get_funding_rates_impl(request).await
+    }
+
     async fn place_order(
         &self,
         request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         self.place_order_impl(request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        self.amend_order_impl(request).await
+    }
+
+    async fn batch_place_orders(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.batch_place_orders_impl(request).await
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.batch_cancel_orders_impl(request).await
     }
 
     async fn place_quote_market_order(
@@ -305,13 +407,6 @@ impl ExchangeClient for AsterGatewayAdapter {
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
         self.cancel_order_impl(request).await
-    }
-
-    async fn amend_order(
-        &self,
-        _request: AmendOrderRequest,
-    ) -> ExchangeApiResult<AmendOrderResponse> {
-        self.unsupported_private("aster.amend_order")
     }
 
     async fn place_order_list(

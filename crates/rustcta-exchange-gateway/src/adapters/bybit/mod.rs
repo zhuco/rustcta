@@ -6,14 +6,18 @@ use rustcta_exchange_api::{
     AccountControlCapabilities, AmendOrderRequest, AmendOrderResponse, BalancesRequest,
     BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
     BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, FundingRatesRequest,
-    FundingRatesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
-    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
-    RecentFillsResponse, SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest,
-    SetPositionModeResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    CancelOrderResponse, CapabilitySupport, ClosePositionRequest, ClosePositionResponse,
+    CountdownCancelAllRequest, CountdownCancelAllResponse, CredentialScope, ExchangeApiError,
+    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
+    FundingRatesRequest, FundingRatesResponse, HeartbeatCapability, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateOrderStreamEventKind, PrivateStreamCapabilities, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, ReconnectCapability, SetLeverageRequest,
+    SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse, StreamAuthCapability,
+    StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -191,9 +195,10 @@ impl GatewayAdapter for BybitGatewayAdapter {
             exchange: self.exchange_id.clone(),
             supports_symbol_account_config: false,
             supports_leverage: private,
+            supports_margin_mode_change: false,
             supports_position_mode_change: private,
-            supports_close_position: false,
-            supports_countdown_cancel_all: false,
+            supports_close_position: private,
+            supports_countdown_cancel_all: private,
         }
     }
 
@@ -209,6 +214,24 @@ impl GatewayAdapter for BybitGatewayAdapter {
         request: SetPositionModeRequest,
     ) -> ExchangeApiResult<SetPositionModeResponse> {
         self.set_position_mode_impl(request).await
+    }
+
+    async fn set_countdown_cancel_all(
+        &self,
+        request: CountdownCancelAllRequest,
+    ) -> ExchangeApiResult<CountdownCancelAllResponse> {
+        self.set_countdown_cancel_all_impl(request).await
+    }
+
+    async fn close_position(
+        &self,
+        request: ClosePositionRequest,
+    ) -> ExchangeApiResult<ClosePositionResponse> {
+        let place_request = super::close_position_order_request(&request)?;
+        let response = self.place_order_impl(place_request).await?;
+        Ok(super::close_position_response_from_place_order(
+            &request, response,
+        ))
     }
 }
 
@@ -227,6 +250,28 @@ impl ExchangeClient for BybitGatewayAdapter {
         capabilities.supports_private_rest = private;
         capabilities.supports_public_streams = true;
         capabilities.supports_private_streams = private;
+        capabilities.private_stream_capabilities = Some(if private {
+            PrivateStreamCapabilities {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                supports_orders: true,
+                supports_fills: true,
+                supports_balances: true,
+                supports_positions: true,
+                supports_account: true,
+                order_event_kinds: vec![
+                    PrivateOrderStreamEventKind::New,
+                    PrivateOrderStreamEventKind::PartialFill,
+                    PrivateOrderStreamEventKind::Fill,
+                    PrivateOrderStreamEventKind::Cancel,
+                    PrivateOrderStreamEventKind::Reject,
+                    PrivateOrderStreamEventKind::Expired,
+                ],
+                supports_client_order_id: true,
+                supports_exchange_order_id: true,
+            }
+        } else {
+            PrivateStreamCapabilities::unsupported(EXCHANGE_API_SCHEMA_VERSION)
+        });
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
@@ -256,8 +301,50 @@ impl ExchangeClient for BybitGatewayAdapter {
         ];
         capabilities.max_order_book_depth = Some(200);
         capabilities.order_book =
-            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(200));
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(200));
         capabilities.refresh_v2_from_legacy_flags();
+        capabilities.capabilities_v2.private_streams = if private {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported("Bybit private streams require private REST credentials")
+        };
+        capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
+            public: CapabilitySupport::native(),
+            private: capabilities.capabilities_v2.private_streams.clone(),
+            supports_subscribe: true,
+            supports_unsubscribe: true,
+            supports_public_subscribe: true,
+            supports_public_unsubscribe: true,
+            supports_private_subscribe: private,
+            supports_private_unsubscribe: private,
+            heartbeat: HeartbeatCapability {
+                supported: true,
+                required: true,
+                direction: StreamHeartbeatDirection::ClientPing,
+                interval_ms: Some(20_000),
+                timeout_ms: Some(10_000),
+            },
+            reconnect: ReconnectCapability {
+                supported: true,
+                requires_resubscribe: true,
+                preserves_session: false,
+                max_reconnect_attempts: None,
+            },
+            resync: StreamResyncCapability {
+                order_book: true,
+                balances: private,
+                positions: private,
+                orders: private,
+            },
+            auth: StreamAuthCapability {
+                required: private,
+                credential_scopes: vec![CredentialScope::ReadOnly, CredentialScope::Trade],
+                renewal_ms: None,
+                uses_listen_key: false,
+                requires_relogin_on_reconnect: true,
+            },
+            ..StreamRuntimeCapability::default()
+        };
         capabilities
     }
 

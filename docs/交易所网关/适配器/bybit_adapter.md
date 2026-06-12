@@ -30,11 +30,27 @@ Official references:
 - Account control exposes shared `set_leverage` and `set_position_mode` requests for linear derivative accounts.
 - V5 REST signing uses `timestamp + api_key + recv_window + query_or_json_body` with `X-BAPI-*` headers.
 - Public WebSocket order-book helpers cover `orderbook.1`, `orderbook.50`, `orderbook.200`, and `orderbook.1000`; Bybit V5 documents 10/20/100/200ms cadences by depth and parser fixtures normalize `u/seq/cts`, snapshot/delta shape, and zero-size delta deletion rows into gateway order-book events. REST snapshots remain the resync source.
-- WebSocket private subscribe/auth/heartbeat payload helpers are present; private long-running connection is still spec-only and uses REST reconciliation fallback.
+- WebSocket private subscribe/auth/heartbeat payload helpers and parser
+  normalization for `order`, `execution`, `position`, and `wallet` are present;
+  private long-running connection is still spec-only and uses REST
+  reconciliation fallback.
+- Disconnected cancel-all / countdown cancel-all is wired through Bybit V5
+  `/v5/order/disconnected-cancel-all` behind the shared dead-man style request
+  path and signed request fixture.
 
 ## Unsupported Boundary
 
-- Native amend, batch create, and batch cancel are wired through signed Bybit V5 REST runtime. Batch create/cancel use native `/v5/order/create-batch` and `/v5/order/cancel-batch`, enforce one market type per batch, and expose partial failures through gateway batch reports/reconciliation plans. Shared `AmendOrderRequest` currently maps quantity-only amend; Bybit client-order-id replacement is rejected before send because V5 amend does not support changing `orderLinkId`. `place_order_list` remains unsupported because shared OCO/OTO order-list semantics are not mapped. Margin mode, disconnected cancel-all/dead-man, inverse-specific routing, and options metadata remain separate unsupported or follow-up boundaries as recorded in endpoint mapping.
+- Native amend, batch create, batch cancel, margin mode, and disconnected
+  cancel-all are wired through signed Bybit V5 REST runtime where the shared
+  request semantics are available. Batch create/cancel use native
+  `/v5/order/create-batch` and `/v5/order/cancel-batch`, enforce one market
+  type per batch, and expose partial failures through gateway batch
+  reports/reconciliation plans. Shared `AmendOrderRequest` currently maps
+  quantity-only amend; Bybit client-order-id replacement is rejected before send
+  because V5 amend does not support changing `orderLinkId`. `place_order_list`
+  remains unsupported because shared OCO/OTO order-list semantics are not
+  mapped. Inverse-specific routing and options metadata remain separate
+  unsupported or follow-up boundaries as recorded in endpoint mapping.
 - Private WS runtime is not long-running in this adapter; fixtures document order/execution/position/wallet channels.
 - Web page or unofficial endpoints are not used.
 

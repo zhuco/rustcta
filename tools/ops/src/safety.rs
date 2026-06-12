@@ -819,8 +819,10 @@ fn validate_enabled_exchange(exchange: &str, enabled_exchanges: &[String]) -> Re
 
 fn validate_supported_perp_canary_exchange(exchange: &str) -> Result<()> {
     match normalize_exchange(exchange).as_str() {
-        "binance" | "bitget" | "gate" => Ok(()),
-        other => bail!("canary currently supports binance, bitget, and gate; got {other}"),
+        "binance" | "bitget" | "gate" | "aster" | "mexc" | "kucoinfutures" | "bybit" => Ok(()),
+        other => bail!(
+            "canary currently supports binance, bitget, gate, aster, mexc, kucoinfutures, and bybit; got {other}"
+        ),
     }
 }
 
@@ -860,9 +862,24 @@ mod tests {
 
     #[test]
     fn exchange_canary_plan_preserves_trading_gate() {
+        let config_path = std::env::temp_dir().join(format!(
+            "rustcta-tools-ops-canary-test-{}.yml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &config_path,
+            r#"
+execution:
+  trading_enabled: false
+  dry_run: true
+universe:
+  enabled_exchanges:
+    - bitget
+"#,
+        )
+        .expect("write canary test config");
         let report = exchange_order_canary_safety_plan(ExchangeOrderCanarySafetyArgs {
-            config: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../config/cross_exchange_arbitrage_usdt.yml"),
+            config: config_path.clone(),
             exchange: "bitget".to_string(),
             symbol: "DOGE/USDT".to_string(),
             side: CanarySide::Long,
@@ -879,6 +896,15 @@ mod tests {
         assert_eq!(value["config_trading_enabled"], false);
         assert_eq!(value["request"]["exchange"], "bitget");
         assert!(value["planned_side_effects"].as_array().unwrap().is_empty());
+        let _ = std::fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn exchange_canary_safety_should_accept_target_contract_venues() {
+        for exchange in ["aster", "mexc", "kucoinfutures", "bybit"] {
+            validate_supported_perp_canary_exchange(exchange).expect(exchange);
+        }
+        assert!(validate_supported_perp_canary_exchange("kucoin").is_err());
     }
 
     #[test]

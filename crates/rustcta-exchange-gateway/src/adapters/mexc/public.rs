@@ -42,8 +42,19 @@ impl MexcGatewayAdapter {
         }
 
         let response = if market_type == rustcta_types::MarketType::Perpetual {
+            let mut params = HashMap::new();
+            if request.symbols.len() == 1 {
+                let symbol = &request.symbols[0];
+                params.insert(
+                    "symbol".to_string(),
+                    normalize_mexc_symbol_for_market(
+                        &symbol.exchange_symbol.symbol,
+                        symbol.market_type,
+                    )?,
+                );
+            }
             self.rest
-                .send_contract_public_request("/api/v1/contract/detail", &HashMap::new())
+                .send_contract_public_request("/api/v1/contract/detail/country", &params)
                 .await?
         } else {
             self.rest

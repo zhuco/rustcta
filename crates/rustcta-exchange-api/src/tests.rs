@@ -387,6 +387,7 @@ impl PerpAccountControlProvider for MockAccountControlProvider {
             exchange: self.exchange.clone(),
             supports_symbol_account_config: true,
             supports_leverage: true,
+            supports_margin_mode_change: true,
             supports_position_mode_change: true,
             supports_close_position: true,
             supports_countdown_cancel_all: false,
@@ -438,6 +439,7 @@ async fn account_control_provider_should_default_to_unsupported_without_concrete
 
     let capabilities = provider.account_control_capabilities();
     assert!(!capabilities.supports_leverage);
+    assert!(!capabilities.supports_margin_mode_change);
     assert!(!capabilities.supports_close_position);
 
     let result = provider
@@ -451,6 +453,21 @@ async fn account_control_provider_should_default_to_unsupported_without_concrete
         result,
         Err(ExchangeApiError::Unsupported {
             operation: "get_symbol_account_config"
+        })
+    ));
+
+    let result = provider
+        .set_margin_mode(SetMarginModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+            mode: MarginMode::Isolated,
+        })
+        .await;
+    assert!(matches!(
+        result,
+        Err(ExchangeApiError::Unsupported {
+            operation: "set_margin_mode"
         })
     ));
 }
@@ -476,6 +493,11 @@ async fn account_control_provider_should_carry_legacy_trading_adapter_controls()
     assert_eq!(config.config.position_mode, Some(PositionMode::Hedge));
     assert_eq!(config.config.margin_mode, Some(MarginMode::Cross));
     assert_eq!(config.config.leverage, Some(5));
+    assert!(
+        provider
+            .account_control_capabilities()
+            .supports_margin_mode_change
+    );
 
     let close = provider
         .close_position(ClosePositionRequest {
@@ -549,7 +571,27 @@ async fn readonly_exchange_client_should_guard_account_control_mutations() {
         other => panic!("expected readonly account-control guard error, got {other:?}"),
     }
     assert_eq!(recorder.count("close_position"), 1);
-    assert_eq!(recorder.total_mutations(), 1);
+
+    let margin_result = PerpAccountControlProvider::set_margin_mode(
+        &client,
+        SetMarginModeRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+            mode: MarginMode::Isolated,
+        },
+    )
+    .await;
+    match margin_result {
+        Err(ExchangeApiError::Exchange(error)) => {
+            assert_eq!(error.class, rustcta_types::ExchangeErrorClass::Permission);
+            assert_eq!(error.code.as_deref(), Some("readonly_guard"));
+            assert!(error.message.contains("set_margin_mode"));
+        }
+        other => panic!("expected readonly margin-mode guard error, got {other:?}"),
+    }
+    assert_eq!(recorder.count("set_margin_mode"), 1);
+    assert_eq!(recorder.total_mutations(), 2);
 }
 
 #[test]

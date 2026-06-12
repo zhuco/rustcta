@@ -26,7 +26,7 @@ use tokio_tungstenite::connect_async;
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8091";
 const DEFAULT_TENANT_ID: &str = "local";
 const DEFAULT_SUPERVISOR_REGISTRY_PATH: &str = "run/supervisor/registry.json";
-const DEFAULT_EXCHANGE_API_KEY_STORE: &str = "data/control_api/exchange_api_keys.env";
+const DEFAULT_LOCAL_CREDENTIAL_STATUS_STORE: &str = "data/control_api/local_credentials.env";
 const DEFAULT_ACCOUNTS_CONFIG: &str = "config/accounts.yml";
 const DEFAULT_STRATEGY_LOG_TAIL_LINES: usize = 800;
 const DEFAULT_STRATEGY_LOG_TAIL_BYTES: usize = 256 * 1024;
@@ -45,7 +45,7 @@ pub struct ControlApiAppConfig {
     pub strategy_log_path: Option<PathBuf>,
     pub strategy_log_tail_lines: Option<usize>,
     pub strategy_log_tail_bytes: Option<usize>,
-    pub exchange_api_key_store: PathBuf,
+    pub credential_status_store: PathBuf,
     pub accounts_config: PathBuf,
     pub static_dir: Option<PathBuf>,
 }
@@ -111,9 +111,12 @@ impl ControlApiAppConfig {
                 &vars,
                 "RUSTCTA_CONTROL_API_STRATEGY_LOG_TAIL_BYTES",
             ),
-            exchange_api_key_store: path_value(&vars, "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE")
-                .or_else(|| path_value(&vars, "EXCHANGE_API_KEY_STORE"))
-                .unwrap_or_else(|| PathBuf::from(DEFAULT_EXCHANGE_API_KEY_STORE)),
+            credential_status_store: path_value(
+                &vars,
+                "RUSTCTA_CONTROL_API_CREDENTIAL_STATUS_STORE",
+            )
+            .or_else(|| path_value(&vars, "EXCHANGE_API_KEY_STORE"))
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCAL_CREDENTIAL_STATUS_STORE)),
             accounts_config: path_value(&vars, "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG")
                 .or_else(|| path_value(&vars, "ACCOUNTS_CONFIG"))
                 .unwrap_or_else(|| PathBuf::from(DEFAULT_ACCOUNTS_CONFIG)),
@@ -161,7 +164,7 @@ impl ControlApiAppConfig {
         let state = self.build_state()?;
         let mut api = router(state.clone());
         api = api.merge(local_credentials_router(LocalCredentialState {
-            exchange_api_key_store: self.exchange_api_key_store.clone(),
+            credential_status_store: self.credential_status_store.clone(),
             accounts_config: self.accounts_config.clone(),
         }));
         if self.local_agent.is_some() {
@@ -324,7 +327,7 @@ struct EndpointLatencyResult {
 
 #[derive(Clone)]
 struct LocalCredentialState {
-    exchange_api_key_store: PathBuf,
+    credential_status_store: PathBuf,
     accounts_config: PathBuf,
 }
 
@@ -386,12 +389,8 @@ fn local_agent_router(state: LocalSideEffectState) -> Router {
 fn local_credentials_router(state: LocalCredentialState) -> Router {
     Router::new()
         .route(
-            "/api/exchange-api-keys",
-            get(exchange_api_keys).post(update_exchange_api_keys),
-        )
-        .route(
-            "/api/exchange-api-keys/:exchange",
-            delete(delete_exchange_api_keys),
+            "/api/local-credentials/status",
+            get(local_credential_status),
         )
         .with_state(state)
 }
@@ -439,27 +438,6 @@ struct ExchangeApiKeyStatusResponse {
     account_manager_accounts: Vec<AccountManagerAccountStatus>,
     supported_exchanges: Vec<ExchangeApiKeyExchangeStatus>,
     exchanges: Vec<ExchangeApiKeyExchangeStatus>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ExchangeApiKeyUpdateRequest {
-    exchange: String,
-    #[serde(default)]
-    account_id: Option<String>,
-    #[serde(default)]
-    account_label: Option<String>,
-    #[serde(default)]
-    credential_namespace: Option<String>,
-    #[serde(default)]
-    exchange_account_id: Option<String>,
-    #[serde(default)]
-    api_key: Option<String>,
-    #[serde(default)]
-    api_secret: Option<String>,
-    #[serde(default)]
-    passphrase: Option<String>,
-    #[serde(default)]
-    clear: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -579,7 +557,7 @@ fn default_true_bool() -> bool {
     true
 }
 
-async fn exchange_api_keys(State(state): State<LocalCredentialState>) -> Response {
+async fn local_credential_status(State(state): State<LocalCredentialState>) -> Response {
     match exchange_api_key_status(&state).await {
         Ok(status) => Json(status).into_response(),
         Err(error) => (
@@ -590,62 +568,10 @@ async fn exchange_api_keys(State(state): State<LocalCredentialState>) -> Respons
     }
 }
 
-async fn update_exchange_api_keys(
-    State(state): State<LocalCredentialState>,
-    Json(request): Json<ExchangeApiKeyUpdateRequest>,
-) -> Response {
-    match apply_exchange_api_key_update(&state, request).await {
-        Ok(()) => match exchange_api_key_status(&state).await {
-            Ok(status) => Json(json!({
-                "saved": true,
-                "restart_required": true,
-                "status": status,
-            }))
-            .into_response(),
-            Err(error) => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": error.to_string() })),
-            )
-                .into_response(),
-        },
-        Err(error) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": error.to_string() })),
-        )
-            .into_response(),
-    }
-}
-
-async fn delete_exchange_api_keys(
-    State(state): State<LocalCredentialState>,
-    AxumPath(exchange): AxumPath<String>,
-) -> Response {
-    match clear_exchange_api_keys(&state.exchange_api_key_store, &exchange).await {
-        Ok(()) => match exchange_api_key_status(&state).await {
-            Ok(status) => Json(json!({
-                "deleted": true,
-                "restart_required": true,
-                "status": status,
-            }))
-            .into_response(),
-            Err(error) => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": error.to_string() })),
-            )
-                .into_response(),
-        },
-        Err(error) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": error.to_string() })),
-        )
-            .into_response(),
-    }
-}
-
 async fn exchange_api_key_status(
     state: &LocalCredentialState,
 ) -> Result<ExchangeApiKeyStatusResponse> {
-    let values = read_env_store(&state.exchange_api_key_store).await?;
+    let values = read_local_credential_status_source(&state.credential_status_store).await?;
     let account_manager_accounts =
         account_manager_accounts_for_status(&state.accounts_config).await;
     let supported_schemas = exchange_api_key_schemas().iter().collect::<Vec<_>>();
@@ -1613,151 +1539,6 @@ fn api_key_field_status_for_namespace(
     }
 }
 
-async fn apply_exchange_api_key_update(
-    state: &LocalCredentialState,
-    request: ExchangeApiKeyUpdateRequest,
-) -> Result<()> {
-    let exchange = request.exchange.trim().to_ascii_lowercase();
-    let raw_account_id = request.account_id.as_deref().unwrap_or("default").trim();
-    validate_account_identifier(raw_account_id)?;
-    let account_id = normalize_account_id(raw_account_id);
-    let credential_namespace_input = request.credential_namespace.as_deref();
-    reject_multiline_secret("account_label", request.account_label.as_deref())?;
-    reject_multiline_secret("credential_namespace", credential_namespace_input)?;
-    reject_multiline_secret("account_id", request.exchange_account_id.as_deref())?;
-    reject_multiline_secret("api_key", request.api_key.as_deref())?;
-    reject_multiline_secret("api_secret", request.api_secret.as_deref())?;
-    reject_multiline_secret("passphrase", request.passphrase.as_deref())?;
-    let mut values = read_env_store(&state.exchange_api_key_store).await?;
-    let schema = exchange_api_key_schema(&exchange)
-        .ok_or_else(|| anyhow::anyhow!("unsupported exchange {}", request.exchange))?;
-    let account_manager_accounts = read_account_manager_accounts(&state.accounts_config)
-        .await
-        .unwrap_or_default();
-    let credential_namespace = credential_namespace_for_update(
-        schema,
-        &account_manager_accounts,
-        &account_id,
-        credential_namespace_input,
-    )?;
-    validate_credential_namespace(&credential_namespace)?;
-    if request.clear {
-        clear_exchange_values_for_namespace(
-            &mut values,
-            schema,
-            &account_id,
-            &credential_namespace,
-        );
-    } else {
-        for field in schema.fields {
-            if let Some(value) = request_secret_value(&request, field.field) {
-                set_account_field_value_for_namespace(
-                    &mut values,
-                    schema,
-                    field,
-                    &account_id,
-                    &credential_namespace,
-                    value,
-                );
-            }
-        }
-        for field in schema.fields.iter().filter(|field| field.required) {
-            if !field_value_present_for_namespace(
-                &values,
-                schema,
-                field,
-                &account_id,
-                &credential_namespace,
-            ) {
-                return Err(anyhow::anyhow!(
-                    "{} {} requires {}",
-                    schema.label,
-                    account_label(&account_id),
-                    field.label
-                ));
-            }
-        }
-    }
-    write_env_store(&state.exchange_api_key_store, &values).await
-}
-
-async fn clear_exchange_api_keys(path: &PathBuf, exchange: &str) -> Result<()> {
-    let (normalized, account_id) = parse_exchange_account_path(exchange);
-    let schema = exchange_api_key_schema(&normalized)
-        .ok_or_else(|| anyhow::anyhow!("unsupported exchange {exchange}"))?;
-    let mut values = read_env_store(path).await?;
-    clear_exchange_values(&mut values, schema, &account_id);
-    write_env_store(path, &values).await
-}
-
-fn clear_exchange_values(
-    values: &mut BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-    account_id: &str,
-) {
-    let credential_namespace = credential_namespace_for_account(schema, account_id, None);
-    clear_exchange_values_for_namespace(values, schema, account_id, &credential_namespace);
-}
-
-fn clear_exchange_values_for_namespace(
-    values: &mut BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-    account_id: &str,
-    credential_namespace: &str,
-) {
-    if account_id == "default" {
-        if credential_namespace.eq_ignore_ascii_case(&env_exchange_prefix(schema.exchange)) {
-            clear_all_exchange_values(values, schema);
-        } else {
-            for field in schema.fields {
-                for key in namespace_env_keys(credential_namespace, field.field) {
-                    values.remove(&key);
-                }
-            }
-        }
-        return;
-    }
-    for field in schema.fields {
-        for key in namespace_env_keys(credential_namespace, field.field) {
-            values.remove(&key);
-        }
-    }
-    values.remove(&account_label_env_key(schema, account_id));
-}
-
-fn clear_all_exchange_values(values: &mut BTreeMap<String, String>, schema: &ExchangeApiKeySchema) {
-    for field in schema.fields {
-        for alias in field.aliases {
-            values.remove(*alias);
-        }
-    }
-    values.remove(&account_label_env_key(schema, "default"));
-    let prefix = account_env_prefix(schema.exchange);
-    let keys = values
-        .keys()
-        .filter(|key| key.starts_with(&prefix))
-        .cloned()
-        .collect::<Vec<_>>();
-    for key in keys {
-        values.remove(&key);
-    }
-}
-
-fn request_secret_value<'a>(
-    request: &'a ExchangeApiKeyUpdateRequest,
-    field: &str,
-) -> Option<&'a str> {
-    match field {
-        "account_id" => request.exchange_account_id.as_deref(),
-        "api_key" => request.api_key.as_deref(),
-        "api_secret" => request.api_secret.as_deref(),
-        "passphrase" => request.passphrase.as_deref(),
-        _ => None,
-    }
-    .map(str::trim)
-    .filter(|value| !value.is_empty())
-}
-
 fn configured_field_value(
     values: &BTreeMap<String, String>,
     schema: &ExchangeApiKeySchema,
@@ -1808,17 +1589,6 @@ fn configured_field_value_for_namespace(
                 .filter(|value| !value.is_empty())
                 .map(|value| ("process_env".to_string(), value))
         })
-}
-
-fn field_value_present_for_namespace(
-    values: &BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-    field: &ExchangeApiFieldSchema,
-    account_id: &str,
-    credential_namespace: &str,
-) -> bool {
-    configured_field_value_for_namespace(values, schema, field, account_id, credential_namespace)
-        .is_some()
 }
 
 fn discovered_configured_accounts(
@@ -1889,34 +1659,6 @@ fn account_namespace_from_env_key(
     None
 }
 
-fn set_account_field_value_for_namespace(
-    values: &mut BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-    field: &ExchangeApiFieldSchema,
-    account_id: &str,
-    credential_namespace: &str,
-    value: &str,
-) {
-    let default_prefix = env_exchange_prefix(schema.exchange);
-    if !credential_namespace.eq_ignore_ascii_case(&default_prefix) {
-        if let Some(key) = namespace_env_keys(credential_namespace, field.field)
-            .into_iter()
-            .next()
-        {
-            set_if_present(values, &key, Some(value));
-        }
-        return;
-    }
-    if account_id == "default" {
-        for alias in field.aliases {
-            set_if_present(values, alias, Some(value));
-        }
-    } else {
-        let key = account_env_key(schema, account_id, field.field);
-        set_if_present(values, &key, Some(value));
-    }
-}
-
 fn credential_namespace_for_account(
     schema: &ExchangeApiKeySchema,
     account_id: &str,
@@ -1963,75 +1705,6 @@ fn credential_namespace_for_env_prefix(
     }
 }
 
-fn credential_namespace_for_update(
-    schema: &ExchangeApiKeySchema,
-    account_manager_accounts: &[AccountManagerAccountStatus],
-    account_id: &str,
-    credential_namespace: Option<&str>,
-) -> Result<String> {
-    let account = account_manager_accounts.iter().find(|account| {
-        account.exchange.eq_ignore_ascii_case(schema.exchange)
-            && account.account_id.eq_ignore_ascii_case(account_id)
-    });
-    if let Some(account) = account {
-        let namespace = account.credential_namespace.trim().to_ascii_uppercase();
-        if namespace.is_empty() {
-            anyhow::bail!(
-                "{} account {} has empty env_prefix in account manager",
-                schema.label,
-                account_id
-            );
-        }
-        if let Some(requested) = credential_namespace
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            let requested = requested.to_ascii_uppercase();
-            if requested != namespace {
-                anyhow::bail!(
-                    "{} account {} env_prefix mismatch: account manager uses {}, request used {}",
-                    schema.label,
-                    account_id,
-                    namespace,
-                    requested
-                );
-            }
-        }
-        return Ok(namespace);
-    }
-    Ok(credential_namespace
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_uppercase())
-        .unwrap_or_else(|| credential_namespace_for_account(schema, account_id, None)))
-}
-
-fn validate_account_identifier(account_id: &str) -> Result<()> {
-    let account_id = account_id.trim();
-    if account_id.is_empty() {
-        return Ok(());
-    }
-    if account_id
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-    {
-        Ok(())
-    } else {
-        anyhow::bail!("account_id must contain only ASCII letters, digits, and _")
-    }
-}
-
-fn validate_credential_namespace(credential_namespace: &str) -> Result<()> {
-    if credential_namespace.is_empty()
-        || credential_namespace
-            .bytes()
-            .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))
-    {
-        anyhow::bail!("credential_namespace must contain only ASCII letters, digits, and _");
-    }
-    Ok(())
-}
-
 fn normalize_account_id(value: &str) -> String {
     let normalized = value
         .trim()
@@ -2058,17 +1731,6 @@ fn account_label(account_id: &str) -> String {
         "Default".to_string()
     } else {
         account_id.to_string()
-    }
-}
-
-fn parse_exchange_account_path(exchange: &str) -> (String, String) {
-    if let Some((exchange, account_id)) = exchange.split_once(':') {
-        (
-            exchange.trim().to_ascii_lowercase(),
-            normalize_account_id(account_id),
-        )
-    } else {
-        (exchange.trim().to_ascii_lowercase(), "default".to_string())
     }
 }
 
@@ -2100,14 +1762,6 @@ fn namespace_env_keys(credential_namespace: &str, field: &str) -> Vec<String> {
     keys
 }
 
-fn account_label_env_key(schema: &ExchangeApiKeySchema, account_id: &str) -> String {
-    if account_id == "default" {
-        format!("{}_ACCOUNT_LABEL", env_exchange_prefix(schema.exchange))
-    } else {
-        account_env_key(schema, account_id, "account_label")
-    }
-}
-
 fn account_env_prefix(exchange: &str) -> String {
     let prefix = env_exchange_prefix(exchange);
     if prefix.ends_with('_') {
@@ -2122,19 +1776,6 @@ fn env_exchange_prefix(exchange: &str) -> String {
         .trim_end_matches("_spot")
         .to_ascii_uppercase()
         .replace('-', "_")
-}
-
-fn exchange_api_key_schema(exchange: &str) -> Option<&'static ExchangeApiKeySchema> {
-    let normalized_exchange = exchange.trim().to_ascii_lowercase();
-    let normalized = match normalized_exchange.as_str() {
-        "gate" | "gate.io" | "gateio" => "gate",
-        "binance_spot" => "binance",
-        "okx_spot" => "okx",
-        value => value,
-    };
-    exchange_api_key_schemas()
-        .iter()
-        .find(|schema| schema.exchange == normalized)
 }
 
 fn exchange_api_key_schemas() -> &'static [ExchangeApiKeySchema] {
@@ -2387,20 +2028,7 @@ fn exchange_api_key_schemas() -> &'static [ExchangeApiKeySchema] {
     SCHEMAS
 }
 
-fn set_if_present(values: &mut BTreeMap<String, String>, key: &str, value: Option<&str>) {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        values.insert(key.to_string(), value.to_string());
-    }
-}
-
-fn reject_multiline_secret(field: &str, value: Option<&str>) -> Result<()> {
-    if value.is_some_and(|value| value.contains('\n') || value.contains('\r')) {
-        return Err(anyhow::anyhow!("{field} must be a single-line value"));
-    }
-    Ok(())
-}
-
-async fn read_env_store(path: &PathBuf) -> Result<BTreeMap<String, String>> {
+async fn read_local_credential_status_source(path: &PathBuf) -> Result<BTreeMap<String, String>> {
     let content = match tokio::fs::read_to_string(path).await {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -2423,55 +2051,12 @@ async fn read_env_store(path: &PathBuf) -> Result<BTreeMap<String, String>> {
     Ok(values)
 }
 
-async fn write_env_store(path: &PathBuf, values: &BTreeMap<String, String>) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("create {}", parent.display()))?;
-    }
-    let mut content = "# Managed by RustCTA control-api. Do not commit this file.\n".to_string();
-    for (key, value) in values {
-        if is_shell_env_key(key) {
-            content.push_str(key);
-            content.push('=');
-            content.push_str(&shell_quote(value));
-            content.push('\n');
-        }
-    }
-    let tmp_path = path.with_extension("env.tmp");
-    tokio::fs::write(&tmp_path, content)
-        .await
-        .with_context(|| format!("write {}", tmp_path.display()))?;
-    set_file_mode_600(&tmp_path).await?;
-    tokio::fs::rename(&tmp_path, path)
-        .await
-        .with_context(|| format!("replace {}", path.display()))?;
-    set_file_mode_600(path).await?;
-    Ok(())
-}
-
-async fn set_file_mode_600(path: &PathBuf) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = std::fs::Permissions::from_mode(0o600);
-        tokio::fs::set_permissions(path, permissions)
-            .await
-            .with_context(|| format!("chmod 600 {}", path.display()))?;
-    }
-    Ok(())
-}
-
 fn parse_shell_env_value(value: &str) -> String {
     if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
         value[1..value.len() - 1].replace("'\\''", "'")
     } else {
         value.trim_matches('"').to_string()
     }
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn is_shell_env_key(key: &str) -> bool {
@@ -4787,17 +4372,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exchange_api_key_routes_should_use_account_manager_env_prefix_and_mask_values() {
+    async fn local_credential_status_should_use_account_manager_env_prefix_and_mask_values() {
         let temp_dir = std::env::current_dir()
             .unwrap()
             .join("target/tmp")
             .join(format!(
-                "rustcta-control-api-credentials-{}",
+                "rustcta-control-api-credential-status-{}",
                 std::process::id()
             ));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let accounts_path = temp_dir.join("accounts.yml");
-        let store_path = temp_dir.join("keys.env");
+        let store_path = temp_dir.join("credentials.env");
         std::fs::write(
             &accounts_path,
             r#"
@@ -4812,11 +4397,16 @@ accounts:
 "#,
         )
         .unwrap();
+        std::fs::write(
+            &store_path,
+            "BINANCE_3_API_KEY='abcd1234efgh5678'\nBINANCE_3_API_SECRET='secret1234567890'\n",
+        )
+        .unwrap();
         let accounts_path_text = accounts_path.to_string_lossy().to_string();
         let store_path_text = store_path.to_string_lossy().to_string();
         let config = ControlApiAppConfig::from_env_iter([
             (
-                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
+                "RUSTCTA_CONTROL_API_CREDENTIAL_STATUS_STORE",
                 store_path_text.as_str(),
             ),
             (
@@ -4830,7 +4420,7 @@ accounts:
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/exchange-api-keys")
+                    .uri("/api/local-credentials/status")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -4850,54 +4440,22 @@ accounts:
             "BINANCE_3"
         );
         assert_eq!(value["store_path"], "local-agent:exchange-api-key-store");
-        assert!(!std::str::from_utf8(&body)
-            .unwrap()
-            .contains(temp_dir.to_string_lossy().as_ref()));
-
-        let save = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/exchange-api-keys")
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "exchange": "binance",
-                            "account_id": "binance_hcr",
-                            "api_key": "abcd1234efgh5678",
-                            "api_secret": "secret1234567890",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(save.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(save.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let raw = std::str::from_utf8(&body).unwrap();
         assert!(!raw.contains("abcd1234efgh5678"));
         assert!(!raw.contains("secret1234567890"));
         assert!(raw.contains("abcd...5678"));
-        let store = std::fs::read_to_string(&store_path).unwrap();
-        assert!(store.contains("BINANCE_3_API_KEY='abcd1234efgh5678'"));
-        assert!(store.contains("BINANCE_3_API_SECRET='secret1234567890'"));
+        assert!(!raw.contains(temp_dir.to_string_lossy().as_ref()));
 
-        let clear = app
+        let post = app
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/exchange-api-keys")
+                    .uri("/api/local-credentials/status")
                     .header(axum::http::header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         serde_json::json!({
                             "exchange": "binance",
-                            "account_id": "binance_hcr",
-                            "credential_namespace": "BINANCE_3",
-                            "clear": true,
+                            "account_id": "binance_hcr"
                         })
                         .to_string(),
                     ))
@@ -4905,255 +4463,7 @@ accounts:
             )
             .await
             .unwrap();
-        assert_eq!(clear.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(clear.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(value["status"]["exchanges"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| !(row["exchange"] == "binance" && row["account_id"] == "binance_hcr")));
-        let store = std::fs::read_to_string(&store_path).unwrap();
-        assert!(!store.contains("BINANCE_3_API_KEY"));
-        assert!(!store.contains("BINANCE_3_API_SECRET"));
-
-        let restarted_app = config.build_router().unwrap();
-        let restarted_status = restarted_app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/exchange-api-keys")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(restarted_status.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(restarted_status.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(value["exchanges"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| !(row["exchange"] == "binance" && row["account_id"] == "binance_hcr")));
-
-        std::fs::remove_dir_all(temp_dir).ok();
-    }
-
-    #[tokio::test]
-    async fn exchange_api_key_routes_should_allow_accounts_without_account_manager() {
-        let temp_dir = std::env::current_dir()
-            .unwrap()
-            .join("target/tmp")
-            .join(format!(
-                "rustcta-control-api-unmanaged-credentials-{}",
-                std::process::id()
-            ));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let accounts_path = temp_dir.join("missing-accounts.yml");
-        let store_path = temp_dir.join("keys.env");
-        std::fs::write(
-            &store_path,
-            "BINANCE_API_KEY='defaultkey123456'\nBINANCE_API_SECRET='defaultsecret123456'\n",
-        )
-        .unwrap();
-        let accounts_path_text = accounts_path.to_string_lossy().to_string();
-        let store_path_text = store_path.to_string_lossy().to_string();
-        let config = ControlApiAppConfig::from_env_iter([
-            (
-                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
-                store_path_text.as_str(),
-            ),
-            (
-                "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG",
-                accounts_path_text.as_str(),
-            ),
-        ]);
-        let app = config.build_router().unwrap();
-
-        let save_binance_alt = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/exchange-api-keys")
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "exchange": "binance",
-                            "account_id": "alt",
-                            "api_key": "altkey1234567890",
-                            "api_secret": "altsecret1234567890",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(save_binance_alt.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(save_binance_alt.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let raw = std::str::from_utf8(&body).unwrap();
-        assert!(!raw.contains("altkey1234567890"));
-        assert!(!raw.contains("altsecret1234567890"));
-        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let exchanges = value["status"]["exchanges"].as_array().unwrap();
-        assert!(exchanges.iter().any(|row| {
-            row["exchange"] == "binance"
-                && row["account_id"] == "default"
-                && row["credential_namespace"] == "BINANCE"
-        }));
-        let alt = exchanges
-            .iter()
-            .find(|row| row["exchange"] == "binance" && row["account_id"] == "alt")
-            .unwrap();
-        assert_eq!(alt["credential_namespace"], "BINANCE__ALT_");
-        assert_eq!(alt["enabled"], false);
-        assert!(alt["fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|field| field["configured"] == true));
-        let store = std::fs::read_to_string(&store_path).unwrap();
-        assert!(store.contains("BINANCE_API_KEY='defaultkey123456'"));
-        assert!(store.contains("BINANCE__ALT_API_KEY='altkey1234567890'"));
-        assert!(store.contains("BINANCE__ALT_API_SECRET='altsecret1234567890'"));
-
-        let save_mexc_alpha = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/exchange-api-keys")
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "exchange": "mexc",
-                            "account_id": "alpha",
-                            "api_key": "mexckey1234567890",
-                            "api_secret": "mexcsecret1234567890",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(save_mexc_alpha.status(), StatusCode::OK);
-        let store = std::fs::read_to_string(&store_path).unwrap();
-        assert!(store.contains("MEXC__ALPHA_API_KEY='mexckey1234567890'"));
-        assert!(store.contains("MEXC__ALPHA_API_SECRET='mexcsecret1234567890'"));
-
-        std::fs::remove_dir_all(temp_dir).ok();
-    }
-
-    #[tokio::test]
-    async fn exchange_api_key_routes_should_require_exchange_account_id_fields() {
-        let temp_dir = std::env::current_dir()
-            .unwrap()
-            .join("target/tmp")
-            .join(format!(
-                "rustcta-control-api-gate-credentials-{}",
-                std::process::id()
-            ));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let accounts_path = temp_dir.join("missing-accounts.yml");
-        let store_path = temp_dir.join("keys.env");
-        let accounts_path_text = accounts_path.to_string_lossy().to_string();
-        let store_path_text = store_path.to_string_lossy().to_string();
-        let config = ControlApiAppConfig::from_env_iter([
-            (
-                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
-                store_path_text.as_str(),
-            ),
-            (
-                "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG",
-                accounts_path_text.as_str(),
-            ),
-        ]);
-        let app = config.build_router().unwrap();
-
-        let missing_account_id = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/exchange-api-keys")
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "exchange": "gate",
-                            "account_id": "trade_a",
-                            "api_key": "gatekey1234567890",
-                            "api_secret": "gatesecret1234567890",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(missing_account_id.status(), StatusCode::BAD_REQUEST);
-
-        let saved = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/exchange-api-keys")
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "exchange": "gateio",
-                            "account_id": "trade_a",
-                            "exchange_account_id": "1234567",
-                            "api_key": "gatekey1234567890",
-                            "api_secret": "gatesecret1234567890",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(saved.status(), StatusCode::OK);
-        let store = std::fs::read_to_string(&store_path).unwrap();
-        assert!(store.contains("GATE__TRADE_A_ACCOUNT_ID='1234567'"));
-        assert!(store.contains("GATE__TRADE_A_API_KEY='gatekey1234567890'"));
-        assert!(store.contains("GATE__TRADE_A_API_SECRET='gatesecret1234567890'"));
-
-        let restarted_app = config.build_router().unwrap();
-        let status = restarted_app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/exchange-api-keys")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(status.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(status.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let account = value["exchanges"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|row| row["exchange"] == "gate" && row["account_id"] == "trade_a")
-            .unwrap();
-        assert!(account["fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|field| field["configured"] == true));
-        assert!(std::str::from_utf8(&body)
-            .unwrap()
-            .contains("\"value\":\"1234567\""));
+        assert_eq!(post.status(), StatusCode::METHOD_NOT_ALLOWED);
 
         std::fs::remove_dir_all(temp_dir).ok();
     }

@@ -17,9 +17,9 @@ use crate::{
     PerpAccountControlProvider, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
     PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
     QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SetLeverageRequest, SetLeverageResponse, SetPositionModeRequest, SetPositionModeResponse,
-    SymbolAccountConfigRequest, SymbolAccountConfigResponse, SymbolRulesRequest,
-    SymbolRulesResponse,
+    SetLeverageRequest, SetLeverageResponse, SetMarginModeRequest, SetMarginModeResponse,
+    SetPositionModeRequest, SetPositionModeResponse, SymbolAccountConfigRequest,
+    SymbolAccountConfigResponse, SymbolRulesRequest, SymbolRulesResponse,
 };
 
 #[derive(Debug, Default)]
@@ -57,6 +57,7 @@ impl ReadOnlyMutationRecorder {
             "batch_cancel_orders",
             "cancel_all_orders",
             "set_leverage",
+            "set_margin_mode",
             "set_position_mode",
             "close_position",
             "set_countdown_cancel_all",
@@ -106,6 +107,17 @@ where
         Err(readonly_error(
             PerpAccountControlProvider::exchange(self),
             "set_position_mode",
+        ))
+    }
+
+    async fn set_margin_mode(
+        &self,
+        _request: SetMarginModeRequest,
+    ) -> ExchangeApiResult<SetMarginModeResponse> {
+        self.recorder.record("set_margin_mode");
+        Err(readonly_error(
+            PerpAccountControlProvider::exchange(self),
+            "set_margin_mode",
         ))
     }
 

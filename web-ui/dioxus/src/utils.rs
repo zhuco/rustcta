@@ -1724,8 +1724,13 @@ fn zh_cross_arb_failure_reason_segment(reason: &str) -> String {
                 .replace("live expected net edge", "实盘预期净边际")
                 .replace("is below execution quality min", "低于执行质量最低要求");
         }
+        _ if lower.contains("display-only opportunity")
+            && lower.contains("no maker order was submitted") =>
+        {
+            "该机会仅展示：尚未生成可执行 maker/hedge 订单草稿，未下 maker 单"
+        }
         _ if lower.contains("display-only row has no executable order drafts") => {
-            "该机会仅展示，无可执行订单草稿"
+            "该机会仅展示：无可执行订单草稿，未下 maker 单"
         }
         _ if lower.contains("private_ws_confirmation_timeout") => "私有 WebSocket 成交确认超时",
         _ if lower.contains("emergency close not filled") => "应急平仓未成交",
@@ -1802,6 +1807,11 @@ pub(crate) fn strategy_log_count(logs: &Value, category: &str) -> usize {
 }
 
 fn strategy_log_event_matches(event: &Value, category: &str) -> bool {
+    let event_category = text_at(event, "category", Language::En).to_ascii_lowercase();
+    if !event_category.is_empty() && event_category != "-" {
+        return event_category == category;
+    }
+
     let level = text_at(event, "level", Language::En).to_ascii_lowercase();
     let message = text_at(event, "message", Language::En).to_ascii_lowercase();
     match category {

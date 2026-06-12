@@ -115,6 +115,7 @@ fn typed_payload_from_legacy_operation(
         }
         GatewayOperation::GetSymbolAccountConfig
         | GatewayOperation::SetLeverage
+        | GatewayOperation::SetMarginMode
         | GatewayOperation::SetPositionMode
         | GatewayOperation::ClosePosition
         | GatewayOperation::SetCountdownCancelAll => {
