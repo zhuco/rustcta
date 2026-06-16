@@ -4,6 +4,7 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use rustcta_strategy_sdk::MarketType;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct CanonicalSymbol {
@@ -160,6 +161,8 @@ pub struct UnifiedArbitrageConfig {
     pub alerts: AlertConfig,
     pub persistence: PersistenceConfig,
     pub control: ControlConfig,
+    pub enabled_exchanges: Vec<String>,
+    pub exchanges: BTreeMap<String, Value>,
 }
 
 impl Default for UnifiedArbitrageConfig {
@@ -176,6 +179,8 @@ impl Default for UnifiedArbitrageConfig {
             alerts: AlertConfig::default(),
             persistence: PersistenceConfig::default(),
             control: ControlConfig::default(),
+            enabled_exchanges: Vec::new(),
+            exchanges: BTreeMap::new(),
         }
     }
 }

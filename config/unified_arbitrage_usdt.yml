@@ -1,192 +1,185 @@
-strategy_kind: unified_arbitrage
-mode: observe
-trading_mode: paper
-enable_live_trading: false
-
 account:
-  tenant_id: local
   account_id: unified_arbitrage
-  require_private_ws: true
   require_position_readback: true
-
-market:
-  quote_asset: USDT
-  stale_book_ms: 1000
-  depth_levels: 5
-  public_book_speed: fastest
-  top_of_book_capacity_ratio: 0.8
-  funding_snapshot_max_age_ms: 60000
-
+  require_private_ws: true
+  tenant_id: local
+alerts:
+  enabled: true
+  liquidation_distance_below_pct: 25.0
+  pnl_loss_below_usdt: -20.0
+  spread_above_bps: 100.0
+  spread_below_bps: -20.0
+control:
+  enable_manual_close: true
+  enable_manual_open: true
+  manual_commands_require_confirmation: true
+  manual_open_requires_current_signal: true
 defaults:
+  execution:
+    allow_market_order: false
+    allowed_close_styles:
+    - dual_taker_reduce_only
+    - maker_taker_reduce_only
+    allowed_open_styles:
+    - dual_taker
+    - maker_taker
+    maker_order_timeout_ms: 3000
+    maker_price_offset_bps: 5.0
+    preferred_close_style: dual_taker_reduce_only
+    preferred_open_style: dual_taker
+    taker_slippage_bps: 10.0
+  funding:
+    close_if_funding_edge_below_bps: -5.0
+    expected_holding_hours: 8.0
+    funding_uncertainty_buffer_bps: 5.0
+    use_predicted_funding: true
+  hedge_tolerance:
+    block_new_entries_above_imbalance_usdt: 5.0
+    emergency_close_above_imbalance_usdt: 10.0
+    max_leg_imbalance_usdt: 1.0
+    repair_above_imbalance_usdt: 2.0
+  leverage:
+    default_perp_leverage: 3
+    margin_mode: isolated
+    max_perp_leverage: 10
+  risk:
+    block_on_external_account_exposure: true
+    max_active_bundles_per_symbol: 3
+    max_daily_loss_usdt: 100.0
+    max_hold_secs: 86400
+    max_open_bundles: 20
+    min_liquidation_distance_pct: 25.0
+    orphan_exposure_blocks_new_entries: true
+    start_close_only: false
   sizing:
-    min_order_notional_usdt: 5.0
+    max_exchange_notional_usdt: 300.0
     max_order_notional_usdt: 20.0
     max_position_notional_usdt: 100.0
     max_route_notional_usdt: 100.0
     max_symbol_notional_usdt: 200.0
-    max_exchange_notional_usdt: 300.0
     max_total_notional_usdt: 500.0
-  leverage:
-    default_perp_leverage: 3
-    max_perp_leverage: 10
-    margin_mode: isolated
-  thresholds:
-    min_open_spread_bps: 20.0
-    max_open_spread_bps: 1000.0
-    min_open_net_edge_bps: 5.0
-    close_spread_bps: 5.0
-    take_profit_bps: 10.0
-    stop_loss_bps: 30.0
-    alert_spread_above_bps: 100.0
-    alert_spread_below_bps: -20.0
-  funding:
-    expected_holding_hours: 8.0
-    use_predicted_funding: true
-    funding_uncertainty_buffer_bps: 5.0
-    close_if_funding_edge_below_bps: -5.0
-  execution:
-    preferred_open_style: dual_taker
-    allowed_open_styles:
-      - dual_taker
-      - maker_taker
-    preferred_close_style: dual_taker_reduce_only
-    allowed_close_styles:
-      - dual_taker_reduce_only
-      - maker_taker_reduce_only
-    taker_slippage_bps: 10.0
-    maker_price_offset_bps: 5.0
-    maker_order_timeout_ms: 3000
-    allow_market_order: false
+    min_order_notional_usdt: 5.0
   split_execution:
+    allow_partial_parent_completion: true
+    child_delay_jitter_ms: 100
+    child_delay_ms: 250
     enabled: true
-    min_child_notional_usdt: 5.0
     max_child_notional_usdt: 20.0
     max_child_orders: 10
-    child_delay_ms: 250
-    child_delay_jitter_ms: 100
+    min_child_notional_usdt: 5.0
+    min_parent_fill_ratio: 0.8
     reprice_before_each_child: true
     stop_slicing_if_edge_below_bps: 3.0
-    allow_partial_parent_completion: true
-    min_parent_fill_ratio: 0.80
-  hedge_tolerance:
-    max_leg_imbalance_usdt: 1.0
-    repair_above_imbalance_usdt: 2.0
-    block_new_entries_above_imbalance_usdt: 5.0
-    emergency_close_above_imbalance_usdt: 10.0
-  risk:
-    start_close_only: false
-    max_open_bundles: 20
-    max_active_bundles_per_symbol: 3
-    min_liquidation_distance_pct: 25.0
-    max_hold_secs: 86400
-    max_daily_loss_usdt: 100.0
-    block_on_external_account_exposure: true
-    orphan_exposure_blocks_new_entries: true
-
-routes:
-  - route_id: ordi_gate_bitget_spot_perp
-    enabled: true
-    kind: spot_perp_basis
-    symbol: ORDI/USDT
-    sizing:
-      min_order_notional_usdt: 5.0
-      max_order_notional_usdt: 20.0
-      max_position_notional_usdt: 50.0
-      max_route_notional_usdt: 50.0
-      max_symbol_notional_usdt: 100.0
-      max_exchange_notional_usdt: 150.0
-      max_total_notional_usdt: 200.0
-    legs:
-      spot:
-        exchange: gate
-        market_type: spot
-        side_on_open: buy
-        position_side: long
-      perp:
-        exchange: bitget
-        market_type: perpetual
-        side_on_open: sell
-        position_side: short
-        leverage: 3
-
-  - route_id: drift_binance_bitget_perp
-    enabled: true
-    kind: perp_perp_spread
-    symbol: DRIFT/USDT
-    thresholds:
-      min_open_spread_bps: 30.0
-      max_open_spread_bps: 1000.0
-      min_open_net_edge_bps: 5.0
-      close_spread_bps: 5.0
-      take_profit_bps: 10.0
-      stop_loss_bps: 30.0
-      alert_spread_above_bps: 100.0
-      alert_spread_below_bps: -20.0
-    legs:
-      long:
-        exchange: binance
-        market_type: perpetual
-        side_on_open: buy
-        position_side: long
-        leverage: 5
-      short:
-        exchange: bitget
-        market_type: perpetual
-        side_on_open: sell
-        position_side: short
-        leverage: 5
-
-  - route_id: soph_bitget_settlement
-    enabled: true
-    kind: single_exchange_settlement
-    symbol: SOPH/USDT
-    sizing:
-      min_order_notional_usdt: 5.0
-      max_order_notional_usdt: 10.0
-      max_position_notional_usdt: 10.0
-      max_route_notional_usdt: 10.0
-      max_symbol_notional_usdt: 10.0
-      max_exchange_notional_usdt: 20.0
-      max_total_notional_usdt: 50.0
-    settlement:
-      open_before_settlement_secs: 20
-      min_submit_before_settlement_secs: 3
-      close_after_settlement_secs: 5
-      min_abs_funding_rate_bps: 20.0
-      min_settlement_net_edge_bps: 5.0
-      max_hold_secs: 120
-      max_settlement_position_notional_usdt: 10.0
-    risk:
-      start_close_only: false
-      max_open_bundles: 1
-      max_active_bundles_per_symbol: 1
-      min_liquidation_distance_pct: 35.0
-      max_hold_secs: 120
-      max_daily_loss_usdt: 20.0
-      block_on_external_account_exposure: true
-      orphan_exposure_blocks_new_entries: true
-    legs:
-      settlement:
-        exchange: bitget
-        market_type: perpetual
-        position_side_policy: receive_funding
-        leverage: 2
-
-alerts:
-  enabled: true
-  spread_above_bps: 100.0
-  spread_below_bps: -20.0
-  liquidation_distance_below_pct: 25.0
-  pnl_loss_below_usdt: -20.0
-
+  thresholds:
+    alert_spread_above_bps: 100.0
+    alert_spread_below_bps: -20.0
+    close_spread_bps: 5.0
+    max_open_spread_bps: 1000.0
+    min_open_net_edge_bps: 5.0
+    min_open_spread_bps: 20.0
+    stop_loss_bps: 30.0
+    take_profit_bps: 10.0
+enable_live_trading: false
+enabled_exchanges: []
+exchanges: {}
+market:
+  depth_levels: 5
+  funding_snapshot_max_age_ms: 60000
+  public_book_speed: fastest
+  quote_asset: USDT
+  stale_book_ms: 1000
+  top_of_book_capacity_ratio: 0.8
+mode: observe
 persistence:
+  clickhouse_enabled: false
+  dashboard_snapshot_path: logs/unified_arbitrage/dashboard.json
   jsonl_dir: logs/unified_arbitrage
   trade_ledger_path: logs/unified_arbitrage/trade_events.jsonl
-  dashboard_snapshot_path: logs/unified_arbitrage/dashboard.json
-  clickhouse_enabled: false
-
-control:
-  enable_manual_open: true
-  enable_manual_close: true
-  manual_commands_require_confirmation: true
-  manual_open_requires_current_signal: true
+routes:
+- enabled: true
+  kind: spot_perp_basis
+  legs:
+    perp:
+      exchange: bitget
+      leverage: 3
+      market_type: perpetual
+      position_side: short
+      side_on_open: sell
+    spot:
+      exchange: gate
+      market_type: spot
+      position_side: long
+      side_on_open: buy
+  route_id: ordi_gate_bitget_spot_perp
+  sizing:
+    max_exchange_notional_usdt: 150.0
+    max_order_notional_usdt: 20.0
+    max_position_notional_usdt: 50.0
+    max_route_notional_usdt: 50.0
+    max_symbol_notional_usdt: 100.0
+    max_total_notional_usdt: 200.0
+    min_order_notional_usdt: 5.0
+  symbol: ORDI/USDT
+- enabled: true
+  kind: perp_perp_spread
+  legs:
+    long:
+      exchange: binance
+      leverage: 5
+      market_type: perpetual
+      position_side: long
+      side_on_open: buy
+    short:
+      exchange: bitget
+      leverage: 5
+      market_type: perpetual
+      position_side: short
+      side_on_open: sell
+  route_id: drift_binance_bitget_perp
+  symbol: DRIFT/USDT
+  thresholds:
+    alert_spread_above_bps: 100.0
+    alert_spread_below_bps: -20.0
+    close_spread_bps: 5.0
+    max_open_spread_bps: 1000.0
+    min_open_net_edge_bps: 5.0
+    min_open_spread_bps: 30.0
+    stop_loss_bps: 30.0
+    take_profit_bps: 10.0
+- enabled: true
+  kind: single_exchange_settlement
+  legs:
+    settlement:
+      exchange: bitget
+      leverage: 2
+      market_type: perpetual
+      position_side_policy: receive_funding
+  risk:
+    block_on_external_account_exposure: true
+    max_active_bundles_per_symbol: 1
+    max_daily_loss_usdt: 20.0
+    max_hold_secs: 120
+    max_open_bundles: 1
+    min_liquidation_distance_pct: 35.0
+    orphan_exposure_blocks_new_entries: true
+    start_close_only: false
+  route_id: soph_bitget_settlement
+  settlement:
+    close_after_settlement_secs: 5
+    max_hold_secs: 120
+    max_settlement_position_notional_usdt: 10.0
+    min_abs_funding_rate_bps: 20.0
+    min_settlement_net_edge_bps: 5.0
+    min_submit_before_settlement_secs: 3
+    open_before_settlement_secs: 20
+  sizing:
+    max_exchange_notional_usdt: 20.0
+    max_order_notional_usdt: 10.0
+    max_position_notional_usdt: 10.0
+    max_route_notional_usdt: 10.0
+    max_symbol_notional_usdt: 10.0
+    max_total_notional_usdt: 50.0
+    min_order_notional_usdt: 5.0
+  symbol: SOPH/USDT
+strategy_kind: unified_arbitrage
+trading_mode: paper

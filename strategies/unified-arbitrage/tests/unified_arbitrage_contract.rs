@@ -49,6 +49,43 @@ fn unified_config_should_parse_and_validate_all_route_kinds() {
 }
 
 #[test]
+fn unified_config_should_accept_control_plane_exchange_metadata() {
+    let raw = r#"
+strategy_kind: unified_arbitrage
+mode: observe
+trading_mode: paper
+enable_live_trading: false
+enabled_exchanges:
+  - binance
+exchanges:
+  binance:
+    enabled: true
+routes:
+  - route_id: drift_binance_bitget_perp
+    enabled: true
+    kind: perp_perp_spread
+    symbol: DRIFT/USDT
+    legs:
+      long:
+        exchange: binance
+        market_type: perpetual
+        side_on_open: buy
+        position_side: long
+      short:
+        exchange: bitget
+        market_type: perpetual
+        side_on_open: sell
+        position_side: short
+"#;
+    let config: UnifiedArbitrageConfig =
+        serde_yaml::from_str(raw).expect("parse config with control-plane metadata");
+
+    config.validate().expect("metadata-compatible config");
+    assert_eq!(config.enabled_exchanges, vec!["binance"]);
+    assert!(config.exchanges.contains_key("binance"));
+}
+
+#[test]
 fn market_data_subscriptions_should_keep_spot_and_perp_separate() {
     let config = load_config();
     let subscriptions = unified_market_data_subscriptions(&config);
