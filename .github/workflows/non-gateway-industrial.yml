@@ -70,8 +70,7 @@ jobs:
 
       - name: Validate checked-in supervisor specs
         run: |
-          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/cross_arb_live.spec.json
-          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/funding_arb_live.spec.json
+          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/unified_arb_live.spec.json
           cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/spot_spot_live_dry_run.spec.json
           cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/trend_report.spec.json
           cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/account_position_reporter.spec.json

@@ -1,0 +1,23 @@
+[Unit]
+Description=RustCTA Exchange Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cta/rustcta
+Environment=RUST_LOG=info
+Environment=RUSTCTA_GATEWAY_BIND=127.0.0.1:18081
+Environment=RUSTCTA_GATEWAY_ADAPTERS=binance,bybit,gateio
+EnvironmentFile=-/home/cta/rustcta/.env
+EnvironmentFile=-/home/cta/rustcta/data/control_api/exchange_api_keys.env
+ExecStart=/home/cta/rustcta/target/release/rustcta-gateway
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=append:/home/cta/rustcta/logs/rustcta-gateway.service.log
+StandardError=append:/home/cta/rustcta/logs/rustcta-gateway.service.log
+
+[Install]
+WantedBy=default.target

@@ -2,10 +2,11 @@
 
 RustCTA has two exchange-facing contracts:
 
-- `ExchangeClient` in `retired exchange tree/unified.rs` for Spot and market-neutral
-  client behavior.
-- `TradingAdapter` plus `MarketDataAdapter` in `src/execution/` and
-  `src/market/` for cross-exchange execution and market-data routing.
+- `ExchangeClient` in `crates/rustcta-exchange-api/src/client.rs` for Spot,
+  Perpetual, and market-neutral client behavior.
+- `TradingAdapter` in `crates/rustcta-execution-api/src/lib.rs`, plus gateway
+  adapters under `crates/rustcta-exchange-gateway/src/adapters/`, for
+  cross-exchange execution and market-data routing.
 
 The old broad compatibility layer is intentionally reduced. It remains only
 where legacy strategy code still depends on `core::exchange::Exchange`.
@@ -50,14 +51,14 @@ Spot arbitrage currently uses these adapter families:
 
 | Exchange | Spot client path | Notes |
 | --- | --- | --- |
-| Binance | `retired exchange tree/binance/spot.rs` | REST orders, balances, fees, public/private streams, dry-run acks |
-| OKX | `retired exchange tree/okx/spot.rs` | REST orders, balances, fees, public/private streams, dry-run acks |
-| Bitget | `retired exchange tree/bitget/mod.rs` | Spot client support for scanner/arbitrage paths |
-| Gate.io | `retired exchange tree/gateio/mod.rs` | Spot client support for scanner/arbitrage paths |
-| MEXC | `retired exchange tree/mexc/mod.rs` | Spot client support for scanner/arbitrage paths |
-| CoinEx | `retired exchange tree/coinex/mod.rs` | Spot client support for scanner/arbitrage paths |
-| KuCoin | `retired exchange tree/kucoin/mod.rs` | Spot client support for scanner/arbitrage paths |
-| Paper | `retired exchange tree/paper/mod.rs` | Deterministic paper execution and user-stream events |
+| Binance | `crates/rustcta-exchange-gateway/src/adapters/binance/` | REST orders, balances, fees, public/private streams, dry-run acks |
+| OKX | `crates/rustcta-exchange-gateway/src/adapters/okx/` | REST orders, balances, fees, public/private streams, dry-run acks |
+| Bitget | `crates/rustcta-exchange-gateway/src/adapters/bitget/` | Spot client support for scanner/arbitrage paths |
+| Gate.io | `crates/rustcta-exchange-gateway/src/adapters/gateio/` | Spot client support for scanner/arbitrage paths |
+| MEXC | `crates/rustcta-exchange-gateway/src/adapters/mexc/` | Spot client support for scanner/arbitrage paths |
+| CoinEx | `crates/rustcta-exchange-gateway/src/adapters/coinex/` | Spot client support for scanner/arbitrage paths |
+| KuCoin | `crates/rustcta-exchange-gateway/src/adapters/kucoin/` | Spot client support for scanner/arbitrage paths |
+| Paper | `crates/rustcta-exchange-gateway/src/mock.rs` | Deterministic paper execution and user-stream events |
 
 The Spot arbitrage runtime can scan and compare multiple exchanges. Live
 trading is still controlled per exchange by config, dry-run mode, preflight, and
@@ -67,12 +68,12 @@ control-plane state.
 
 USDT perpetual market data and execution are routed through:
 
-- `retired exchange tree/market_adapters/`
-- `retired exchange tree/private_perp/`
-- `retired exchange tree/trading_adapters/`
-- `retired exchange tree/registry.rs`
+- `crates/rustcta-exchange-api/`
+- `crates/rustcta-exchange-gateway/src/adapters/`
+- `crates/rustcta-exchange-gateway/src/client.rs`
+- `crates/rustcta-execution-api/`
 
-This path is used by `cross_exchange_arbitrage` and funding-rate tooling, not by
+This path is used by unified arbitrage and funding-rate tooling, not by
 the Spot-to-Spot arbitrage runtime.
 
 ## Compatibility Boundary
@@ -86,7 +87,7 @@ The compatibility layer now consists of:
 
 Removed compatibility:
 
-- `retired exchange tree/adapters/`
+- old flat adapter compatibility modules outside `crates/rustcta-exchange-gateway`
 - deleted single-file exchange shims that were superseded by directory modules
 - legacy strategy exports for removed strategy families
 

@@ -20,22 +20,23 @@ pub fn parse_balances(
     assets: &[String],
     value: &Value,
 ) -> ExchangeApiResult<Vec<ExchangeBalance>> {
-    let items = value
-        .as_array()
-        .map(|items| items.iter().collect::<Vec<_>>())
-        .unwrap_or_else(|| vec![value]);
+    let items = gateio_balance_items(value);
     let requested = assets
         .iter()
         .map(|asset| asset.trim().to_ascii_uppercase())
         .filter(|asset| !asset.is_empty())
         .collect::<Vec<_>>();
     let mut balances = Vec::new();
-    for item in items {
-        let asset = item
-            .get("currency")
-            .or_else(|| item.get("asset"))
-            .and_then(Value::as_str)
-            .unwrap_or("USDT")
+    for (named_asset, item) in items {
+        let asset = named_asset
+            .map(str::to_string)
+            .or_else(|| {
+                item.get("currency")
+                    .or_else(|| item.get("asset"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "USDT".to_string())
             .to_ascii_uppercase();
         if !requested.is_empty() && !requested.contains(&asset) {
             continue;
@@ -43,34 +44,68 @@ pub fn parse_balances(
         let available = decimal_value_to_f64(
             item.get("available")
                 .or_else(|| item.get("available_balance"))
-                .or_else(|| item.get("cross_available")),
+                .or_else(|| item.get("cross_available"))
+                .or_else(|| item.get("available_margin")),
         )?
+        .or_else(|| {
+            if named_asset.is_some() {
+                decimal_value_to_f64(Some(item)).ok().flatten()
+            } else {
+                None
+            }
+        })
         .unwrap_or(0.0);
         let total = decimal_value_to_f64(
             item.get("total")
                 .or_else(|| item.get("total_balance"))
-                .or_else(|| item.get("cross_margin_balance")),
+                .or_else(|| item.get("cross_margin_balance"))
+                .or_else(|| item.get("margin_balance"))
+                .or_else(|| item.get("cross_balance"))
+                .or_else(|| item.get("iso_balance")),
         )?
+        .or_else(|| decimal_value_to_f64(item.get("equity")).ok().flatten())
+        .or_else(|| decimal_value_to_f64(item.get("balance")).ok().flatten())
+        .or_else(|| {
+            if named_asset.is_some() {
+                decimal_value_to_f64(Some(item)).ok().flatten()
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            decimal_value_to_f64(
+                item.get("unified_account_total_equity")
+                    .or_else(|| item.get("unified_account_total"))
+                    .or_else(|| item.get("total_balance")),
+            )
+            .ok()
+            .flatten()
+        })
         .unwrap_or_else(|| {
-            let locked = decimal_value_to_f64(item.get("locked"))
+            let locked = decimal_value_to_f64(item.get("locked").or_else(|| item.get("freeze")))
                 .ok()
                 .flatten()
                 .unwrap_or(0.0);
             available + locked
         });
-        let locked = decimal_value_to_f64(item.get("locked"))?
-            .or_else(|| {
-                let position_margin = decimal_value_to_f64(item.get("position_margin"))
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0.0);
-                let order_margin = decimal_value_to_f64(item.get("order_margin"))
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0.0);
-                (position_margin + order_margin > 0.0).then_some(position_margin + order_margin)
-            })
-            .unwrap_or_else(|| (total - available).max(0.0));
+        let locked = decimal_value_to_f64(
+            item.get("locked")
+                .or_else(|| item.get("freeze"))
+                .or_else(|| item.get("frozen"))
+                .or_else(|| item.get("total_freeze")),
+        )?
+        .or_else(|| {
+            let position_margin = decimal_value_to_f64(item.get("position_margin"))
+                .ok()
+                .flatten()
+                .unwrap_or(0.0);
+            let order_margin = decimal_value_to_f64(item.get("order_margin"))
+                .ok()
+                .flatten()
+                .unwrap_or(0.0);
+            (position_margin + order_margin > 0.0).then_some(position_margin + order_margin)
+        })
+        .unwrap_or_else(|| (total - available).max(0.0));
         if total > 0.0 || !requested.is_empty() {
             balances.push(
                 AssetBalance::new(asset, total, available, locked).map_err(validation_error)?,
@@ -86,6 +121,19 @@ pub fn parse_balances(
         balances,
         observed_at: Utc::now(),
     }])
+}
+
+fn gateio_balance_items(value: &Value) -> Vec<(Option<&str>, &Value)> {
+    if let Some(items) = value.as_array() {
+        return items.iter().map(|item| (None, item)).collect();
+    }
+    if let Some(balances) = value.get("balances").and_then(Value::as_object) {
+        return balances
+            .iter()
+            .map(|(asset, item)| (Some(asset.as_str()), item))
+            .collect();
+    }
+    vec![(None, value)]
 }
 
 pub fn parse_order(

@@ -1743,7 +1743,11 @@ fn gateway_request_for_place_order(command: &OrderCommand) -> GatewayProtocolReq
             side: command.side,
             position_side: Some(command.position_side),
             order_type: command.order_type,
-            time_in_force: Some(command.time_in_force),
+            time_in_force: if command.order_type == rustcta_types::OrderType::PostOnly {
+                None
+            } else {
+                Some(command.time_in_force)
+            },
             quantity: command.quantity.to_string(),
             price: command.price.map(|price| price.to_string()),
             quote_quantity: None,

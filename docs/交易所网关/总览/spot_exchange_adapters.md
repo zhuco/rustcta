@@ -12,36 +12,35 @@ References:
 
 ## Architecture
 
-RustCTA currently has both legacy and newer exchange abstractions:
+RustCTA currently uses workspace exchange abstractions:
 
-- `src/core/exchange.rs` defines the legacy `Exchange` trait.
-- `retired exchange tree/gateway.rs` defines the layered `MarketDataAdapter`,
-  `TradingAdapter`, and `ExchangeGateway` traits.
-- `retired exchange tree/unified.rs` defines the newer async `ExchangeClient` trait and
-  normalized Spot/Perpetual types.
-- `retired exchange tree/gateway_exchange.rs` bridges newer gateway adapters back into the
-  legacy `Exchange` surface.
+- `crates/rustcta-exchange-api/src/client.rs` defines the async
+  `ExchangeClient` trait and normalized Spot/Perpetual request types.
+- `crates/rustcta-exchange-gateway/src/client.rs` defines gateway routing and
+  local/in-process gateway clients.
+- `crates/rustcta-execution-api/src/lib.rs` defines execution-plane
+  `TradingAdapter` contracts.
 
 The MEXC and CoinEx Spot adapters implement `ExchangeClient` and reuse the unified
-types in `retired exchange tree/unified.rs`. This keeps the implementation reviewable while
-preserving the existing legacy strategy code.
+types in `crates/rustcta-exchange-api/`. This keeps the implementation
+reviewable while preserving a shared exchange API boundary.
 
 ## Modules
 
 MEXC Spot:
 
-- `retired exchange tree/mexc/mod.rs`
+- `crates/rustcta-exchange-gateway/src/adapters/mexc/`
 - `config/mexc_spot_example.yml`
 
 CoinEx Spot:
 
-- `retired exchange tree/coinex/mod.rs`
+- `crates/rustcta-exchange-gateway/src/adapters/coinex/`
 - `config/coinex_spot_example.yml`
 
 Shared Spot support:
 
-- `retired exchange tree/unified.rs`
-- `retired exchange tree/spot_reservation.rs`
+- `crates/rustcta-exchange-api/`
+- `crates/rustcta-exchange-gateway/`
 - `config/spot_exchanges_example.yml`
 
 ## Unified Types

@@ -39,6 +39,65 @@ async fn bitget_adapter_should_keep_private_operations_unsupported_without_crede
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
 }
 
+#[tokio::test]
+async fn bitget_adapter_should_query_unified_balances_when_market_type_is_omitted() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "00000",
+        "msg": "success",
+        "data": {
+            "accountEquity": "11.13919278",
+            "usdtEquity": "11.13921165",
+            "assets": [
+                {
+                    "coin": "USDT",
+                    "equity": "6.19300826",
+                    "balance": "6.19300826",
+                    "available": "6.19300826",
+                    "locked": "0"
+                },
+                {
+                    "coin": "BGB",
+                    "equity": "1.15582129",
+                    "balance": "1.15582129",
+                    "available": "1.15582129",
+                    "locked": "0"
+                }
+            ]
+        }
+    })])
+    .await;
+    let adapter = BitgetGatewayAdapter::new(BitgetGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..BitgetGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let balances = adapter
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("unified-balances"),
+            exchange: exchange_id(),
+            market_type: None,
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("balances");
+    assert_eq!(balances.balances.len(), 1);
+    assert_eq!(balances.balances[0].market_type, MarketType::Perpetual);
+    assert_eq!(balances.balances[0].balances.len(), 1);
+    assert_eq!(balances.balances[0].balances[0].asset, "USDT");
+    assert_eq!(balances.balances[0].balances[0].total, 11.13921165);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_bitget_request(&requests[0], "/api/v3/account/assets");
+    assert!(!requests[0].query.contains_key("productType"));
+}
+
 #[test]
 fn bitget_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     let adapter = BitgetGatewayAdapter::new(BitgetGatewayConfig {

@@ -2648,11 +2648,19 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         adapter: "binance",
         api_key_keys: &[
             "RUSTCTA_BINANCE_API_KEY",
+            "RUSTCTA_BINANCE_FUTURES_API_KEY",
+            "RUSTCTA_BINANCE_USDM_API_KEY",
+            "BINANCE_FUTURES_API_KEY",
+            "BINANCE_USDM_API_KEY",
             "BINANCE_SPOT_API_KEY",
             "BINANCE_API_KEY",
         ],
         api_secret_keys: &[
             "RUSTCTA_BINANCE_API_SECRET",
+            "RUSTCTA_BINANCE_FUTURES_API_SECRET",
+            "RUSTCTA_BINANCE_USDM_API_SECRET",
+            "BINANCE_FUTURES_API_SECRET",
+            "BINANCE_USDM_API_SECRET",
             "BINANCE_SPOT_API_SECRET",
             "BINANCE_API_SECRET",
         ],
@@ -4152,7 +4160,7 @@ mod tests {
         assert!(capabilities.supports_public_rest);
         assert!(capabilities.supports_symbol_rules);
         assert!(capabilities.supports_order_book_snapshot);
-        assert!(!capabilities.supports_private_rest);
+        assert!(capabilities.supports_private_rest);
         assert!(!capabilities.supports_public_streams);
         assert!(!capabilities.supports_place_order);
     }
@@ -5012,7 +5020,7 @@ mod tests {
         assert!(response.capabilities[0].supports_public_rest);
         assert!(response.capabilities[0].supports_symbol_rules);
         assert!(response.capabilities[0].supports_order_book_snapshot);
-        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(response.capabilities[0].supports_private_rest);
         assert!(!response.capabilities[0].supports_place_order);
     }
 
@@ -5510,7 +5518,7 @@ mod tests {
         assert!(aster.supports_positions);
         assert!(aster.supports_place_order);
         assert!(!aster.supports_quote_market_order);
-        assert!(!aster.supports_amend_order);
+        assert!(aster.supports_amend_order);
 
         let bitstamp = response
             .capabilities
@@ -5623,7 +5631,7 @@ mod tests {
         assert!(response.capabilities[0].supports_public_rest);
         assert!(response.capabilities[0].supports_symbol_rules);
         assert!(response.capabilities[0].supports_order_book_snapshot);
-        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(response.capabilities[0].supports_private_rest);
         assert!(!response.capabilities[0].supports_place_order);
         assert!(!response.capabilities[0].supports_private_streams);
     }
@@ -5849,7 +5857,7 @@ mod tests {
         assert!(response.capabilities[0].supports_order_book_snapshot);
         assert!(!response.capabilities[0].supports_private_rest);
         assert!(!response.capabilities[0].supports_place_order);
-        assert!(!response.capabilities[0].supports_public_streams);
+        assert!(response.capabilities[0].supports_public_streams);
     }
 
     #[tokio::test]
@@ -7359,7 +7367,7 @@ mod tests {
         assert!(yobit.supports_public_rest);
         assert!(yobit.supports_symbol_rules);
         assert!(yobit.supports_order_book_snapshot);
-        assert!(!yobit.supports_private_rest);
+        assert!(yobit.supports_private_rest);
         assert!(!yobit.supports_place_order);
     }
 

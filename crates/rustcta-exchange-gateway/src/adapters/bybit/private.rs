@@ -35,13 +35,24 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
+        let market_type = request.market_type.unwrap_or(MarketType::Perpetual);
+        self.ensure_supported_market_type(market_type)?;
         let operation = self.profile_operation("bybit.get_balances", "bybiteu.get_balances");
         let (tenant_id, account_id) = self.context_account(&request.context, operation)?;
-        let mut params = HashMap::new();
-        params.insert("accountType".to_string(), "UNIFIED".to_string());
-        let value = self
+        let params = bybit_balance_params(market_type, &request.assets);
+        let value = match self
             .send_signed_get(operation, "/v5/account/wallet-balance", &params)
-            .await?;
+            .await
+        {
+            Ok(value) => value,
+            Err(error) if market_type == MarketType::Spot => {
+                let unified_params = bybit_balance_params(MarketType::Perpetual, &request.assets);
+                self.send_signed_get(operation, "/v5/account/wallet-balance", &unified_params)
+                    .await
+                    .map_err(|_| error)?
+            }
+            Err(error) => return Err(error),
+        };
         Ok(BalancesResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
@@ -49,7 +60,7 @@ impl BybitGatewayAdapter {
                 &self.exchange_id,
                 tenant_id,
                 account_id,
-                request.market_type.unwrap_or(MarketType::Perpetual),
+                market_type,
                 &request.assets,
                 &value,
             )?,
@@ -544,6 +555,31 @@ impl BybitGatewayAdapter {
                     .to_string(),
             ),
         })
+    }
+}
+
+fn bybit_balance_params(market_type: MarketType, assets: &[String]) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+    params.insert(
+        "accountType".to_string(),
+        bybit_balance_account_type(market_type).to_string(),
+    );
+    let coins = assets
+        .iter()
+        .map(|asset| asset.trim().to_ascii_uppercase())
+        .filter(|asset| !asset.is_empty())
+        .collect::<Vec<_>>();
+    if !coins.is_empty() {
+        params.insert("coin".to_string(), coins.join(","));
+    }
+    params
+}
+
+fn bybit_balance_account_type(market_type: MarketType) -> &'static str {
+    match market_type {
+        MarketType::Spot => "SPOT",
+        MarketType::Perpetual | MarketType::Futures => "UNIFIED",
+        _ => "UNIFIED",
     }
 }
 

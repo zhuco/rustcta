@@ -14,6 +14,7 @@ pub fn router(state: ControlApiState) -> Router {
         .route("/api/agents", get(routes::agents))
         .route("/api/agents/:id", get(routes::agent_detail))
         .route("/api/strategies", get(routes::strategies))
+        .route("/api/strategy-templates", get(routes::strategy_templates))
         .route("/api/strategies/:id", get(routes::strategy_detail))
         .route("/api/strategy-snapshots", get(routes::strategy_snapshots))
         .route(
@@ -62,14 +63,17 @@ pub fn router(state: ControlApiState) -> Router {
             get(routes::balance_reconciliation),
         )
         .route("/api/spot-arb/dashboard", get(routes::spot_arb_dashboard))
-        .route("/api/cross-arb/dashboard", get(routes::cross_arb_dashboard))
         .route(
-            "/api/cross-arb/instruments",
-            get(routes::cross_arb_instruments),
+            "/api/unified-arb/dashboard",
+            get(routes::unified_arb_dashboard),
         )
         .route(
-            "/api/cross-arb/market-snapshots",
-            get(routes::cross_arb_market_snapshots),
+            "/api/unified-arb/instruments",
+            get(routes::unified_arb_instruments),
+        )
+        .route(
+            "/api/unified-arb/market-snapshots",
+            get(routes::unified_arb_market_snapshots),
         )
         .route("/api/scanner/exchanges", get(routes::scanner_exchanges))
         .route(

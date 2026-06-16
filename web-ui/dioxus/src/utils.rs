@@ -1294,8 +1294,8 @@ fn strategy_log_source_label(logs: &Value, lang: Language) -> String {
         (Language::Zh, _, true, _) => "资金费率套利".to_string(),
         (Language::Zh, _, _, true) => "现货套利".to_string(),
         (Language::Zh, _, _, _) => "策略日志".to_string(),
-        (Language::En, true, _, _) => "cross-arb".to_string(),
-        (Language::En, _, true, _) => "funding-arb".to_string(),
+        (Language::En, true, _, _) => "unified-arb".to_string(),
+        (Language::En, _, true, _) => "unified-arb".to_string(),
         (Language::En, _, _, true) => "spot-arb".to_string(),
         (Language::En, _, _, _) => "strategy".to_string(),
     }

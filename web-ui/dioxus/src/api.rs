@@ -10,6 +10,7 @@ const API_INVENTORY: &str = "/api/inventory";
 const API_BALANCE_HISTORY: &str = "/api/balance-history";
 const API_WORKSPACE: &str = "/api/workspace";
 const API_STRATEGIES: &str = "/api/strategies";
+const API_STRATEGY_TEMPLATES: &str = "/api/strategy-templates";
 const API_STRATEGY_SNAPSHOTS: &str = "/api/strategy-snapshots";
 const API_PROCESSES: &str = "/api/processes";
 const API_AGENTS: &str = "/api/agents";
@@ -21,6 +22,7 @@ const API_EXCHANGES: &str = "/api/exchanges";
 const API_BOOKS: &str = "/api/books";
 const API_SYMBOLS: &str = "/api/symbols";
 const API_OPPORTUNITIES: &str = "/api/opportunities";
+const API_RECENT_TRADES: &str = "/api/trades/recent";
 const API_DRY_RUN_PLANS: &str = "/api/dry_run_plans";
 const API_RISK: &str = "/api/risk";
 const API_LOGS: &str = "/api/logs";
@@ -36,10 +38,11 @@ const API_HEDGE_POLICY_STATUS: &str = "/api/hedge-policy/status";
 const API_CONTROL_SYMBOLS: &str = "/api/control/symbols";
 const API_CONTROL_AUDIT: &str = "/api/control/audit";
 const API_EXCHANGE_API_KEYS: &str = "/api/exchange-api-keys";
+const API_EXCHANGE_API_KEYS_TEST: &str = "/api/exchange-api-keys/test";
 const API_STRATEGY_LOGS: &str = "/api/strategy-logs";
-const API_CROSS_ARB_INSTRUMENTS: &str = "/api/cross-arb/instruments";
-const API_LOCAL_CROSS_ARB_EXCHANGES: &str = "/api/local-agent/cross-arb/exchanges";
-const API_LOCAL_CROSS_ARB_SETTINGS: &str = "/api/local-agent/cross-arb/settings";
+const API_CROSS_ARB_INSTRUMENTS: &str = "/api/unified-arb/instruments";
+const API_LOCAL_CROSS_ARB_EXCHANGES: &str = "/api/local-agent/unified-arb/exchanges";
+const API_LOCAL_CROSS_ARB_SETTINGS: &str = "/api/local-agent/unified-arb/settings";
 const API_LOCAL_EXCHANGE_LATENCY_TEST: &str = "/api/local-agent/exchange-latency-test";
 
 pub(crate) struct DashboardFetch {
@@ -51,7 +54,6 @@ pub(crate) struct DashboardFetch {
 pub(crate) struct StrategyLiveFetch {
     pub(crate) spot_arb: Value,
     pub(crate) cross_arb: Value,
-    pub(crate) spot_futures_arb: Value,
     pub(crate) strategy_logs: Value,
     pub(crate) updated: usize,
     pub(crate) errors: Vec<String>,
@@ -79,10 +81,6 @@ fn strategy_command_endpoint(strategy_id: &str) -> String {
     format!("{API_STRATEGIES}/{}/command", path_segment(strategy_id))
 }
 
-pub(crate) async fn create_strategy(token: &str, body: &Value) -> Result<Value, String> {
-    api_post_json(API_STRATEGIES, token, body).await
-}
-
 pub(crate) async fn post_local_agent_command(
     token: &str,
     command: &str,
@@ -108,9 +106,9 @@ pub(crate) async fn request_cross_arb_position_close(
 ) -> Result<Value, String> {
     post_local_agent_command(
         token,
-        "manual_close_cross_arb_position",
+        "manual_close",
         json!({
-            "strategy_id": "cross_arb_live",
+            "strategy_id": "unified_arb_live",
             "bundle_id": bundle_id,
             "symbol": symbol,
             "long_exchange": long_exchange,
@@ -185,13 +183,8 @@ pub(crate) async fn fetch_strategy_live_data(
         ),
         cross_arb: strategy_snapshot_detail(
             &strategy_snapshots,
-            "cross_exchange_arbitrage",
+            "unified_arbitrage",
             previous.cross_arb,
-        ),
-        spot_futures_arb: strategy_snapshot_detail(
-            &strategy_snapshots,
-            "spot_futures_arbitrage",
-            previous.spot_futures_arb,
         ),
         strategy_logs: fetch_or_previous(
             API_STRATEGY_LOGS,
@@ -354,6 +347,14 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
                 &mut errors,
             )
             .await,
+            recent_trades: fetch_or_previous(
+                API_RECENT_TRADES,
+                token,
+                previous.recent_trades,
+                &mut updated,
+                &mut errors,
+            )
+            .await,
             dry_run_plans: fetch_or_previous(
                 API_DRY_RUN_PLANS,
                 token,
@@ -432,13 +433,8 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
             ),
             cross_arb: strategy_snapshot_detail(
                 &strategy_snapshots,
-                "cross_exchange_arbitrage",
+                "unified_arbitrage",
                 previous.cross_arb,
-            ),
-            spot_futures_arb: strategy_snapshot_detail(
-                &strategy_snapshots,
-                "spot_futures_arbitrage",
-                previous.spot_futures_arb,
             ),
             api_keys,
             strategy_logs: fetch_or_previous(
@@ -464,8 +460,36 @@ pub(crate) async fn fetch_exchange_api_keys(token: &str) -> Result<Value, String
     api_get(API_EXCHANGE_API_KEYS, token).await
 }
 
+pub(crate) async fn fetch_strategy_templates(token: &str) -> Result<Value, String> {
+    api_get(API_STRATEGY_TEMPLATES, token).await
+}
+
+pub(crate) async fn create_strategy(token: &str, body: &Value) -> Result<Value, String> {
+    api_post_json(API_STRATEGIES, token, body).await
+}
+
+pub(crate) async fn delete_strategy(token: &str, strategy_id: &str) -> Result<Value, String> {
+    api_delete(
+        &format!("{API_STRATEGIES}/{}", path_segment(strategy_id)),
+        token,
+    )
+    .await
+}
+
 pub(crate) async fn save_exchange_api_keys(token: &str, body: &Value) -> Result<Value, String> {
     api_post_json(API_EXCHANGE_API_KEYS, token, body).await
+}
+
+pub(crate) async fn delete_exchange_api_keys(token: &str, body: &Value) -> Result<Value, String> {
+    let mut body = body.clone();
+    if let Some(map) = body.as_object_mut() {
+        map.insert("clear".to_string(), Value::Bool(true));
+    }
+    api_post_json(API_EXCHANGE_API_KEYS, token, &body).await
+}
+
+pub(crate) async fn test_exchange_api_keys(token: &str, body: &Value) -> Result<Value, String> {
+    api_post_json(API_EXCHANGE_API_KEYS_TEST, token, body).await
 }
 
 pub(crate) async fn refresh_spot_symbol_control(
@@ -530,7 +554,7 @@ pub(crate) async fn fetch_cross_arb_settings(token: &str) -> Result<Value, Strin
         Err(_) => {
             let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
             Ok(
-                strategy_snapshot_detail(&snapshots, "cross_exchange_arbitrage", Value::Null)
+                strategy_snapshot_detail(&snapshots, "unified_arbitrage", Value::Null)
                     .get("settings")
                     .cloned()
                     .unwrap_or(Value::Null),
@@ -565,20 +589,6 @@ pub(crate) async fn delete_cross_arb_exchange_config(
     .await
 }
 
-pub(crate) async fn fetch_funding_arb_settings(token: &str) -> Result<Value, String> {
-    let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
-    Ok(
-        strategy_snapshot_detail(&snapshots, "funding_arbitrage", Value::Null)
-            .get("settings")
-            .cloned()
-            .unwrap_or(Value::Null),
-    )
-}
-
-pub(crate) async fn save_funding_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
-    post_local_agent_command(token, "update_funding_arb_settings", body.clone()).await
-}
-
 pub(crate) async fn fetch_cross_arb_instrument_data(
     token: &str,
 ) -> Result<CrossArbInstrumentFetch, String> {
@@ -595,12 +605,14 @@ pub(crate) async fn run_exchange_latency_test(
     mode: &str,
     batch_size: usize,
     timeout_ms: u64,
+    exchanges: Vec<String>,
     gateway_endpoints: Value,
 ) -> Result<Value, String> {
     let body = json!({
         "mode": mode,
         "batch_size": batch_size,
         "timeout_ms": timeout_ms,
+        "exchanges": exchanges,
         "gateway_endpoints": gateway_endpoints,
     });
     api_post_json(API_LOCAL_EXCHANGE_LATENCY_TEST, token, &body).await

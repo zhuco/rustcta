@@ -279,6 +279,27 @@ impl ControlApiState {
         Ok(process)
     }
 
+    pub async fn delete_strategy(
+        &self,
+        strategy_id: &str,
+    ) -> Result<StrategyProcess, SupervisorError> {
+        match self.local_supervisor.write().await.stop(strategy_id).await {
+            Ok(_) | Err(SupervisorError::NotFound { .. }) => {}
+            Err(error) => return Err(error),
+        }
+        self.local_specs.write().await.remove(strategy_id);
+
+        let mut registry = self.load_mutable_registry().await?;
+        let process = registry
+            .remove(strategy_id)
+            .ok_or_else(|| SupervisorError::NotFound {
+                strategy_id: strategy_id.to_string(),
+            })?;
+        self.save_mutable_registry(&registry).await?;
+        self.replace_inner_strategies(registry.list()).await;
+        Ok(process)
+    }
+
     pub async fn apply_strategy_command(
         &self,
         command: LifecycleCommandRecord,
@@ -543,7 +564,7 @@ fn strategy_snapshots_from_extra_value(
 }
 
 fn looks_like_runtime_or_legacy_dashboard_snapshot(value: &serde_json::Value) -> bool {
-    value.get("cross_arb_dashboard").is_some()
+    value.get("unified_arb_dashboard").is_some()
         || value.get("runtime").is_some()
         || value.get("summary").is_some()
         || value.get("opportunities").is_some()
@@ -828,7 +849,7 @@ fn control_audit_log_message(record: &AuditRecord) -> String {
 fn classify_strategy_log_line(lower: &str, level: LogLevel) -> LogCategory {
     if contains_any(
         lower,
-        &["open_decision_audit", "cross_arb_open_decision_audit"],
+        &["open_decision_audit", "unified_arb_open_decision_audit"],
     ) {
         return LogCategory::Info;
     }
@@ -858,7 +879,7 @@ fn classify_strategy_log_line(lower: &str, level: LogLevel) -> LogCategory {
         || contains_any(
             lower,
             &[
-                "cross_arb_alert",
+                "unified_arb_alert",
                 "alert",
                 "warning",
                 "timeout",
@@ -919,11 +940,11 @@ fn classify_strategy_log_line(lower: &str, level: LogLevel) -> LogCategory {
     if contains_any(
         lower,
         &[
-            "cross-arb trade event",
+            "unified-arb trade event",
             "lifecycle=open",
             "lifecycle=close",
-            "action=cross_arb_open",
-            "action=cross_arb_close",
+            "action=unified_arb_open",
+            "action=unified_arb_close",
             "slippage_capture_open",
             "slippage_capture_taker_hedge",
             "order_trade_update",
@@ -1070,7 +1091,7 @@ fn is_noisy_strategy_log_line(line: &str) -> bool {
     let trimmed = lower.trim();
     trimmed.is_empty()
         || trimmed.contains("heartbeat")
-        || trimmed.contains("cross-arb live runner status")
+        || trimmed.contains("unified-arb live runner status")
         || trimmed.contains("keep_alive")
         || trimmed.contains("keep-alive")
 }

@@ -1,6 +1,6 @@
 # Dioxus Control Panel Architecture
 
-Status date: 2026-06-07
+Status date: 2026-06-16
 
 This document covers the local Dioxus control panel path after the workspace
 control API migration. The default entrypoint is `apps/control-api` binary
@@ -22,6 +22,18 @@ The exchange configuration page uses `/api/exchange-api-keys` from
 env-store configured by `RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE`, and returns
 only redacted field status.
 
+Credential operations have one normal entrypoint:
+
+- WebUI exchange configuration reads, saves, tests, and deletes through
+  `/api/exchange-api-keys`.
+- The local env-store is `data/control_api/exchange_api_keys.env`.
+- Gateway and live strategy systemd units read that same env-store with
+  `EnvironmentFile=-/home/cta/rustcta/data/control_api/exchange_api_keys.env`.
+- Saved values are not returned to the browser; status responses contain only
+  configured/masked field metadata.
+- Because credentials are process environment variables, restart gateway and
+  strategy services after saving or deleting credentials.
+
 ## Process Boundary
 
 ```text
@@ -39,9 +51,9 @@ supervisor registry, runtime snapshots, audit ledger, local-agent queue
   | sanitized MonitoringState snapshot writer
   |
 strategy runtime process
-  - spot_spot_taker_arbitrage
-  - market data, scanning, risk gates, RuntimePublisher
-  - LivePreflight, SmallLiveGate, live_dry_run plans
+  - unified-arbitrage-runtime
+  - unified_arbitrage market data, route evaluation, risk gates
+  - local command queue, dashboard snapshot, execution mode gates
   - no browser UI binding by default
 ```
 
@@ -90,14 +102,14 @@ The script builds `web-ui/dioxus`, copies the Dioxus release output into
 `web-ui/dioxus/dist`, uploads that exact `dist` directory to
 `/home/cta/rustcta/web-ui/dioxus/dist`, and restarts `control-api`.
 
-For the live cross-arb strategy plus the Web panel, use one stack entrypoint:
+For the live unified-arb strategy plus the Web panel, use one stack entrypoint:
 
 ```bash
-scripts/rustcta_server.sh deploy-cross-arb-live-stack
+scripts/rustcta_server.sh deploy-unified-arb-live-stack
 ```
 
 That command rebuilds/uploads the Dioxus panel, the control API binary, the
-cross-arb live runner binary, and the live strategy config before restarting
+unified arbitrage runtime binary, and the live strategy config before restarting
 both systemd user services.
 
 ## Build
@@ -174,25 +186,25 @@ Pid and log files:
 
 Static assets are served from `web-ui/dioxus/dist` by default.
 
-For the cross-exchange arbitrage page, the control API must read the live runner
+For the unified arbitrage page, the control API must read the live runner
 dashboard snapshot:
 
 ```bash
-RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json
+RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=logs/unified_arbitrage/dashboard.json
 ```
 
-Do not point the active control panel at
-`logs/cross_exchange_arbitrage/cross_arb_dashboard_snapshot.json`; that is not
-the current live runner output.
+Do not point the active control panel at old split-strategy snapshot files;
+`logs/unified_arbitrage/dashboard.json` is the current live runner output.
 
 ## Direct Commands
 
 Strategy runtime:
 
 ```bash
-target/release/rustcta \
-  --strategy spot_spot_taker_arbitrage \
-  --config config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml
+target/release/unified-arbitrage-runtime \
+  --config config/unified_arbitrage_usdt.yml \
+  --command-queue data/control_api/unified_arb_control_commands.jsonl \
+  --dashboard-snapshot-path logs/unified_arbitrage/dashboard.json
 ```
 
 Workspace control API on loopback:

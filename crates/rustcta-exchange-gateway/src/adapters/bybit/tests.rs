@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use rustcta_exchange_api::{
-    AmendOrderRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelOrderRequest,
-    CapabilitySupport, ClosePositionRequest, CountdownCancelAllRequest, ExchangeClient,
-    ExchangeStreamEvent, FeesRequest, FundingRatesRequest, PlaceOrderRequest, PositionMode,
-    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
-    RequestContext, SetLeverageRequest, SetPositionModeRequest, StreamHeartbeatDirection,
-    SymbolScope, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelOrderRequest, CapabilitySupport, ClosePositionRequest, CountdownCancelAllRequest,
+    ExchangeClient, ExchangeStreamEvent, FeesRequest, FundingRatesRequest, PlaceOrderRequest,
+    PositionMode, PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind,
+    PublicStreamSubscription, RequestContext, SetLeverageRequest, SetPositionModeRequest,
+    StreamHeartbeatDirection, SymbolScope, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, OrderSide, OrderStatus,
@@ -22,7 +22,7 @@ use crate::request_spec::{ActualHttpRequest, RequestSpec};
 use crate::signing_spec::SigningVector;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
-use super::private_parser::parse_fee_snapshots;
+use super::private_parser::{parse_balances, parse_fee_snapshots};
 use super::signing::{sign_rest_payload, sign_ws_auth};
 use super::streams::{
     bybit_heartbeat_payload, bybit_private_auth_payload, bybit_private_resubscribe_plan,
@@ -506,6 +506,31 @@ fn bybit_private_ws_parser_should_normalize_order_execution_position_and_wallet_
     assert_eq!(balances.balances[0].balances[0].asset, "USDT");
     assert_eq!(balances.balances[0].balances[0].available, 90.0);
 
+    let rest_balances = parse_balances(
+        &exchange,
+        TenantId::new("tenant").unwrap(),
+        AccountId::new("account").unwrap(),
+        MarketType::Perpetual,
+        &["USDT".to_string()],
+        &json!({
+            "retCode": 0,
+            "result": {
+                "list": [{
+                    "accountType": "UNIFIED",
+                    "coin": [{
+                        "coin": "USDT",
+                        "walletBalance": "100",
+                        "availableToWithdraw": "",
+                        "availableBalance": "88"
+                    }]
+                }]
+            }
+        }),
+    )
+    .expect("rest balances");
+    assert_eq!(rest_balances[0].balances[0].total, 100.0);
+    assert_eq!(rest_balances[0].balances[0].available, 88.0);
+
     let categorized_fill_events = parse_bybit_private_stream_events(
         &exchange,
         &private_subscription(PrivateStreamKind::Fills),
@@ -597,6 +622,109 @@ async fn bybit_get_fees_should_send_signed_fee_rate_request() {
     let request_lower = requests[0].to_ascii_lowercase();
     assert!(request_lower.contains("x-bapi-api-key: test-key"));
     assert!(!requests[0].contains("test-secret"));
+}
+
+#[tokio::test]
+async fn bybit_get_spot_balances_should_send_spot_account_type() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "accountType": "SPOT",
+                "coin": [{
+                    "coin": "USDT",
+                    "free": "12",
+                    "locked": "3"
+                }]
+            }]
+        }
+    })])
+    .await;
+
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+    let response = adapter
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("spot-balances"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("balances");
+
+    assert_eq!(response.balances.len(), 1);
+    assert_eq!(response.balances[0].market_type, MarketType::Spot);
+    assert_eq!(response.balances[0].balances[0].asset, "USDT");
+    assert_eq!(response.balances[0].balances[0].total, 15.0);
+    assert_eq!(response.balances[0].balances[0].available, 12.0);
+    assert_eq!(response.balances[0].balances[0].locked, 3.0);
+    let requests = seen.lock().unwrap();
+    assert!(requests[0].starts_with("GET /v5/account/wallet-balance?accountType=SPOT&coin=USDT "));
+}
+
+#[tokio::test]
+async fn bybit_get_spot_balances_should_fallback_to_unified_for_uta() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "retCode": 100028,
+            "retMsg": "The API cannot be accessed by unified account users.",
+            "result": {}
+        }),
+        json!({
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [{
+                    "accountType": "UNIFIED",
+                    "coin": [{
+                        "coin": "USDT",
+                        "walletBalance": "20",
+                        "availableBalance": "19",
+                        "locked": "1"
+                    }]
+                }]
+            }
+        }),
+    ])
+    .await;
+
+    let adapter = BybitGatewayAdapter::new(BybitGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        enabled_private_rest: true,
+        ..BybitGatewayConfig::default()
+    })
+    .expect("adapter");
+    let response = adapter
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("spot-balances-uta"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("balances");
+
+    assert_eq!(response.balances[0].market_type, MarketType::Spot);
+    assert_eq!(response.balances[0].balances[0].total, 20.0);
+    assert_eq!(response.balances[0].balances[0].available, 19.0);
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].starts_with("GET /v5/account/wallet-balance?accountType=SPOT&coin=USDT "));
+    assert!(
+        requests[1].starts_with("GET /v5/account/wallet-balance?accountType=UNIFIED&coin=USDT ")
+    );
 }
 
 #[tokio::test]

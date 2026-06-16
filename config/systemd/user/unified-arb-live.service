@@ -1,0 +1,21 @@
+[Unit]
+Description=RustCTA Unified Arbitrage Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cta/rustcta
+Environment=RUST_LOG=warn,rustcta_strategy_unified_arbitrage=info
+EnvironmentFile=-/home/cta/rustcta/.env
+EnvironmentFile=-/home/cta/rustcta/data/control_api/exchange_api_keys.env
+ExecStart=/home/cta/rustcta/target/release/unified-arbitrage-runtime --config /home/cta/rustcta/config/unified_arbitrage_usdt.yml --strategy-id unified_arb_live --run-id server-live --tenant-id server --account-id unified_arbitrage --lock-file /home/cta/rustcta/logs/unified_arbitrage/unified_arb_live.lock --dashboard-snapshot-path /home/cta/rustcta/logs/unified_arbitrage/dashboard.json --command-queue /home/cta/rustcta/data/control_api/unified_arb_control_commands.jsonl --snapshot-interval-ms 5000 --quiet-stdout
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=append:/home/cta/rustcta/logs/unified_arbitrage/unified-arb-live.service.log
+StandardError=append:/home/cta/rustcta/logs/unified_arbitrage/unified-arb-live.service.log
+
+[Install]
+WantedBy=default.target

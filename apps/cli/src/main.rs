@@ -24,10 +24,6 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     Doctor,
-    CrossArb {
-        #[command(subcommand)]
-        command: CrossArbCommand,
-    },
     Migration {
         #[command(subcommand)]
         command: MigrationCommand,
@@ -44,91 +40,6 @@ enum Command {
         #[command(subcommand)]
         command: OpsCommand,
     },
-}
-
-#[derive(Debug, Subcommand)]
-enum CrossArbCommand {
-    Preflight(CrossArbPreflightArgs),
-    Observe(CrossArbObserveArgs),
-}
-
-#[derive(Debug, Parser)]
-struct CrossArbPreflightArgs {
-    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
-    config: String,
-    #[arg(long, alias = "private-readonly", default_value_t = false)]
-    private: bool,
-    #[arg(long, default_value_t = 5_000)]
-    timeout_ms: u64,
-    #[arg(long, default_value_t = 8)]
-    private_symbol_sample: usize,
-    #[arg(long, default_value_t = 24)]
-    public_orderbook_sample: usize,
-    #[arg(long, default_value_t = false)]
-    full_symbol_checks: bool,
-}
-
-#[derive(Debug, Parser)]
-struct CrossArbObserveArgs {
-    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
-    config: String,
-    #[arg(long, default_value_t = 5_000)]
-    request_timeout_ms: u64,
-    #[arg(long)]
-    max_symbols: Option<usize>,
-}
-
-#[derive(Debug, Serialize)]
-struct CrossArbPreflightBridgePlan {
-    command: &'static str,
-    legacy_binary: &'static str,
-    legacy_args: Vec<String>,
-    config: String,
-    private_readonly: bool,
-    timeout_ms: u64,
-    private_symbol_sample: usize,
-    public_orderbook_sample: usize,
-    full_symbol_checks: bool,
-    network_access: &'static str,
-    live_order_access: &'static str,
-    boundary: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct CrossArbObserveBridgePlan {
-    command: &'static str,
-    legacy_binary: &'static str,
-    legacy_args: Vec<String>,
-    config: String,
-    request_timeout_ms: u64,
-    max_symbols: Option<usize>,
-    network_access: &'static str,
-    live_order_access: &'static str,
-    boundary: &'static str,
-    output_fields_preserved: Vec<&'static str>,
-    summary: CrossArbObserveOfflineSummary,
-}
-
-#[derive(Debug, Serialize)]
-struct CrossArbObserveOfflineSummary {
-    config_path: String,
-    mode: &'static str,
-    configured_mode: String,
-    generated_at: &'static str,
-    symbols: Vec<String>,
-    exchanges_seen: Vec<String>,
-    books_loaded: usize,
-    funding_loaded: usize,
-    opportunities: Vec<serde_json::Value>,
-    errors: Vec<CrossArbObserveOfflineError>,
-}
-
-#[derive(Debug, Serialize)]
-struct CrossArbObserveOfflineError {
-    exchange: &'static str,
-    symbol: Option<String>,
-    kind: &'static str,
-    message: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -156,7 +67,7 @@ struct LedgerArgs {
 #[derive(Debug, Subcommand)]
 enum SupervisorCommand {
     PrintLegacySpec(PrintLegacySpecArgs),
-    PrintCrossArbShardSpecs(PrintCrossArbShardSpecsArgs),
+    PrintUnifiedArbShardSpecs(PrintUnifiedArbShardSpecsArgs),
     Readiness(SupervisorReadinessArgs),
     ValidateRegistry(ValidateRegistryArgs),
     ValidateSpec(ValidateSpecArgs),
@@ -230,24 +141,24 @@ struct PrintLegacySpecArgs {
 }
 
 #[derive(Debug, Parser)]
-struct PrintCrossArbShardSpecsArgs {
+struct PrintUnifiedArbShardSpecsArgs {
     #[arg(long, default_value_t = 1)]
     shard_count: usize,
-    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
+    #[arg(long, default_value = "config/unified_arbitrage_usdt.yml")]
     config: String,
-    #[arg(long, default_value = "cross_arb_live")]
+    #[arg(long, default_value = "unified_arb_live")]
     strategy_id_prefix: String,
     #[arg(long, default_value = "local")]
     run_id_prefix: String,
     #[arg(long, default_value = "local")]
     tenant_id: String,
-    #[arg(long, default_value = "cross_arb_3venues")]
+    #[arg(long, default_value = "unified_arb")]
     account_id: String,
     #[arg(long)]
     working_dir: Option<String>,
     #[arg(long, default_value = "logs/supervisor")]
     log_dir: String,
-    #[arg(long, default_value = "logs/cross_exchange_arbitrage")]
+    #[arg(long, default_value = "logs/unified_arbitrage")]
     runtime_dir: String,
     #[arg(long)]
     restart_backoff_ms: Option<u64>,
@@ -329,193 +240,12 @@ async fn main() -> Result<()> {
         Command::Doctor => {
             println!("industrial workspace scaffold is installed");
         }
-        Command::CrossArb { command } => run_cross_arb(command)?,
         Command::Migration { command } => run_migration(command)?,
         Command::Ledger { command } => run_ledger(command).await?,
         Command::Supervisor { command } => run_supervisor(command)?,
         Command::Ops { command } => run_ops(command).await?,
     }
     Ok(())
-}
-
-fn run_cross_arb(command: CrossArbCommand) -> Result<()> {
-    match command {
-        CrossArbCommand::Preflight(args) => run_cross_arb_preflight_bridge(args)?,
-        CrossArbCommand::Observe(args) => run_cross_arb_observe_bridge(args)?,
-    }
-    Ok(())
-}
-
-fn run_cross_arb_preflight_bridge(args: CrossArbPreflightArgs) -> Result<()> {
-    let plan = cross_arb_preflight_bridge_plan(args);
-    println!("{}", serde_json::to_string_pretty(&plan)?);
-    Ok(())
-}
-
-fn cross_arb_preflight_bridge_plan(args: CrossArbPreflightArgs) -> CrossArbPreflightBridgePlan {
-    let legacy_args = legacy_cross_arb_preflight_args(&args);
-    CrossArbPreflightBridgePlan {
-        command: "cross-arb preflight",
-        legacy_binary: "cross_arb_preflight",
-        legacy_args,
-        config: args.config,
-        private_readonly: args.private,
-        timeout_ms: args.timeout_ms,
-        private_symbol_sample: args.private_symbol_sample,
-        public_orderbook_sample: args.public_orderbook_sample,
-        full_symbol_checks: args.full_symbol_checks,
-        network_access: "disabled",
-        live_order_access: "disabled",
-        boundary:
-            "industrial CLI reports the legacy preflight invocation only; run cross_arb_preflight directly for networked read-only checks",
-    }
-}
-
-fn legacy_cross_arb_preflight_args(args: &CrossArbPreflightArgs) -> Vec<String> {
-    let mut forwarded = vec![
-        "--config".to_string(),
-        args.config.clone(),
-        "--timeout-ms".to_string(),
-        args.timeout_ms.to_string(),
-        "--private-symbol-sample".to_string(),
-        args.private_symbol_sample.to_string(),
-        "--public-orderbook-sample".to_string(),
-        args.public_orderbook_sample.to_string(),
-    ];
-    if args.private {
-        forwarded.push("--private".to_string());
-    }
-    if args.full_symbol_checks {
-        forwarded.push("--full-symbol-checks".to_string());
-    }
-    forwarded
-}
-
-fn run_cross_arb_observe_bridge(args: CrossArbObserveArgs) -> Result<()> {
-    let plan = cross_arb_observe_bridge_plan(args);
-    println!("{}", serde_json::to_string_pretty(&plan)?);
-    Ok(())
-}
-
-fn cross_arb_observe_bridge_plan(args: CrossArbObserveArgs) -> CrossArbObserveBridgePlan {
-    let legacy_args = legacy_cross_arb_observe_args(&args);
-    let (configured_mode, symbols, errors) = cross_arb_observe_config_preview(&args);
-    CrossArbObserveBridgePlan {
-        command: "cross-arb observe",
-        legacy_binary: "cross_arb_observe",
-        legacy_args,
-        config: args.config.clone(),
-        request_timeout_ms: args.request_timeout_ms,
-        max_symbols: args.max_symbols,
-        network_access: "disabled",
-        live_order_access: "disabled",
-        boundary:
-            "industrial CLI preserves the observe command contract only; supervised strategy runtime owns live market data",
-        output_fields_preserved: vec![
-            "config_path",
-            "mode",
-            "configured_mode",
-            "generated_at",
-            "symbols",
-            "exchanges_seen",
-            "books_loaded",
-            "funding_loaded",
-            "opportunities",
-            "errors",
-        ],
-        summary: CrossArbObserveOfflineSummary {
-            config_path: args.config,
-            mode: "observe",
-            configured_mode,
-            generated_at: "offline_plan",
-            symbols,
-            exchanges_seen: Vec::new(),
-            books_loaded: 0,
-            funding_loaded: 0,
-            opportunities: Vec::new(),
-            errors,
-        },
-    }
-}
-
-fn legacy_cross_arb_observe_args(args: &CrossArbObserveArgs) -> Vec<String> {
-    let mut forwarded = vec![
-        "--config".to_string(),
-        args.config.clone(),
-        "--request-timeout-ms".to_string(),
-        args.request_timeout_ms.to_string(),
-    ];
-    if let Some(max_symbols) = args.max_symbols {
-        forwarded.push("--max-symbols".to_string());
-        forwarded.push(max_symbols.to_string());
-    }
-    forwarded
-}
-
-fn cross_arb_observe_config_preview(
-    args: &CrossArbObserveArgs,
-) -> (String, Vec<String>, Vec<CrossArbObserveOfflineError>) {
-    let mut errors = Vec::new();
-    let raw = match std::fs::read_to_string(&args.config) {
-        Ok(raw) => raw,
-        Err(error) => {
-            errors.push(CrossArbObserveOfflineError {
-                exchange: "config",
-                symbol: None,
-                kind: "read",
-                message: error.to_string(),
-            });
-            return ("unknown".to_string(), Vec::new(), errors);
-        }
-    };
-    let value = match serde_yaml::from_str::<serde_yaml::Value>(&raw) {
-        Ok(value) => value,
-        Err(error) => {
-            errors.push(CrossArbObserveOfflineError {
-                exchange: "config",
-                symbol: None,
-                kind: "parse",
-                message: error.to_string(),
-            });
-            return ("unknown".to_string(), Vec::new(), errors);
-        }
-    };
-
-    let configured_mode = yaml_path_string(&value, &["mode"]).unwrap_or_else(|| "unknown".into());
-    let mut symbols = yaml_path_sequence_strings(&value, &["universe", "symbols"]);
-    if let Some(max_symbols) = args.max_symbols {
-        symbols.truncate(max_symbols);
-    }
-    (configured_mode, symbols, errors)
-}
-
-fn yaml_path_string(value: &serde_yaml::Value, path: &[&str]) -> Option<String> {
-    yaml_path(value, path).and_then(|value| match value {
-        serde_yaml::Value::String(text) => Some(text.clone()),
-        serde_yaml::Value::Bool(value) => Some(value.to_string()),
-        serde_yaml::Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    })
-}
-
-fn yaml_path_sequence_strings(value: &serde_yaml::Value, path: &[&str]) -> Vec<String> {
-    yaml_path(value, path)
-        .and_then(serde_yaml::Value::as_sequence)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(ToString::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn yaml_path<'a>(value: &'a serde_yaml::Value, path: &[&str]) -> Option<&'a serde_yaml::Value> {
-    path.iter().try_fold(value, |current, key| {
-        current
-            .as_mapping()
-            .and_then(|mapping| mapping.get(serde_yaml::Value::String((*key).to_string())))
-    })
 }
 
 fn run_migration(command: MigrationCommand) -> Result<()> {
@@ -574,8 +304,8 @@ fn run_supervisor(command: SupervisorCommand) -> Result<()> {
             spec.validate()?;
             println!("{}", serde_json::to_string_pretty(&spec)?);
         }
-        SupervisorCommand::PrintCrossArbShardSpecs(args) => {
-            let specs = build_cross_arb_shard_specs(&args)?;
+        SupervisorCommand::PrintUnifiedArbShardSpecs(args) => {
+            let specs = build_unified_arb_shard_specs(&args)?;
             println!("{}", serde_json::to_string_pretty(&specs)?);
         }
         SupervisorCommand::Readiness(args) => {
@@ -607,8 +337,8 @@ fn run_supervisor(command: SupervisorCommand) -> Result<()> {
     Ok(())
 }
 
-fn build_cross_arb_shard_specs(
-    args: &PrintCrossArbShardSpecsArgs,
+fn build_unified_arb_shard_specs(
+    args: &PrintUnifiedArbShardSpecsArgs,
 ) -> Result<Vec<StrategyProcessSpec>> {
     if args.shard_count == 0 || args.shard_count > 1024 {
         bail!("--shard-count must be between 1 and 1024");
@@ -617,7 +347,7 @@ fn build_cross_arb_shard_specs(
     for shard_id in 0..args.shard_count {
         let strategy_id = format!("{}_shard_{shard_id}", args.strategy_id_prefix);
         let run_id = format!("{}_shard_{shard_id}", args.run_id_prefix);
-        let mut options = LegacyProcessSpecOptions::new(LegacyProcessTemplate::CrossArbLive);
+        let mut options = LegacyProcessSpecOptions::new(LegacyProcessTemplate::UnifiedArbLive);
         options.strategy_id = Some(strategy_id.clone());
         options.run_id = Some(run_id.clone());
         options.tenant_id = Some(args.tenant_id.clone());
@@ -633,13 +363,16 @@ fn build_cross_arb_shard_specs(
         replace_arg_value(
             &mut spec.args,
             "--lock-file",
-            &format!("{}/cross_arb_live_shard_{shard_id}.lock", args.runtime_dir),
+            &format!(
+                "{}/unified_arb_live_shard_{shard_id}.lock",
+                args.runtime_dir
+            ),
         );
         replace_arg_value(
             &mut spec.args,
             "--dashboard-snapshot-path",
             &format!(
-                "{}/cross_arb_live_dashboard_shard_{shard_id}.json",
+                "{}/unified_arb_live_dashboard_shard_{shard_id}.json",
                 args.runtime_dir
             ),
         );
@@ -736,17 +469,10 @@ const SUPERVISOR_READINESS_ORDER: &[(&str, usize, &str, bool, bool)] = &[
         false,
         true,
     ),
-    ("cross_arb_live.spec.json", 3, "live_smoke", true, false),
-    (
-        "funding_arb_live.spec.json",
-        4,
-        "secondary_live",
-        true,
-        false,
-    ),
+    ("unified_arb_live.spec.json", 3, "live_smoke", true, false),
     (
         "spot_spot_live_dry_run.spec.json",
-        5,
+        4,
         "live_dry_run",
         true,
         false,
@@ -1063,27 +789,30 @@ mod tests {
     }
 
     #[test]
-    fn supervisor_cross_arb_shard_specs_should_emit_distinct_shard_args() {
-        let args = PrintCrossArbShardSpecsArgs {
+    fn supervisor_unified_arb_shard_specs_should_emit_distinct_shard_args() {
+        let args = PrintUnifiedArbShardSpecsArgs {
             shard_count: 3,
-            config: "config/cross_exchange_arbitrage_usdt.yml".to_string(),
-            strategy_id_prefix: "cross_arb_live".to_string(),
+            config: "config/unified_arbitrage_usdt.yml".to_string(),
+            strategy_id_prefix: "unified_arb_live".to_string(),
             run_id_prefix: "run".to_string(),
             tenant_id: "tenant-a".to_string(),
             account_id: "acct-a".to_string(),
             working_dir: Some(".".to_string()),
             log_dir: "logs/supervisor".to_string(),
-            runtime_dir: "logs/cross_exchange_arbitrage".to_string(),
+            runtime_dir: "logs/unified_arbitrage".to_string(),
             restart_backoff_ms: Some(1000),
             dashboard_refresh_ms: 7000,
             enable_live_trading: false,
         };
 
-        let specs = build_cross_arb_shard_specs(&args).expect("shard specs");
+        let specs = build_unified_arb_shard_specs(&args).expect("shard specs");
 
         assert_eq!(specs.len(), 3);
         for (shard_id, spec) in specs.iter().enumerate() {
-            assert_eq!(spec.strategy_id, format!("cross_arb_live_shard_{shard_id}"));
+            assert_eq!(
+                spec.strategy_id,
+                format!("unified_arb_live_shard_{shard_id}")
+            );
             assert!(spec
                 .args
                 .windows(2)
@@ -1110,38 +839,6 @@ mod tests {
     }
 
     #[test]
-    fn cross_arb_preflight_bridge_should_not_spawn_legacy_network_command() {
-        let args = CrossArbPreflightArgs {
-            config: "config/cross_exchange_arbitrage_usdt.yml".to_string(),
-            private: true,
-            timeout_ms: 123,
-            private_symbol_sample: 2,
-            public_orderbook_sample: 3,
-            full_symbol_checks: true,
-        };
-
-        let plan = cross_arb_preflight_bridge_plan(args);
-        let value = serde_json::to_value(plan).expect("serialize preflight bridge plan");
-
-        assert_eq!(value["command"], "cross-arb preflight");
-        assert_eq!(value["legacy_binary"], "cross_arb_preflight");
-        assert_eq!(value["network_access"], "disabled");
-        assert_eq!(value["live_order_access"], "disabled");
-        assert_eq!(value["private_readonly"], true);
-        assert_eq!(value["legacy_args"][0], "--config");
-        assert!(value["legacy_args"]
-            .as_array()
-            .expect("legacy args")
-            .iter()
-            .any(|arg| arg == "--private"));
-        assert!(value["legacy_args"]
-            .as_array()
-            .expect("legacy args")
-            .iter()
-            .any(|arg| arg == "--full-symbol-checks"));
-    }
-
-    #[test]
     fn supervisor_readiness_report_should_rank_small_runtime_specs() {
         let spec_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
@@ -1152,10 +849,10 @@ mod tests {
         let value = serde_json::to_value(report).expect("serialize readiness report");
 
         assert_eq!(value["valid"], true);
-        assert_eq!(value["spec_count"], 5);
+        assert_eq!(value["spec_count"], 4);
         assert_eq!(value["recommended_start_order"][0], "trend_report");
         assert_eq!(
-            value["recommended_start_order"][4],
+            value["recommended_start_order"][3],
             "spot_spot_live_dry_run"
         );
         let spot_spot = value["specs"]

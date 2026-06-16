@@ -384,12 +384,12 @@ Endpoint mapping：
 
 代码边界：
 
-- `retired exchange tree/toobit/mod.rs`：Spot/USDT-M config、签名、REST transport、Spot public/private WS runtime、public/private parser、dry-run 和离线测试。
-- `retired exchange tree/market_adapters/toobit.rs`：Toobit USDT-M public market adapter，覆盖 contracts、funding、mark price、depth snapshot 和 public WS payload parser。
-- `retired exchange tree/private_perp/mod.rs`：Toobit USDT-M v2 futures order/batch/cancel/amend API request spec、`X-BB-APIKEY` query/body HMAC 签名、余额/仓位/成交/订单 parser、listenKey private WS endpoint/parser、private_perp adapter 注册与能力声明。
-- `retired exchange tree/mod.rs`：adapter module/export 注册。
-- `retired exchange tree/registry.rs`、`retired exchange tree/trading_adapters/mod.rs`：Toobit private perpetual gateway/trading support 注册。
-- `retired exchange tree/client_order_id.rs`：Toobit Spot/Perpetual client order id policy。
+- `crates/rustcta-exchange-gateway/src/adapters/toobit/`：Spot/USDT-M config、签名、REST transport、Spot public/private WS runtime、public/private parser、dry-run 和离线测试。
+- `crates/rustcta-exchange-gateway/src/adapters/toobit/`：Toobit USDT-M public market adapter，覆盖 contracts、funding、mark price、depth snapshot 和 public WS payload parser。
+- `crates/rustcta-exchange-gateway/src/adapters/toobit/`：Toobit USDT-M v2 futures order/batch/cancel/amend API request spec、`X-BB-APIKEY` query/body HMAC 签名、余额/仓位/成交/订单 parser、listenKey private WS endpoint/parser、adapter 注册与能力声明。
+- `crates/rustcta-exchange-gateway/src/lib.rs`：adapter module/export 注册。
+- `crates/rustcta-exchange-gateway/src/client.rs`、`crates/rustcta-execution-api/src/lib.rs`：Toobit private perpetual gateway/trading support 注册。
+- `crates/rustcta-exchange-api/src/order.rs`：Toobit Spot/Perpetual client order id policy。
 - `crates/rustcta-exchange-gateway/src/adapters/toobit/`：config、signing、transport、public/private REST、public/private WS request-spec/parser、heartbeat helper、离线 mock REST/WS 测试。
 - `crates/rustcta-exchange-gateway/src/adapters/mod.rs`、`crates/rustcta-exchange-gateway/src/lib.rs`：`toobit` named adapter 注册和 `ToobitGatewayConfig` 导出。
 - `docs/交易所网关/适配器/toobit_adapter.md`、`config/toobit_gateway_example.yml`：endpoint mapping、认证规则、配置示例和能力边界。

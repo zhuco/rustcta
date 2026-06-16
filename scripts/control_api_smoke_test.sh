@@ -32,11 +32,11 @@ HTML
   "processes": [
     {
       "schema_version": 1,
-      "strategy_id": "ci-cross-arb",
-      "strategy_kind": "cross_exchange_arbitrage",
+      "strategy_id": "ci-unified-arb",
+      "strategy_kind": "unified_arbitrage",
       "run_id": "ci-run",
       "tenant_id": "ci-tenant",
-      "config_path": "config/cross_exchange_arbitrage_usdt.yml",
+      "config_path": "config/unified_arbitrage_usdt.yml",
       "status": "Running",
       "process_id": 123,
       "started_at": "2026-06-07T12:00:00Z",
@@ -122,9 +122,9 @@ if workspace.get("process_count") != 1 or workspace.get("strategy_count") != 1:
     raise SystemExit(f"/api/workspace did not reflect supervisor registry: {workspace}")
 
 strategies = get_json("/api/strategies")
-if len(strategies) != 1 or strategies[0].get("strategy_id") != "ci-cross-arb":
+if len(strategies) != 1 or strategies[0].get("strategy_id") != "ci-unified-arb":
     raise SystemExit(f"/api/strategies did not return registry process: {strategies}")
-if strategies[0].get("strategy_kind") != "cross_exchange_arbitrage":
+if strategies[0].get("strategy_kind") != "unified_arbitrage":
     raise SystemExit(f"/api/strategies returned wrong strategy kind: {strategies[0]}")
 if strategies[0].get("log_configured") is not True:
     raise SystemExit(f"/api/strategies did not sanitize log path as log_configured: {strategies[0]}")
@@ -135,8 +135,8 @@ processes = get_json("/api/processes")
 if processes != strategies:
     raise SystemExit("/api/processes and /api/strategies diverged for registry-backed view")
 
-process = get_json("/api/processes/ci-cross-arb")
-if process.get("strategy_id") != "ci-cross-arb" or process.get("status") != "Running":
+process = get_json("/api/processes/ci-unified-arb")
+if process.get("strategy_id") != "ci-unified-arb" or process.get("status") != "Running":
     raise SystemExit(f"/api/processes/:id did not return running process: {process}")
 
 logs = get_json("/api/strategy-logs")
@@ -154,7 +154,7 @@ print(json.dumps({
         "/api/workspace",
         "/api/strategies",
         "/api/processes",
-        "/api/processes/ci-cross-arb",
+        "/api/processes/ci-unified-arb",
         "/api/strategy-logs"
     ],
     "strategy_id": strategies[0]["strategy_id"]

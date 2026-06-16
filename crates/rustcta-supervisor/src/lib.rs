@@ -389,8 +389,7 @@ impl StrategyProcessSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LegacyProcessTemplate {
-    CrossArbLive,
-    FundingArbLive,
+    UnifiedArbLive,
     SpotSpotLiveDryRun,
     TrendReport,
     AccountPositionReporter,
@@ -400,9 +399,8 @@ pub enum LegacyProcessTemplate {
 }
 
 impl LegacyProcessTemplate {
-    pub const ALL: [Self; 8] = [
-        Self::CrossArbLive,
-        Self::FundingArbLive,
+    pub const ALL: [Self; 7] = [
+        Self::UnifiedArbLive,
         Self::SpotSpotLiveDryRun,
         Self::TrendReport,
         Self::AccountPositionReporter,
@@ -413,8 +411,7 @@ impl LegacyProcessTemplate {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::CrossArbLive => "cross_arb_live",
-            Self::FundingArbLive => "funding_arb_live",
+            Self::UnifiedArbLive => "unified_arb_live",
             Self::SpotSpotLiveDryRun => "spot_spot_live_dry_run",
             Self::TrendReport => "trend_report",
             Self::AccountPositionReporter => "account_position_reporter",
@@ -426,8 +423,7 @@ impl LegacyProcessTemplate {
 
     pub fn strategy_kind(self) -> &'static str {
         match self {
-            Self::CrossArbLive => "cross_exchange_arbitrage",
-            Self::FundingArbLive => "funding_arbitrage",
+            Self::UnifiedArbLive => "unified_arbitrage",
             Self::SpotSpotLiveDryRun => "spot_spot_arbitrage",
             Self::TrendReport => "trend_report",
             Self::AccountPositionReporter => "account_position_report",
@@ -439,13 +435,12 @@ impl LegacyProcessTemplate {
 
     pub fn default_config_path(self) -> &'static str {
         match self {
-            Self::CrossArbLive => "config/cross_exchange_arbitrage_usdt.yml",
-            Self::FundingArbLive => "config/funding_rate_arbitrage_live_usdt.yml",
+            Self::UnifiedArbLive => "config/unified_arbitrage_usdt.yml",
             Self::SpotSpotLiveDryRun => "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml",
             Self::TrendReport => "config/trend_report.yml",
             Self::AccountPositionReporter => "config/account_position_reporter.yml",
-            Self::ExchangeOrderCanary => "config/cross_exchange_arbitrage_usdt.yml",
-            Self::BitgetPerpOrderCanary => "config/cross_exchange_arbitrage_usdt.yml",
+            Self::ExchangeOrderCanary => "config/unified_arbitrage_usdt.yml",
+            Self::BitgetPerpOrderCanary => "config/unified_arbitrage_usdt.yml",
             Self::BitgetSpotOrderCanary => {
                 "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml"
             }
@@ -453,15 +448,18 @@ impl LegacyProcessTemplate {
     }
 
     pub fn default_command(self) -> &'static str {
-        match self {
-            Self::CrossArbLive => "target/release/cross-exchange-arbitrage-live-runner",
-            _ => "cargo",
-        }
+        "cargo"
     }
 
     pub fn default_args(self, config_path: &str) -> Vec<String> {
         match self {
-            Self::CrossArbLive => vec![
+            Self::UnifiedArbLive => vec![
+                "run".to_string(),
+                "-p".to_string(),
+                "rustcta-strategy-unified-arbitrage".to_string(),
+                "--bin".to_string(),
+                "unified-arbitrage-runtime".to_string(),
+                "--".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
                 "--strategy-id".to_string(),
@@ -471,31 +469,16 @@ impl LegacyProcessTemplate {
                 "--tenant-id".to_string(),
                 "local".to_string(),
                 "--account-id".to_string(),
-                "cross_arb_3venues".to_string(),
+                "unified_arbitrage".to_string(),
                 "--lock-file".to_string(),
-                "logs/cross_exchange_arbitrage/cross_arb_live.lock".to_string(),
+                "logs/unified_arbitrage/unified_arb_live.lock".to_string(),
                 "--dashboard-snapshot-path".to_string(),
-                "logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json".to_string(),
-                "--market-data-source".to_string(),
-                "direct_websocket".to_string(),
-                "--profit-history-path".to_string(),
-                "logs/cross_exchange_arbitrage/profit_history.jsonl".to_string(),
-                "--trade-ledger-path".to_string(),
-                "logs/cross_exchange_arbitrage/trade_events.jsonl".to_string(),
-                "--dashboard-refresh-ms".to_string(),
+                "logs/unified_arbitrage/dashboard.json".to_string(),
+                "--command-queue".to_string(),
+                "data/control_api/unified_arb_control_commands.jsonl".to_string(),
+                "--snapshot-interval-ms".to_string(),
                 "5000".to_string(),
-            ],
-            Self::FundingArbLive => vec![
-                "run".to_string(),
-                "-p".to_string(),
-                "rustcta-strategy-funding-arbitrage".to_string(),
-                "--bin".to_string(),
-                "funding-arbitrage-runtime".to_string(),
-                "--".to_string(),
-                "--config".to_string(),
-                config_path.to_string(),
-                "--strategy-id".to_string(),
-                self.as_str().to_string(),
+                "--quiet-stdout".to_string(),
             ],
             Self::SpotSpotLiveDryRun => vec![
                 "run".to_string(),
@@ -572,12 +555,7 @@ impl std::str::FromStr for LegacyProcessTemplate {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let normalized = value.trim().replace('-', "_").to_ascii_lowercase();
         match normalized.as_str() {
-            "cross_arb_live" | "cross_exchange_arbitrage" | "cross_exchange_arbitrage_live" => {
-                Ok(Self::CrossArbLive)
-            }
-            "funding_arb_live" | "funding_arbitrage" | "funding_rate_arbitrage_live" => {
-                Ok(Self::FundingArbLive)
-            }
+            "unified_arb_live" | "unified_arbitrage" => Ok(Self::UnifiedArbLive),
             "spot_spot_live_dry_run"
             | "spot_spot"
             | "spot_spot_arbitrage"
@@ -1108,8 +1086,6 @@ fn validate_registry_process(process: &StrategyProcess) -> Vec<String> {
 fn validate_root_free_command(spec: &StrategyProcessSpec) -> Result<(), SupervisorError> {
     let legacy_bins = [
         "rustcta",
-        "cross_arb_live",
-        "funding_arb_live",
         "account_position_reporter",
         "trend_report",
         "exchange_order_canary",
@@ -1706,14 +1682,8 @@ mod tests {
     #[test]
     fn legacy_process_template_should_parse_aliases() {
         assert_eq!(
-            "cross-arb-live".parse::<LegacyProcessTemplate>().unwrap(),
-            LegacyProcessTemplate::CrossArbLive
-        );
-        assert_eq!(
-            "funding_rate_arbitrage_live"
-                .parse::<LegacyProcessTemplate>()
-                .unwrap(),
-            LegacyProcessTemplate::FundingArbLive
+            "unified-arb-live".parse::<LegacyProcessTemplate>().unwrap(),
+            LegacyProcessTemplate::UnifiedArbLive
         );
         assert_eq!(
             "spot-spot".parse::<LegacyProcessTemplate>().unwrap(),
@@ -1744,50 +1714,50 @@ mod tests {
     #[test]
     fn legacy_process_spec_should_build_supervisor_ready_command() {
         let spec = build_legacy_process_spec(LegacyProcessSpecOptions::new(
-            LegacyProcessTemplate::CrossArbLive,
+            LegacyProcessTemplate::UnifiedArbLive,
         ));
 
         assert_eq!(spec.schema_version, SUPERVISOR_SCHEMA_VERSION);
-        assert_eq!(spec.strategy_id, "cross_arb_live");
-        assert_eq!(spec.strategy_kind, "cross_exchange_arbitrage");
+        assert_eq!(spec.strategy_id, "unified_arb_live");
+        assert_eq!(spec.strategy_kind, "unified_arbitrage");
         assert_eq!(spec.run_id, "local");
         assert_eq!(spec.tenant_id, "local");
-        assert_eq!(spec.config_path, "config/cross_exchange_arbitrage_usdt.yml");
-        assert_eq!(
-            spec.command,
-            "target/release/cross-exchange-arbitrage-live-runner"
-        );
+        assert_eq!(spec.config_path, "config/unified_arbitrage_usdt.yml");
+        assert_eq!(spec.command, "cargo");
         assert_eq!(
             spec.args,
             vec![
+                "run",
+                "-p",
+                "rustcta-strategy-unified-arbitrage",
+                "--bin",
+                "unified-arbitrage-runtime",
+                "--",
                 "--config",
-                "config/cross_exchange_arbitrage_usdt.yml",
+                "config/unified_arbitrage_usdt.yml",
                 "--strategy-id",
-                "cross_arb_live",
+                "unified_arb_live",
                 "--run-id",
                 "local",
                 "--tenant-id",
                 "local",
                 "--account-id",
-                "cross_arb_3venues",
+                "unified_arbitrage",
                 "--lock-file",
-                "logs/cross_exchange_arbitrage/cross_arb_live.lock",
+                "logs/unified_arbitrage/unified_arb_live.lock",
                 "--dashboard-snapshot-path",
-                "logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json",
-                "--market-data-source",
-                "direct_websocket",
-                "--profit-history-path",
-                "logs/cross_exchange_arbitrage/profit_history.jsonl",
-                "--trade-ledger-path",
-                "logs/cross_exchange_arbitrage/trade_events.jsonl",
-                "--dashboard-refresh-ms",
+                "logs/unified_arbitrage/dashboard.json",
+                "--command-queue",
+                "data/control_api/unified_arb_control_commands.jsonl",
+                "--snapshot-interval-ms",
                 "5000",
+                "--quiet-stdout",
             ]
         );
         assert_eq!(spec.working_dir.as_deref(), Some("."));
         assert_eq!(
             spec.log_path.as_deref(),
-            Some("logs/supervisor/cross_arb_live.log")
+            Some("logs/supervisor/unified_arb_live.log")
         );
         assert_eq!(spec.restart_backoff_ms, 5_000);
         spec.validate().expect("legacy process spec validates");
@@ -1862,12 +1832,8 @@ mod tests {
     fn checked_in_legacy_process_specs_should_match_templates() {
         for (template, path) in [
             (
-                LegacyProcessTemplate::CrossArbLive,
-                "../../config/supervisor/cross_arb_live.spec.json",
-            ),
-            (
-                LegacyProcessTemplate::FundingArbLive,
-                "../../config/supervisor/funding_arb_live.spec.json",
+                LegacyProcessTemplate::UnifiedArbLive,
+                "../../config/supervisor/unified_arb_live.spec.json",
             ),
             (
                 LegacyProcessTemplate::SpotSpotLiveDryRun,

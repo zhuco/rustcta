@@ -9,7 +9,9 @@ const ALLOW_NON_CANONICAL_BIND_ENV: &str = "RUSTCTA_CONTROL_API_ALLOW_NON_CANONI
 async fn main() -> Result<()> {
     let config = ControlApiAppConfig::from_env();
     validate_canonical_bind(&config.bind_addr)?;
-    config.clean_cross_arb_exchange_config_on_startup().await?;
+    config
+        .clean_unified_arb_exchange_config_on_startup()
+        .await?;
     let app = config.build_router()?;
     let listener = TcpListener::bind(&config.bind_addr).await?;
     println!(

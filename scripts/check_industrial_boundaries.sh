@@ -348,8 +348,7 @@ for entry in "${required_full_migration_workflow_entries[@]}"; do
 done
 
 required_supervisor_specs=(
-  "config/supervisor/cross_arb_live.spec.json"
-  "config/supervisor/funding_arb_live.spec.json"
+  "config/supervisor/unified_arb_live.spec.json"
   "config/supervisor/spot_spot_live_dry_run.spec.json"
   "config/supervisor/trend_report.spec.json"
   "config/supervisor/account_position_reporter.spec.json"
@@ -394,37 +393,17 @@ require_file_contains \
   '"ops"' \
   "industrial CLI smoke must include ops help"
 require_file_contains \
-  apps/cli/tests/cli_contract_smoke.rs \
-  "cross_arb_preflight_bridge_should_emit_offline_plan_without_network_paths" \
-  "industrial CLI smoke must prove cross-arb preflight bridge stays offline"
-require_file_contains \
-  apps/cli/tests/cli_contract_smoke.rs \
-  '"network_access"' \
-  "industrial CLI preflight smoke must assert network boundary"
+  apps/cli/src/main.rs \
+  "PrintUnifiedArbShardSpecs" \
+  "industrial CLI must expose unified arbitrage shard spec generation"
 require_file_contains \
   apps/cli/tests/cli_contract_smoke.rs \
-  '"live_order_access"' \
-  "industrial CLI preflight smoke must assert live order boundary"
-require_file_contains \
-  apps/cli/src/main.rs \
-  "network_access: \"disabled\"" \
-  "industrial CLI preflight bridge must not run live network paths"
-require_file_contains \
-  apps/cli/src/main.rs \
-  "live_order_access: \"disabled\"" \
-  "industrial CLI preflight bridge must not run live order paths"
-require_file_contains \
-  apps/cli/src/main.rs \
-  "legacy_cross_arb_preflight_args" \
-  "industrial CLI preflight bridge must preserve legacy argument mapping"
+  "supervisor_readiness_should_report_checked_in_specs_in_run_order" \
+  "industrial CLI smoke must cover unified supervisor readiness"
 require_file_contains \
   docs/industrial_cli_command_tree.md \
-  "rustcta-industrial cross-arb preflight" \
-  "industrial CLI command tree doc must describe the preflight bridge"
-require_file_contains \
-  docs/industrial_cli_command_tree.md \
-  "network_access=disabled" \
-  "industrial CLI command tree doc must document offline preflight boundary"
+  "print-unified-arb-shard-specs" \
+  "industrial CLI command tree doc must describe unified arbitrage shard specs"
 require_file_contains \
   docs/industrial_cli_command_tree.md \
   "migration verify-retired-src" \
@@ -455,12 +434,8 @@ require_file_contains \
   "industrial CLI readiness smoke must include account_position_reporter"
 require_file_contains \
   apps/cli/tests/cli_contract_smoke.rs \
-  '"cross_arb_live"' \
-  "industrial CLI readiness smoke must include cross_arb_live"
-require_file_contains \
-  apps/cli/tests/cli_contract_smoke.rs \
-  '"funding_arb_live"' \
-  "industrial CLI readiness smoke must include funding_arb_live"
+  '"unified_arb_live"' \
+  "industrial CLI readiness smoke must include unified_arb_live"
 require_file_contains \
   apps/cli/tests/cli_contract_smoke.rs \
   '"spot_spot_live_dry_run"' \
@@ -511,31 +486,6 @@ for file in "${ownership_files[@]}"; do
   fi
 done
 
-full_migration_plan="docs/full_workspace_migration_execution_plan_zh.md"
-if [[ ! -f "$full_migration_plan" ]]; then
-  fail "missing full workspace migration execution plan: $full_migration_plan"
-fi
-
-require_file_contains \
-  "$full_migration_plan" \
-  "#### 任务 1 冻结结果" \
-  "task 1 inventory freeze must be recorded in the full migration plan"
-require_file_contains \
-  "$full_migration_plan" \
-  '当前冻结基线：`src/` 目录已从工作树移除' \
-  "task 1 plan must freeze the current src retirement baseline"
-require_file_contains \
-  "$full_migration_plan" \
-  "root \`Cargo.toml\` 已是 virtual" \
-  "task 1 plan must freeze the root virtual workspace manifest baseline"
-require_file_contains \
-  "$full_migration_plan" \
-  '### 16. 最终兼容清理与 legacy `src/` 删除' \
-  "task 16 final legacy src cleanup must be recorded in the full migration plan"
-require_file_contains \
-  "$full_migration_plan" \
-  "任务 2-15 文件所有权如下" \
-  "task 1 plan must assign file ownership for tasks 2-15"
 if rg -n '^\[\[bin\]\]|path[[:space:]]*=[[:space:]]*"src/' Cargo.toml; then
   fail "root Cargo.toml must not expose root src binaries or legacy source paths"
 fi
@@ -654,7 +604,6 @@ require_opportunities_aggregate_evidence_if_present
 require_symbols_evidence_if_present
 
 raw_credential_promotion_targets=(
-  apps/control-api
   .github/workflows/non-gateway-industrial.yml
 )
 
@@ -669,7 +618,7 @@ for target in "${raw_credential_promotion_targets[@]}"; do
       --glob '*.yaml' \
       --glob '!**/target/**' \
       --glob '!**/dist/**'; then
-    fail "raw exchange credential write/delete routes must stay frozen in legacy control_api.rs until a gateway/agent-owned credential service exists"
+    fail "raw exchange credential write/delete routes must stay out of public crates and CI promotion paths; apps/control-api owns the local env-store bridge"
   fi
 done
 

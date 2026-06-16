@@ -1,7 +1,10 @@
 # Architecture Module Layout
 
-This document describes the current repository architecture after the
-industrial workspace split, exchange adapter cleanup, and root `src/` removal.
+Status date: 2026-06-16
+
+This document describes the current repository architecture after the workspace
+split, exchange adapter cleanup, root `src/` removal, and unified arbitrage
+runtime consolidation.
 
 ## Workspace Layout
 
@@ -26,14 +29,14 @@ The old root module map is no longer a runnable layout. Current runnable
 entrypoints are workspace app binaries under `apps/`; current reusable contracts
 and implementations live under `crates/` and strategy packages.
 
-The system supports two arbitrage families:
+The system keeps these arbitrage families as current workspace-owned paths:
 
-- Spot-to-Spot arbitrage: `retired strategy tree/spot_spot_taker_arbitrage/`.
-- USDT perpetual cross-exchange arbitrage: `retired strategy tree/cross_exchange_arbitrage/`.
+- Spot-to-Spot arbitrage: `strategies/spot-spot-arbitrage/`.
+- Unified arbitrage: `strategies/unified-arbitrage/`.
 
-These are separate paths. Spot arbitrage should not import perpetual-only
-position semantics, and perpetual arbitrage should not rely on Spot inventory
-liquidation controls.
+Unified arbitrage is the normal operator-facing path for cross-exchange
+perpetual, funding, spot-perp basis, and settlement routes. Retired split
+strategy trees should not be reintroduced as separate live entrypoints.
 
 ## Dependency Direction
 
@@ -63,26 +66,22 @@ Rules:
 
 ## Exchange Modules
 
-The old flat `retired exchange tree/adapters/` compatibility path has been removed.
-Production-facing exchange code now uses:
+Production-facing exchange code now uses the gateway crate and exchange API
+contracts:
 
 ```text
-retired exchange tree/<exchange>/      venue-specific Spot or core client
-retired exchange tree/market_adapters/ public market-data adapters
-retired exchange tree/private_perp/    shared private perpetual protocol support
-retired exchange tree/trading_adapters/ legacy-to-execution trading bridge
-retired exchange tree/registry.rs      gateway and adapter registration
-retired exchange tree/unified.rs       unified Spot/Perpetual client contract
+crates/rustcta-exchange-api/                    shared exchange contracts
+crates/rustcta-exchange-gateway/src/adapters/   venue-specific adapters
+apps/gateway/                                   runnable gateway process
 ```
 
-`GatewayExchange` remains only as a compatibility bridge for code that still
-expects `core::exchange::Exchange`. New code should prefer `ExchangeClient`,
-`MarketDataAdapter`, or `TradingAdapter` directly.
+New strategy and execution code should call shared exchange/execution contracts
+instead of reaching into adapter internals.
 
 ## Spot Arbitrage Runtime
 
-`spot_spot_taker_arbitrage` owns the current multi-exchange Spot arbitrage
-runtime.
+`strategies/spot-spot-arbitrage/` owns the current multi-exchange Spot
+arbitrage runtime.
 
 Responsibilities:
 
@@ -99,9 +98,23 @@ Non-responsibilities:
 - It does not bypass the control plane for manual enable/disable operations.
 - It does not submit live orders unless live gates are explicitly enabled.
 
+## Unified Arbitrage Runtime
+
+`strategies/unified-arbitrage/` owns the normal live arbitrage runtime for
+cross-exchange perpetual, funding, spot-perp basis, and settlement routes.
+
+Responsibilities:
+
+- Load `config/unified_arbitrage_usdt.yml` and validate active routes.
+- Publish `logs/unified_arbitrage/dashboard.json` for the Web control panel.
+- Consume audited local operator commands from
+  `data/control_api/unified_arb_control_commands.jsonl` when configured.
+- Keep live execution behind explicit execution-mode, risk, and command gates.
+
 ## Control Plane
 
-`src/control/spot_control/` owns Spot symbol lifecycle and operational safety:
+`crates/rustcta-runtime-control/src/control/spot_control/` owns Spot symbol
+lifecycle and operational safety:
 
 - runtime snapshots
 - symbol enable/disable

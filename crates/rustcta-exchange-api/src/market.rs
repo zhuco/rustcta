@@ -126,6 +126,7 @@ pub struct BalancesRequest {
     pub schema_version: u16,
     pub context: RequestContext,
     pub exchange: ExchangeId,
+    /// Product-specific balance when set; account-level/unified balance snapshot when omitted.
     pub market_type: Option<MarketType>,
     pub assets: Vec<String>,
 }

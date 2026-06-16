@@ -185,20 +185,24 @@ impl BitgetGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        let market_type = request.market_type.unwrap_or(MarketType::Spot);
-        self.ensure_supported_market_type(market_type)?;
         self.ensure_private_rest("bitget.get_balances")?;
         let mut params = HashMap::new();
-        let endpoint = match market_type {
-            MarketType::Spot => "/api/v2/spot/account/assets",
-            MarketType::Perpetual => {
-                params.insert(
-                    "productType".to_string(),
-                    BITGET_PERP_PRODUCT_TYPE.to_string(),
-                );
-                "/api/v2/mix/account/accounts"
+        let (market_type, endpoint) = match request.market_type {
+            Some(market_type) => {
+                self.ensure_supported_market_type(market_type)?;
+                match market_type {
+                    MarketType::Spot => (market_type, "/api/v2/spot/account/assets"),
+                    MarketType::Perpetual => {
+                        params.insert(
+                            "productType".to_string(),
+                            BITGET_PERP_PRODUCT_TYPE.to_string(),
+                        );
+                        (market_type, "/api/v2/mix/account/accounts")
+                    }
+                    _ => unreachable!("checked by ensure_supported_market_type"),
+                }
             }
-            _ => unreachable!("checked by ensure_supported_market_type"),
+            None => (MarketType::Perpetual, "/api/v3/account/assets"),
         };
         let value = self
             .rest

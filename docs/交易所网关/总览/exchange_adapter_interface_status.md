@@ -6,9 +6,10 @@ This note records the current adapter layout after compatibility cleanup.
 
 Multi-exchange Spot arbitrage is supported through unified Spot clients and the
 `spot_spot_taker_arbitrage` runtime. USDT perpetual arbitrage remains on the
-execution gateway path used by `cross_exchange_arbitrage`.
+execution gateway path used by unified arbitrage.
 
-The old `retired exchange tree/adapters/` compatibility directory has been removed.
+The old flat compatibility adapter directory has been removed; current adapter
+code lives under `crates/rustcta-exchange-gateway/src/adapters/`.
 
 ## 2026-06-10 Cross-Arb Gateway Closure
 
@@ -50,23 +51,21 @@ cargo test -p rustcta-exchange-gateway kucoinfutures_public_stream_spec_should_n
 
 | Area | Path | Role |
 | --- | --- | --- |
-| Unified client contracts | `retired exchange tree/unified.rs` | Spot/Perpetual client model, requests, responses, user stream events |
-| Venue modules | `retired exchange tree/<exchange>/` | Exchange-specific Spot or legacy core clients |
-| Market adapters | `retired exchange tree/market_adapters/` | Public perpetual market-data adapters |
-| Private perpetual protocols | `retired exchange tree/private_perp/` | Shared private REST/WebSocket implementation for linear perpetual venues |
-| Trading adapters | `retired exchange tree/trading_adapters/` | Bridge legacy/core clients into `TradingAdapter` |
-| Gateway registry | `retired exchange tree/registry.rs` | Builds gateways, market adapters, trading adapters, auth, and position mode |
-| Legacy bridge | `retired exchange tree/gateway_exchange.rs` | Wraps gateway adapters for code still requiring `core::exchange::Exchange` |
+| Unified client contracts | `crates/rustcta-exchange-api/` | Spot/Perpetual client model, requests, responses, user stream events |
+| Venue modules | `crates/rustcta-exchange-gateway/src/adapters/<exchange>/` | Exchange-specific gateway adapters |
+| Gateway client | `crates/rustcta-exchange-gateway/src/client.rs` | Local/in-process gateway routing and client wrapper |
+| Gateway protocol | `crates/rustcta-exchange-gateway/src/protocol/` | Request validation and operation routing helpers |
+| Trading adapter contract | `crates/rustcta-execution-api/src/lib.rs` | Execution-plane adapter trait and order/fill command models |
+| Gateway app | `apps/gateway/` | Runnable gateway process |
 
 ## Spot Support
 
 The Spot path is used by:
 
-- `retired strategy tree/spot_spot_taker_arbitrage/`
-- `src/scanner/five_exchange_spot.rs`
-- `src/control/spot_control/`
-- `src/execution/live_dry_run.rs`
-- `src/execution/order_reconciliation.rs`
+- `strategies/spot-spot-arbitrage/`
+- `crates/rustcta-runtime-control/src/control/spot_control/`
+- `crates/rustcta-execution-api/`
+- `crates/rustcta-execution-router/`
 
 Current Spot-related venue modules include Binance, OKX, Bitget, Gate.io, MEXC,
 CoinEx, KuCoin, BitMEX public/private REST, and Paper. Capability depth varies by
@@ -91,7 +90,7 @@ REST symbol, book, account, position, order, and fill support in
 
 Removed:
 
-- old flat `retired exchange tree/adapters/` modules
+- old flat adapter compatibility modules outside `crates/rustcta-exchange-gateway`
 - stale strategy references to deleted legacy strategy families
 - migration/remediation documents superseded by current architecture docs
 

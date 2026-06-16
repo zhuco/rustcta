@@ -18,9 +18,8 @@ if [[ -z "$LOG_FILE" || ! -f "$LOG_FILE" ]]; then
 fi
 
 echo "strategy_log=$LOG_FILE"
-echo "strategy_wrappers=$(pgrep -af 'rustcta --strategy spot_spot_taker_arbitrage' | wc -l)"
-echo "strategy_rustcta_processes=$(pgrep -af '^target/release/rustcta --strategy spot_spot_taker_arbitrage|target/release/rustcta --strategy spot_spot_taker_arbitrage' | grep -v 'bash -c' | wc -l)"
-pgrep -af 'rustcta --strategy spot_spot_taker_arbitrage' || true
+echo "strategy_processes=$(pgrep -af 'spot-spot-arbitrage-runtime' | grep -v 'bash -c' | wc -l)"
+pgrep -af 'spot-spot-arbitrage-runtime' || true
 
 echo
 echo "[orders]"

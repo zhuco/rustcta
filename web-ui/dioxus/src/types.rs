@@ -29,63 +29,48 @@ impl Language {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ControlPanelView {
     #[default]
-    Workspace,
-    SpotArb,
-    CrossArb,
-    SpotFuturesArb,
-    ExchangeLatency,
-    FundingArb,
-    ApiKeys,
+    StrategyConsole,
+    TradeHistory,
+    ExchangeConsole,
+    Logs,
 }
 
 impl ControlPanelView {
-    pub(crate) const ALL: [Self; 7] = [
-        Self::Workspace,
-        Self::SpotArb,
-        Self::CrossArb,
-        Self::SpotFuturesArb,
-        Self::ApiKeys,
-        Self::ExchangeLatency,
-        Self::FundingArb,
-    ];
+    pub(crate) const ALL: [Self; 3] = [Self::StrategyConsole, Self::ExchangeConsole, Self::Logs];
 
     pub(crate) fn nav_label_key(self) -> &'static str {
         match self {
-            Self::Workspace => "nav_workspace",
-            Self::SpotArb => "nav_spot_arb",
-            Self::CrossArb => "nav_cross_arb",
-            Self::SpotFuturesArb => "nav_spot_futures_arb",
-            Self::ExchangeLatency => "nav_exchange_latency",
-            Self::FundingArb => "nav_funding_arb",
-            Self::ApiKeys => "nav_api_keys",
+            Self::StrategyConsole => "nav_strategy_console",
+            Self::TradeHistory => "nav_trade_history",
+            Self::ExchangeConsole => "nav_exchange_console",
+            Self::Logs => "nav_logs",
         }
     }
 
     pub(crate) fn route_id(self) -> &'static str {
         match self {
-            Self::Workspace => "workspace",
-            Self::SpotArb => "spot-arb",
-            Self::CrossArb => "cross-arb",
-            Self::SpotFuturesArb => "spot-futures-arb",
-            Self::ExchangeLatency => "exchange-latency",
-            Self::FundingArb => "funding-arb",
-            Self::ApiKeys => "api-keys",
+            Self::StrategyConsole => "trade-console",
+            Self::TradeHistory => "trade-history",
+            Self::ExchangeConsole => "exchange-console",
+            Self::Logs => "logs",
         }
     }
 
     pub(crate) fn from_route_id(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "workspace" => Some(Self::Workspace),
-            "spot-arb" | "spot_arb" => Some(Self::SpotArb),
-            "cross-arb" | "cross_arb" => Some(Self::CrossArb),
-            "spot-futures-arb" | "spot_futures_arb" | "spot-futures" | "spot_futures" => {
-                Some(Self::SpotFuturesArb)
+            "trade-console" | "trade_console" | "strategy-console" | "strategy_console"
+            | "strategies" | "strategy" | "create-strategy" | "create_strategy" | "workspace"
+            | "legacy" | "overview" | "spot-arb" | "spot_arb" => Some(Self::StrategyConsole),
+            "trade-history" | "trade_history" | "history" | "profits" | "pnl" => {
+                Some(Self::StrategyConsole)
             }
-            "exchange-latency" | "exchange_latency" => Some(Self::ExchangeLatency),
-            "funding-arb" | "funding_arb" => Some(Self::FundingArb),
-            "api-keys" | "api_keys" => Some(Self::ApiKeys),
-            "legacy" | "overview" | "exchanges" | "symbols" | "plans" | "risk" | "runtime"
-            | "config" | "logs" => Some(Self::Workspace),
+            "exchange-console" | "exchange_console" | "exchanges" | "exchange" => {
+                Some(Self::ExchangeConsole)
+            }
+            "settings" | "setting" | "config" | "api-keys" | "api_keys" | "exchange-latency"
+            | "exchange_latency" => Some(Self::ExchangeConsole),
+            "logs" | "log" | "runtime" => Some(Self::Logs),
+            "symbols" | "plans" | "risk" => Some(Self::StrategyConsole),
             _ => None,
         }
     }
@@ -99,6 +84,7 @@ pub(crate) struct DashboardData {
     pub(crate) books: Value,
     pub(crate) symbols: Value,
     pub(crate) opportunities: Value,
+    pub(crate) recent_trades: Value,
     pub(crate) dry_run_plans: Value,
     pub(crate) risk: Value,
     pub(crate) logs: Value,
@@ -113,7 +99,6 @@ pub(crate) struct DashboardData {
     pub(crate) control_audit: Value,
     pub(crate) spot_arb: Value,
     pub(crate) cross_arb: Value,
-    pub(crate) spot_futures_arb: Value,
     pub(crate) api_keys: Value,
     pub(crate) strategy_logs: Value,
     pub(crate) balance_history: Value,
@@ -348,6 +333,12 @@ pub(crate) struct ExchangeCredentialAccountRow {
     pub(crate) wallet_address: String,
     pub(crate) is_vault_address: String,
     pub(crate) fields: Vec<ExchangeCredentialAccountField>,
+    pub(crate) connection_status: String,
+    pub(crate) last_tested_at: String,
+    pub(crate) last_error: String,
+    pub(crate) unified_total_usdt: Option<f64>,
+    pub(crate) spot_total_usdt: Option<f64>,
+    pub(crate) perp_total_usdt: Option<f64>,
     pub(crate) enabled: bool,
     pub(crate) default_account: bool,
 }
@@ -582,6 +573,7 @@ impl ExchangeCredentialAccountRow {
                 let exchange = text_at(&row, "exchange", lang);
                 let account_id = text_at(&row, "account_id", lang);
                 let raw_fields = as_array(row.get("fields").unwrap_or(&Value::Null));
+                let connection = row.get("connection").unwrap_or(&Value::Null);
                 Self {
                     row_key: format!("{exchange}:{account_id}"),
                     exchange,
@@ -596,6 +588,14 @@ impl ExchangeCredentialAccountRow {
                         .iter()
                         .map(|field| ExchangeCredentialAccountField::from_value(field, lang))
                         .collect(),
+                    connection_status: text_at(connection, "status", lang),
+                    last_tested_at: text_at(connection, "last_tested_at", lang),
+                    last_error: text_at(connection, "error", lang),
+                    unified_total_usdt: connection
+                        .get("unified_total_usdt")
+                        .and_then(Value::as_f64),
+                    spot_total_usdt: connection.get("spot_total_usdt").and_then(Value::as_f64),
+                    perp_total_usdt: connection.get("perp_total_usdt").and_then(Value::as_f64),
                     enabled: bool_at(&row, "enabled"),
                     default_account: bool_at(&row, "is_default_account"),
                 }
@@ -1727,6 +1727,269 @@ pub(crate) struct CrossArbSettingsFormData {
     pub(crate) execution_profile: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CrossArbPairCardStatus {
+    CanOpen,
+    Watching,
+    OpenPosition,
+    CloseReady,
+    RiskBlocked,
+    Stale,
+}
+
+impl CrossArbPairCardStatus {
+    pub(crate) fn label_key(self) -> &'static str {
+        match self {
+            Self::CanOpen => "pair_status_can_open",
+            Self::Watching => "pair_status_watching",
+            Self::OpenPosition => "pair_status_open_position",
+            Self::CloseReady => "pair_status_close_ready",
+            Self::RiskBlocked => "pair_status_risk_blocked",
+            Self::Stale => "pair_status_stale",
+        }
+    }
+
+    pub(crate) fn class_name(self) -> &'static str {
+        match self {
+            Self::CanOpen => "can-open",
+            Self::Watching => "watching",
+            Self::OpenPosition => "open-position",
+            Self::CloseReady => "close-ready",
+            Self::RiskBlocked => "risk-blocked",
+            Self::Stale => "stale",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PairOpenStateData {
+    pub(crate) raw_spread_pct: f64,
+    pub(crate) raw_spread_text: String,
+    pub(crate) raw_spread_threshold_text: String,
+    pub(crate) net_edge_pct: f64,
+    pub(crate) net_edge_text: String,
+    pub(crate) net_edge_threshold_text: String,
+    pub(crate) target_notional: String,
+    pub(crate) executable_notional: String,
+    pub(crate) book_age_ms: String,
+    pub(crate) can_open: bool,
+    pub(crate) market_can_open: bool,
+    pub(crate) reject_reasons: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PairCloseStateData {
+    pub(crate) bundle_id: String,
+    pub(crate) status: String,
+    pub(crate) close_profit_pct: f64,
+    pub(crate) close_profit_text: String,
+    pub(crate) close_profit_threshold_text: String,
+    pub(crate) close_prices: String,
+    pub(crate) close_route: String,
+    pub(crate) closeable: bool,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PairRiskStateData {
+    pub(crate) label: String,
+    pub(crate) class_name: &'static str,
+    pub(crate) details: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CrossArbPairCardData {
+    pub(crate) id: String,
+    pub(crate) symbol: String,
+    pub(crate) route: String,
+    pub(crate) long_exchange: String,
+    pub(crate) short_exchange: String,
+    pub(crate) status: CrossArbPairCardStatus,
+    pub(crate) open: PairOpenStateData,
+    pub(crate) close: PairCloseStateData,
+    pub(crate) risk: PairRiskStateData,
+    pub(crate) updated_at: String,
+}
+
+impl CrossArbPairCardData {
+    pub(crate) fn from_source(
+        source: &CrossArbSourceData,
+        settings: &CrossArbSettingsFormData,
+        lang: Language,
+    ) -> Vec<Self> {
+        let raw_threshold = pct_text_to_ratio(&settings.min_open_spread);
+        let net_threshold = pct_text_to_ratio(&settings.min_net_edge);
+        let close_threshold = pct_text_to_ratio(&settings.close_profit);
+        let risk_by_symbol = cross_arb_risk_by_symbol(&source.risk_events, lang);
+        let mut rows = std::collections::BTreeMap::<String, CrossArbPairCardData>::new();
+
+        for row in &source.opportunities {
+            let symbol = text_or_fallback(text_at(row, "canonical_symbol", lang), || {
+                text_at(row, "symbol", lang)
+            });
+            if symbol == "-" {
+                continue;
+            }
+            let long_exchange = text_or_fallback(text_at(row, "long_exchange", lang), || {
+                directional_exchange_from_sides(row, "long", lang)
+            });
+            let short_exchange = text_or_fallback(text_at(row, "short_exchange", lang), || {
+                directional_exchange_from_sides(row, "short", lang)
+            });
+            let key = pair_card_key(&symbol, &long_exchange, &short_exchange);
+            let raw_spread = first_numeric(
+                row,
+                &[
+                    "raw_open_spread_pct",
+                    "raw_spread_pct",
+                    "raw_open_spread",
+                    "spread_pct",
+                    "spread",
+                ],
+            );
+            let net_edge = first_numeric(
+                row,
+                &[
+                    "maker_taker_net_edge",
+                    "expected_net_profit_pct",
+                    "net_profit_pct",
+                ],
+            );
+            let can_open = bool_at(row, "can_open");
+            let market_can_open = bool_at(row, "market_can_open");
+            let reject_reasons = text_or_fallback(text_at(row, "reject_reasons", lang), || {
+                text_at(row, "failure_reason", lang)
+            });
+            let risk = risk_state_for_pair(&symbol, &reject_reasons, &risk_by_symbol, lang);
+            let mut status = if can_open {
+                CrossArbPairCardStatus::CanOpen
+            } else if risk.class_name == "bad" {
+                CrossArbPairCardStatus::RiskBlocked
+            } else {
+                CrossArbPairCardStatus::Watching
+            };
+            let book_age_ms = text_or_fallback(text_at(row, "book_age_ms", lang), || {
+                text_at(row, "age_ms", lang)
+            });
+            if status == CrossArbPairCardStatus::Watching && stale_age_text(&book_age_ms) {
+                status = CrossArbPairCardStatus::Stale;
+            }
+            rows.insert(
+                key.clone(),
+                CrossArbPairCardData {
+                    id: key,
+                    symbol: symbol.clone(),
+                    route: route_text(&long_exchange, &short_exchange),
+                    long_exchange,
+                    short_exchange,
+                    status,
+                    open: PairOpenStateData {
+                        raw_spread_pct: raw_spread,
+                        raw_spread_text: crate::utils::format_pct(raw_spread),
+                        raw_spread_threshold_text: crate::utils::format_pct(raw_threshold),
+                        net_edge_pct: net_edge,
+                        net_edge_text: crate::utils::format_pct(net_edge),
+                        net_edge_threshold_text: crate::utils::format_pct(net_threshold),
+                        target_notional: first_money_text(
+                            row,
+                            &[
+                                "target_notional_usdt",
+                                "long_notional_usdt",
+                                "short_notional_usdt",
+                            ],
+                        ),
+                        executable_notional: first_money_text(
+                            row,
+                            &[
+                                "executable_notional_usdt",
+                                "executable_top_depth_usdt",
+                                "long_notional_usdt",
+                            ],
+                        ),
+                        book_age_ms,
+                        can_open,
+                        market_can_open,
+                        reject_reasons,
+                    },
+                    close: empty_pair_close_state(close_threshold),
+                    risk,
+                    updated_at: first_nonempty_text(
+                        row,
+                        &["updated_at", "evaluated_at", "recorded_at", "opened_at"],
+                        lang,
+                    ),
+                },
+            );
+        }
+
+        for row in &source.position_bundles {
+            let Some(position) =
+                CrossArbPositionBundleRowData::from_value_rows(std::slice::from_ref(row), lang)
+                    .into_iter()
+                    .next()
+            else {
+                continue;
+            };
+            if position.symbol == "-" {
+                continue;
+            }
+            let key = pair_card_key(
+                &position.symbol,
+                &position.long_exchange,
+                &position.short_exchange,
+            );
+            let close_state = PairCloseStateData {
+                bundle_id: position.bundle_id.clone(),
+                status: position.status.clone(),
+                close_profit_pct: position.close_profit_now,
+                close_profit_text: position.close_profit_now_text.clone(),
+                close_profit_threshold_text: position.close_threshold_pct.clone(),
+                close_prices: position.close_prices.clone(),
+                close_route: position.close_route.clone(),
+                closeable: position.closeable,
+                updated_at: position.updated_at.clone(),
+            };
+            rows.entry(key.clone())
+                .and_modify(|card| {
+                    card.close = close_state.clone();
+                    card.status = if position.closeable {
+                        CrossArbPairCardStatus::CloseReady
+                    } else if card.status != CrossArbPairCardStatus::RiskBlocked {
+                        CrossArbPairCardStatus::OpenPosition
+                    } else {
+                        card.status
+                    };
+                    card.updated_at = latest_nonempty(&card.updated_at, &position.updated_at);
+                })
+                .or_insert_with(|| {
+                    let risk = risk_state_for_pair(&position.symbol, "-", &risk_by_symbol, lang);
+                    CrossArbPairCardData {
+                        id: key,
+                        symbol: position.symbol.clone(),
+                        route: route_text(&position.long_exchange, &position.short_exchange),
+                        long_exchange: position.long_exchange.clone(),
+                        short_exchange: position.short_exchange.clone(),
+                        status: if position.closeable {
+                            CrossArbPairCardStatus::CloseReady
+                        } else if risk.class_name == "bad" {
+                            CrossArbPairCardStatus::RiskBlocked
+                        } else {
+                            CrossArbPairCardStatus::OpenPosition
+                        },
+                        open: empty_pair_open_state(raw_threshold, net_threshold),
+                        close: close_state,
+                        risk,
+                        updated_at: position.updated_at.clone(),
+                    }
+                });
+        }
+
+        let mut cards = rows.into_values().collect::<Vec<_>>();
+        cards.sort_by(pair_card_sort);
+        cards
+    }
+}
+
 impl CrossArbSettingsFormData {
     pub(crate) fn from_settings(
         settings: &Value,
@@ -2343,41 +2606,39 @@ pub(crate) struct CrossArbInstrumentRowData {
 impl CrossArbInstrumentRowData {
     pub(crate) fn from_value_rows(rows: &[Value], lang: Language) -> Vec<Self> {
         rows.iter()
-            .map(|row| {
-                Self {
-                    exchange: text_at(row, "exchange", lang),
-                    canonical_symbol: text_at(row, "canonical_symbol", lang),
-                    exchange_symbol: row
-                        .get("exchange_symbol")
-                        .and_then(|value| value.get("symbol"))
-                        .map(|value| crate::utils::value_text(value, lang))
-                        .filter(|value| value != "-")
-                        .unwrap_or_else(|| text_at(row, "exchange_symbol", lang)),
-                    price_precision: text_or_fallback(text_at(row, "price_precision", lang), || {
-                        text_at(row, "price_tick", lang)
-                    }),
-                    quantity_precision: text_or_fallback(
-                        text_at(row, "quantity_precision", lang),
-                        || text_at(row, "quantity_step", lang),
-                    ),
-                    min_order: first_nonempty_text(
-                        row,
-                        &[
-                            "min_order",
-                            "min_order_qty",
-                            "min_base_quantity",
-                            "min_qty",
-                            "min_notional",
-                        ],
-                        lang,
-                    ),
-                    funding_rate: row
-                        .get("funding_rate")
-                        .and_then(Value::as_f64)
-                        .map(crate::utils::format_pct)
-                        .unwrap_or_else(|| text_at(row, "funding_rate", lang)),
-                    status: localized_order_status_text(&text_at(row, "status", Language::En), lang),
-                }
+            .map(|row| Self {
+                exchange: text_at(row, "exchange", lang),
+                canonical_symbol: text_at(row, "canonical_symbol", lang),
+                exchange_symbol: row
+                    .get("exchange_symbol")
+                    .and_then(|value| value.get("symbol"))
+                    .map(|value| crate::utils::value_text(value, lang))
+                    .filter(|value| value != "-")
+                    .unwrap_or_else(|| text_at(row, "exchange_symbol", lang)),
+                price_precision: text_or_fallback(text_at(row, "price_precision", lang), || {
+                    text_at(row, "price_tick", lang)
+                }),
+                quantity_precision: text_or_fallback(
+                    text_at(row, "quantity_precision", lang),
+                    || text_at(row, "quantity_step", lang),
+                ),
+                min_order: first_nonempty_text(
+                    row,
+                    &[
+                        "min_order",
+                        "min_order_qty",
+                        "min_base_quantity",
+                        "min_qty",
+                        "min_notional",
+                    ],
+                    lang,
+                ),
+                funding_rate: row
+                    .get("funding_rate")
+                    .and_then(Value::as_f64)
+                    .map(crate::utils::format_pct)
+                    .unwrap_or_else(|| text_at(row, "funding_rate", lang)),
+                status: localized_order_status_text(&text_at(row, "status", Language::En), lang),
             })
             .collect()
     }
@@ -3032,9 +3293,7 @@ fn localized_order_status_text(status: &str, lang: Language) -> String {
         "new" => ("已创建", "New"),
         "open" | "working" | "live" | "open_order" => ("挂单中", "Open"),
         "pending_cancel" => ("撤单中", "Pending cancel"),
-        "partially_filled" | "partial_fill" | "partially_fill" => {
-            ("部分成交", "Partially filled")
-        }
+        "partially_filled" | "partial_fill" | "partially_fill" => ("部分成交", "Partially filled"),
         "filled" | "full_fill" | "closed" | "private_ws_confirmed" => ("已成交", "Filled"),
         "cancelled" | "canceled" | "cancel" | "ioc_cancelled" | "ioc_canceled" => {
             ("已取消", "Cancelled")
@@ -3073,9 +3332,10 @@ fn localized_arbitrage_result_status_text(status: &str, lang: Language) -> Strin
         "cross_arb_partial_close_anomaly" | "partial_close_single_leg_anomaly" => {
             Some(("部分平仓异常", "Partial close anomaly"))
         }
-        "partial_close_required_emergency_repair" => {
-            Some(("部分平仓需应急修复", "Partial close requires emergency repair"))
-        }
+        "partial_close_required_emergency_repair" => Some((
+            "部分平仓需应急修复",
+            "Partial close requires emergency repair",
+        )),
         _ => None,
     };
     if let Some((zh, en)) = label {
@@ -3539,6 +3799,186 @@ fn pct_setting_text_any(settings: &Value, keys: &[&str], default: f64) -> String
         trim_number(value * 100.0)
     } else {
         trim_number(default * 100.0)
+    }
+}
+
+fn pct_text_to_ratio(value: &str) -> f64 {
+    value
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .map(|value| value / 100.0)
+        .unwrap_or(0.0)
+}
+
+fn pair_card_key(symbol: &str, long_exchange: &str, short_exchange: &str) -> String {
+    format!(
+        "{}|{}|{}",
+        symbol.trim().to_ascii_uppercase(),
+        canonical_exchange_name(long_exchange),
+        canonical_exchange_name(short_exchange)
+    )
+}
+
+fn route_text(long_exchange: &str, short_exchange: &str) -> String {
+    match (long_exchange.trim(), short_exchange.trim()) {
+        ("", "") | ("-", "-") => "-".to_string(),
+        (long, "") | (long, "-") => format!("{long} / -"),
+        ("", short) | ("-", short) => format!("- / {short}"),
+        (long, short) => format!("{long} / {short}"),
+    }
+}
+
+fn directional_exchange_from_sides(row: &Value, direction: &str, lang: Language) -> String {
+    let maker_exchange = text_at(row, "maker_exchange", lang);
+    let taker_exchange = text_at(row, "taker_exchange", lang);
+    let maker_side = text_at(row, "maker_side", Language::En).to_ascii_lowercase();
+    let taker_side = text_at(row, "taker_side", Language::En).to_ascii_lowercase();
+    if maker_side.contains(direction) {
+        return maker_exchange;
+    }
+    if taker_side.contains(direction) {
+        return taker_exchange;
+    }
+    "-".to_string()
+}
+
+fn cross_arb_risk_by_symbol(rows: &[Value], lang: Language) -> BTreeMap<String, String> {
+    let mut risks = BTreeMap::new();
+    for row in rows {
+        let symbol = text_or_fallback(text_at(row, "canonical_symbol", lang), || {
+            text_at(row, "symbol", lang)
+        });
+        if symbol == "-" {
+            continue;
+        }
+        let detail = first_nonempty_text(
+            row,
+            &["reason", "message", "details", "risk_reason", "status"],
+            lang,
+        );
+        risks
+            .entry(symbol.to_ascii_uppercase())
+            .and_modify(|existing: &mut String| {
+                if detail != "-" && !existing.contains(&detail) {
+                    existing.push_str("; ");
+                    existing.push_str(&detail);
+                }
+            })
+            .or_insert(detail);
+    }
+    risks
+}
+
+fn risk_state_for_pair(
+    symbol: &str,
+    reject_reasons: &str,
+    risk_by_symbol: &BTreeMap<String, String>,
+    lang: Language,
+) -> PairRiskStateData {
+    let symbol_key = symbol.to_ascii_uppercase();
+    let risk_detail = risk_by_symbol
+        .get(&symbol_key)
+        .filter(|value| !value.trim().is_empty() && value.trim() != "-")
+        .cloned();
+    if let Some(details) = risk_detail {
+        return PairRiskStateData {
+            label: s(lang, "pair_risk_blocked"),
+            class_name: "bad",
+            details,
+        };
+    }
+    if reject_reasons.trim().is_empty() || reject_reasons.trim() == "-" {
+        PairRiskStateData {
+            label: s(lang, "pair_risk_clear"),
+            class_name: "good",
+            details: "-".to_string(),
+        }
+    } else {
+        PairRiskStateData {
+            label: s(lang, "pair_risk_watch"),
+            class_name: "warn",
+            details: reject_reasons.to_string(),
+        }
+    }
+}
+
+fn stale_age_text(value: &str) -> bool {
+    value
+        .trim()
+        .trim_end_matches("ms")
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .map(|value| value > 5_000.0)
+        .unwrap_or(false)
+}
+
+fn empty_pair_open_state(raw_threshold: f64, net_threshold: f64) -> PairOpenStateData {
+    PairOpenStateData {
+        raw_spread_pct: 0.0,
+        raw_spread_text: "-".to_string(),
+        raw_spread_threshold_text: crate::utils::format_pct(raw_threshold),
+        net_edge_pct: 0.0,
+        net_edge_text: "-".to_string(),
+        net_edge_threshold_text: crate::utils::format_pct(net_threshold),
+        target_notional: "-".to_string(),
+        executable_notional: "-".to_string(),
+        book_age_ms: "-".to_string(),
+        can_open: false,
+        market_can_open: false,
+        reject_reasons: "-".to_string(),
+    }
+}
+
+fn empty_pair_close_state(close_threshold: f64) -> PairCloseStateData {
+    PairCloseStateData {
+        bundle_id: "-".to_string(),
+        status: "-".to_string(),
+        close_profit_pct: 0.0,
+        close_profit_text: "-".to_string(),
+        close_profit_threshold_text: crate::utils::format_pct(close_threshold),
+        close_prices: "-".to_string(),
+        close_route: "-".to_string(),
+        closeable: false,
+        updated_at: "-".to_string(),
+    }
+}
+
+fn latest_nonempty(left: &str, right: &str) -> String {
+    if right.trim().is_empty() || right == "-" {
+        left.to_string()
+    } else {
+        right.to_string()
+    }
+}
+
+fn pair_card_sort(left: &CrossArbPairCardData, right: &CrossArbPairCardData) -> std::cmp::Ordering {
+    pair_card_status_rank(right.status)
+        .cmp(&pair_card_status_rank(left.status))
+        .then_with(|| {
+            right
+                .open
+                .net_edge_pct
+                .partial_cmp(&left.open.net_edge_pct)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .then_with(|| left.symbol.cmp(&right.symbol))
+        .then_with(|| left.route.cmp(&right.route))
+}
+
+fn pair_card_status_rank(status: CrossArbPairCardStatus) -> u8 {
+    match status {
+        CrossArbPairCardStatus::RiskBlocked => 6,
+        CrossArbPairCardStatus::CloseReady => 5,
+        CrossArbPairCardStatus::CanOpen => 4,
+        CrossArbPairCardStatus::OpenPosition => 3,
+        CrossArbPairCardStatus::Stale => 2,
+        CrossArbPairCardStatus::Watching => 1,
     }
 }
 

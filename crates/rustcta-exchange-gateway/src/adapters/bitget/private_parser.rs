@@ -20,27 +20,33 @@ pub fn parse_balances(
     market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<Balance>> {
-    let assets = value
-        .get("data")
-        .unwrap_or(value)
-        .as_array()
-        .ok_or_else(|| {
-            parse_error(
-                exchange_id.clone(),
-                "assets response is not an array",
-                value,
-            )
-        })?;
+    let assets = bitget_balance_assets(exchange_id, value)?;
     let requested = requested_assets
         .iter()
         .map(|asset| asset.trim().to_ascii_uppercase())
         .filter(|asset| !asset.is_empty())
         .collect::<Vec<_>>();
     let mut balances = Vec::new();
+    if let Some(total) = bitget_account_equity(value) {
+        if requested.is_empty() || requested.contains(&"USDT".to_string()) {
+            balances.push(AssetBalance::new("USDT", total, total, 0.0).map_err(validation_error)?);
+            return Ok(vec![Balance {
+                schema_version: SchemaVersion::current(),
+                tenant_id,
+                account_id,
+                exchange_id: exchange_id.clone(),
+                market_type,
+                balances,
+                observed_at: Utc::now(),
+            }]);
+        }
+    }
     for asset in assets {
         let asset_name = required_str(exchange_id, asset, "coin")
             .or_else(|_| required_str(exchange_id, asset, "coinName"))
-            .or_else(|_| required_str(exchange_id, asset, "marginCoin"))?
+            .or_else(|_| required_str(exchange_id, asset, "marginCoin"))
+            .or_else(|_| required_str(exchange_id, asset, "asset"))
+            .or_else(|_| required_str(exchange_id, asset, "currency"))?
             .to_ascii_uppercase();
         if !requested.is_empty() && !requested.contains(&asset_name) {
             continue;
@@ -49,14 +55,20 @@ pub fn parse_balances(
             asset
                 .get("available")
                 .or_else(|| asset.get("availableAmount"))
-                .or_else(|| asset.get("availableBalance")),
+                .or_else(|| asset.get("availableBalance"))
+                .or_else(|| asset.get("free")),
         )
         .unwrap_or(0.0);
         let locked =
             decimal_as_f64(asset.get("frozen").or_else(|| asset.get("locked"))).unwrap_or(0.0);
-        let total = decimal_as_f64(asset.get("equity").or_else(|| asset.get("totalAmount")))
-            .or_else(|| decimal_as_f64(asset.get("accountEquity")))
-            .unwrap_or(available + locked);
+        let total = decimal_as_f64(
+            asset
+                .get("equity")
+                .or_else(|| asset.get("totalAmount"))
+                .or_else(|| asset.get("accountEquity"))
+                .or_else(|| asset.get("balance")),
+        )
+        .unwrap_or(available + locked);
         if total > 0.0 || available > 0.0 || locked > 0.0 || !requested.is_empty() {
             balances.push(
                 AssetBalance::new(asset_name, total, available, locked)
@@ -73,6 +85,45 @@ pub fn parse_balances(
         balances,
         observed_at: Utc::now(),
     }])
+}
+
+fn bitget_account_equity(value: &Value) -> Option<f64> {
+    let data = value.get("data").unwrap_or(value);
+    if !data.is_object() {
+        return None;
+    }
+    decimal_as_f64(
+        data.get("usdtEquity")
+            .or_else(|| data.get("accountEquity"))
+            .or_else(|| data.get("totalEquity")),
+    )
+}
+
+fn bitget_balance_assets<'a>(
+    exchange_id: &ExchangeId,
+    value: &'a Value,
+) -> ExchangeApiResult<Vec<&'a Value>> {
+    let data = value.get("data").unwrap_or(value);
+    if let Some(items) = data.as_array() {
+        return Ok(items.iter().collect());
+    }
+    for field in ["assets", "list"] {
+        if let Some(items) = data.get(field).and_then(Value::as_array) {
+            return Ok(items.iter().collect());
+        }
+    }
+    if data.is_object()
+        && ["coin", "coinName", "marginCoin", "asset", "currency"]
+            .iter()
+            .any(|field| data.get(*field).is_some())
+    {
+        return Ok(vec![data]);
+    }
+    Err(parse_error(
+        exchange_id.clone(),
+        "assets response does not contain asset rows",
+        value,
+    ))
 }
 
 pub fn parse_order(

@@ -38,6 +38,7 @@ pub(crate) fn ExchangeLatencyPanel(
                 &mode,
                 batch_size,
                 timeout_ms,
+                Vec::new(),
                 Value::Array(endpoint_rows),
             )
             .await

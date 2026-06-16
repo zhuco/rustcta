@@ -176,6 +176,10 @@ pub struct CreateStrategyRequest {
     pub strategy_id: String,
     pub strategy_kind: String,
     #[serde(default)]
+    pub template_id: Option<String>,
+    #[serde(default)]
+    pub run_mode: Option<String>,
+    #[serde(default)]
     pub run_id: Option<String>,
     #[serde(default)]
     pub tenant_id: Option<String>,
@@ -189,6 +193,55 @@ pub struct CreateStrategyRequest {
     pub args: Vec<String>,
     #[serde(default)]
     pub working_dir: Option<String>,
+    #[serde(default)]
+    pub exchange_accounts: serde_json::Value,
+    #[serde(default)]
+    pub risk: serde_json::Value,
+    #[serde(default)]
+    pub params: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrategyTemplateCatalog {
+    pub schema_version: u16,
+    pub templates: Vec<StrategyTemplateView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrategyTemplateView {
+    pub template_id: String,
+    pub strategy_kind: String,
+    pub label: String,
+    pub description: String,
+    pub exchange_slots: Vec<StrategyExchangeSlotView>,
+    pub common_fields: Vec<StrategyTemplateFieldView>,
+    pub strategy_fields: Vec<StrategyTemplateFieldView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrategyExchangeSlotView {
+    pub slot_id: String,
+    pub label: String,
+    pub market_type: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrategyTemplateFieldView {
+    pub field_id: String,
+    pub label: String,
+    pub input_type: String,
+    pub default_value: String,
+    pub unit: Option<String>,
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<StrategyTemplateFieldOptionView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrategyTemplateFieldOptionView {
+    pub value: String,
+    pub label: String,
 }
 
 impl CreateStrategyRequest {
@@ -224,6 +277,12 @@ impl CreateStrategyRequest {
         now: DateTime<Utc>,
     ) -> Result<(StrategyProcess, StrategyProcessSpec), &'static str> {
         let process = self.clone().into_process(now)?;
+        let execution_endpoint = self
+            .params
+            .get("execution_endpoint")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("http://127.0.0.1:18081")
+            .to_string();
         let mut spec = StrategyProcessSpec::new(
             process.strategy_id.clone(),
             process.strategy_kind.clone(),
@@ -237,6 +296,9 @@ impl CreateStrategyRequest {
         .with_args(default_strategy_args(
             &process.strategy_kind,
             &process.config_path,
+            &process.strategy_id,
+            self.run_mode.as_deref(),
+            &execution_endpoint,
             self.args,
         ));
         if let Some(working_dir) = self.working_dir.filter(|value| !value.trim().is_empty()) {
@@ -252,24 +314,50 @@ impl CreateStrategyRequest {
 fn default_strategy_args(
     strategy_kind: &str,
     config_path: &str,
+    strategy_id: &str,
+    run_mode: Option<&str>,
+    execution_endpoint: &str,
     explicit_args: Vec<String>,
 ) -> Vec<String> {
     if !explicit_args.is_empty() {
         return explicit_args;
     }
     match strategy_kind {
-        "cross_exchange_arbitrage" => vec![
+        "unified_arbitrage" => vec![
             "run".to_string(),
             "-p".to_string(),
-            "rustcta-gateway".to_string(),
+            "rustcta-strategy-unified-arbitrage".to_string(),
             "--bin".to_string(),
-            "cross-exchange-arbitrage-live-runner".to_string(),
+            "unified-arbitrage-runtime".to_string(),
             "--".to_string(),
             "--config".to_string(),
             config_path.to_string(),
             "--strategy-id".to_string(),
-            "cross_arb_live".to_string(),
+            strategy_id.to_string(),
         ],
+        "hedged_grid" => {
+            let mut args = vec![
+                "run".to_string(),
+                "-p".to_string(),
+                "rustcta-strategy-hedged-grid".to_string(),
+                "--bin".to_string(),
+                "hedged-grid-runtime".to_string(),
+                "--".to_string(),
+                "--config".to_string(),
+                config_path.to_string(),
+                "--strategy-id".to_string(),
+                strategy_id.to_string(),
+            ];
+            if run_mode
+                .map(|mode| mode.eq_ignore_ascii_case("live"))
+                .unwrap_or(false)
+            {
+                args.push("--enable-live-orders".to_string());
+                args.push("--execution-endpoint".to_string());
+                args.push(execution_endpoint.to_string());
+            }
+            args
+        }
         "spot_spot_arbitrage" | "spot_spot_taker_arbitrage" => vec![
             "run".to_string(),
             "--bin".to_string(),
@@ -618,4 +706,46 @@ pub enum LogLevel {
     Info,
     Warn,
     Error,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hedged_grid_request(run_mode: &str) -> CreateStrategyRequest {
+        CreateStrategyRequest {
+            strategy_id: "hedged_grid_SOL".to_string(),
+            strategy_kind: "hedged_grid".to_string(),
+            template_id: Some("hedged_grid".to_string()),
+            run_mode: Some(run_mode.to_string()),
+            run_id: Some("local".to_string()),
+            tenant_id: Some("local".to_string()),
+            config_path: "config/generated/hedged_grid_SOL.yml".to_string(),
+            log_path: None,
+            command: None,
+            args: Vec::new(),
+            working_dir: Some(".".to_string()),
+            exchange_accounts: serde_json::json!({}),
+            risk: serde_json::json!({}),
+            params: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn hedged_grid_live_spec_should_enable_live_orders_flag() {
+        let (_, spec) = hedged_grid_request("live")
+            .into_process_and_spec(Utc::now())
+            .expect("live hedged grid spec");
+
+        assert!(spec.args.iter().any(|arg| arg == "--enable-live-orders"));
+    }
+
+    #[test]
+    fn hedged_grid_dry_run_spec_should_not_enable_live_orders_flag() {
+        let (_, spec) = hedged_grid_request("dry_run")
+            .into_process_and_spec(Utc::now())
+            .expect("dry-run hedged grid spec");
+
+        assert!(!spec.args.iter().any(|arg| arg == "--enable-live-orders"));
+    }
 }

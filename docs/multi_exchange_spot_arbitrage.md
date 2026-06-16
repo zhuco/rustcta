@@ -3,7 +3,7 @@
 ## Support Answer
 
 The current system supports multi-exchange Spot-to-Spot arbitrage through
-`spot_spot_taker_arbitrage`.
+`strategies/spot-spot-arbitrage/`.
 
 Supported functions:
 
@@ -22,13 +22,13 @@ Not supported as default behavior:
 
 - ungated live Spot order submission
 - automatic unmanaged-inventory liquidation without control-plane workflow
-- treating the USDT perpetual `cross_exchange_arbitrage` runtime as Spot
+- treating the unified arbitrage runtime as Spot
   arbitrage
 
 ## Main Runtime
 
 ```text
-retired strategy tree/spot_spot_taker_arbitrage/
+strategies/spot-spot-arbitrage/
   config.rs
   market_data.rs
   websocket_market_data.rs
@@ -45,9 +45,7 @@ retired strategy tree/spot_spot_taker_arbitrage/
 Primary config:
 
 ```text
-config/spot_spot_taker_arbitrage.yml
-config/spot_spot_taker_arbitrage_gateio_bitget.live-dry-run.example.yml
-config/five_exchange_spot_scanner.yml
+config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml
 config/spot_exchanges_example.yml
 config/symbol_mappings.yml
 config/fees.yml
@@ -104,6 +102,6 @@ cargo test --all-features
   stable.
 - Mark unsupported live behavior explicitly instead of routing around missing
   adapter capabilities.
-- Keep per-exchange API keys in environment variables or `.env`; never commit
-  secrets.
+- Keep per-exchange API keys in the unified WebUI-managed env-store; never
+  commit secrets.
 - Store ad-hoc validation output under `logs/`.

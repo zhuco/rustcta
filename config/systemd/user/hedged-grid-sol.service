@@ -1,0 +1,28 @@
+[Unit]
+Description=RustCTA Hedged Grid SOLUSDC Contract Runtime
+After=network-online.target rustcta-gateway.service
+Wants=network-online.target
+Requires=rustcta-gateway.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cta/rustcta
+Environment=RUST_LOG=info,rustcta_strategy_hedged_grid=info
+Environment=RUSTCTA_GATEWAY_URL=http://127.0.0.1:18081
+Environment=RUSTCTA_TENANT_ID=server
+Environment=RUSTCTA_ACCOUNT_ID=default
+Environment=RUSTCTA_RUN_ID=server-live
+Environment=RUSTCTA_EXCHANGE_ID=binance
+Environment=RUSTCTA_SYMBOL=SOLUSDC
+Environment=RUSTCTA_MARKET_TYPE=perpetual
+ExecStartPre=/home/cta/rustcta/scripts/hedged_grid_sol_preflight.sh
+ExecStart=/home/cta/rustcta/target/release/hedged-grid-runtime --config /home/cta/rustcta/config/generated/hedged_grid_SOL.yml --strategy-id hedged_grid_SOL --run-id server-live --tenant-id server --account-id default --execution-endpoint http://127.0.0.1:18081
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=append:/home/cta/rustcta/logs/hedged_grid_SOL.service.log
+StandardError=append:/home/cta/rustcta/logs/hedged_grid_SOL.service.log
+
+[Install]
+WantedBy=default.target

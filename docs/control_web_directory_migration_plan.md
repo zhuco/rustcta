@@ -1,6 +1,6 @@
 # Control API + Web Panel Current Directory Boundary
 
-Status date: 2026-06-08
+Status date: 2026-06-16
 
 The root `src/` tree has been removed from this checkout. Control-panel docs and
 runbooks must use the current workspace entrypoints only.
@@ -17,6 +17,8 @@ runbooks must use the current workspace entrypoints only.
 - `data/control_api/exchange_api_keys.env` is the default local env-store for
   exchange credentials. Override it with
   `RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE`.
+- WebUI is the only normal operator path for editing exchange credentials; do
+  not maintain separate live `.env` copies for the same keys.
 
 There is no valid root `src/bin/control_api.rs`, `src/web/`, or root-package
 control-panel binary in this checkout.
@@ -33,10 +35,10 @@ That is the only normal entrypoint for building the Dioxus panel, syncing
 `web-ui/dioxus/dist` to the server, deploying `rustcta-control-api`, and
 restarting the `control-api` user service.
 
-For a full cross-arb live runner plus Web control panel deploy, use:
+For a full unified arbitrage runtime plus Web control panel deploy, use:
 
 ```bash
-scripts/rustcta_server.sh deploy-cross-arb-live-stack
+scripts/rustcta_server.sh deploy-unified-arb-live-stack
 ```
 
 Direct `cargo run` is for local debugging only:
@@ -50,7 +52,7 @@ RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=data/control_api/audit.jsonl \
 RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE=data/control_api/exchange_api_keys.env \
 RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG=config/accounts.yml \
 RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \
-RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json \
+RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=logs/unified_arbitrage/dashboard.json \
 cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```
 
@@ -64,9 +66,8 @@ The served static directory is always `web-ui/dioxus/dist`. The source tree is
 `web-ui/dioxus`; Dioxus build output under `target/dx/.../public` is an
 intermediate artifact and must be copied into `dist` before deployment.
 
-For the cross-arb page, `control-api` must read
-`logs/cross_exchange_arbitrage/cross_arb_live_dashboard.json`. Do not use the
-old `cross_arb_dashboard_snapshot.json` path for the active panel.
+For the unified-arb page, `control-api` must read
+`logs/unified_arbitrage/dashboard.json`.
 
 ## Exchange Configuration Contract
 
@@ -84,6 +85,10 @@ The Web exchange configuration page uses `/api/exchange-api-keys` from
 
 The browser never receives raw stored secrets. Existing secret values are shown
 only as masked hints. Secret writes stay in the local env-store.
+
+Gateway and strategy processes read the same env-store through systemd
+`EnvironmentFile` entries. After WebUI writes or deletes keys, restart those
+processes so their environment reflects the file.
 
 ## Boundary Rules
 

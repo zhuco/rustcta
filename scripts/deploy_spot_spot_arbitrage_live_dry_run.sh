@@ -6,13 +6,13 @@ set -Eeuo pipefail
 
 REMOTE="${REMOTE:-cta@45.77.253.180}"
 REMOTE_BASE="${REMOTE_BASE:-/home/cta/rustcta_spot_arb}"
-SPOT_ARB_CONFIG="${SPOT_ARB_CONFIG:-config/spot_spot_taker_arbitrage_gateio_bitget.live-dry-run.example.yml}"
-BIN_PATH="${BIN_PATH:-target/release/rustcta}"
+SPOT_ARB_CONFIG="${SPOT_ARB_CONFIG:-config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml}"
+BIN_PATH="${BIN_PATH:-target/release/spot-spot-arbitrage-runtime}"
 RELEASE_ID="${RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 REMOTE_RELEASE="${REMOTE_BASE}/releases/${RELEASE_ID}"
-RUNTIME_CONFIG_REL="config/spot_spot_taker_arbitrage.runtime.yml"
-RUNTIME_BIN_REL="bin/rustcta"
-MIGRATION_SQL="${MIGRATION_SQL:-data/sql/cross_exchange_arbitrage.sql}"
+RUNTIME_CONFIG_REL="config/spot_spot_arbitrage_live_dry_run.runtime.yml"
+RUNTIME_BIN_REL="bin/spot-spot-arbitrage-runtime"
+MIGRATION_SQL="${MIGRATION_SQL:-data/sql/unified_arbitrage.sql}"
 SSH_OPTS="${SSH_OPTS:-}"
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-180}"
 STARTUP_SETTLE_SECONDS="${STARTUP_SETTLE_SECONDS:-20}"
@@ -305,7 +305,7 @@ check_prerequisites() {
 
 build_binary() {
   log "building release binary"
-  cargo build --release --bin rustcta
+  cargo build --release --bin spot-spot-arbitrage-runtime
   [[ -x "$BIN_PATH" ]] || die "release binary not found or not executable: $BIN_PATH"
 }
 
@@ -548,8 +548,8 @@ cd "$REMOTE_BASE/current"
 mkdir -p run
 log_file="logs/spot_spot_arbitrage_${HOSTNAME}_$(date -u +%Y%m%dT%H%M%SZ).log"
 RUST_LOG="${RUST_LOG:-info}" nohup "./$RUNTIME_BIN_REL" \
-  --strategy spot_spot_taker_arbitrage \
   --config "$RUNTIME_CONFIG_REL" \
+  --strategy-id spot_spot_live_dry_run \
   >"$log_file" 2>&1 &
 pid="$!"
 echo "$pid" > run/spot_arb.pid

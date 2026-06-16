@@ -259,9 +259,8 @@ async fn run_private_ws_observe_cli(args: PrivateWsObserveCliArgs) -> Result<()>
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<PrivateWsObserveEvent>(1024);
     let observed_exchanges = exchanges.clone();
-    let handle = tokio::spawn(async move {
-        rustcta_tools_ops::run_private_ws_observe_once(&observed_exchanges, config, tx).await;
-    });
+    let observe = rustcta_tools_ops::run_private_ws_observe_once(&observed_exchanges, config, tx);
+    tokio::pin!(observe);
 
     let deadline = tokio::time::sleep(Duration::from_millis(duration_ms));
     tokio::pin!(deadline);
@@ -269,6 +268,7 @@ async fn run_private_ws_observe_cli(args: PrivateWsObserveCliArgs) -> Result<()>
     let mut private_events = Vec::<Value>::new();
     loop {
         tokio::select! {
+            _ = &mut observe => break,
             _ = &mut deadline => break,
             maybe_event = rx.recv() => {
                 let Some(event) = maybe_event else {
@@ -289,7 +289,6 @@ async fn run_private_ws_observe_cli(args: PrivateWsObserveCliArgs) -> Result<()>
             }
         }
     }
-    handle.abort();
 
     let ready = exchanges.iter().all(|exchange| {
         statuses.get(exchange).is_some_and(|row| {

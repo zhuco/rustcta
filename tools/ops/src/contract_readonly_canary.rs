@@ -291,9 +291,8 @@ async fn observe_private_ws_once(
         reconnect_delay_ms: 1_000,
         gateio_user_id: None,
     };
-    let handle = tokio::spawn(async move {
-        run_private_ws_observe_once(&exchanges, config, tx).await;
-    });
+    let observe = run_private_ws_observe_once(&exchanges, config, tx);
+    tokio::pin!(observe);
     let deadline = tokio::time::sleep(Duration::from_millis(
         args.private_ws_observe_duration_ms.max(1_000),
     ));
@@ -301,6 +300,7 @@ async fn observe_private_ws_once(
     let mut latest = None;
     loop {
         tokio::select! {
+            _ = &mut observe => break,
             _ = &mut deadline => break,
             event = rx.recv() => {
                 let Some(event) = event else {
@@ -312,7 +312,6 @@ async fn observe_private_ws_once(
             }
         }
     }
-    handle.abort();
     latest
 }
 

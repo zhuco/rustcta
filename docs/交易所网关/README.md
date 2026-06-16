@@ -33,7 +33,7 @@
 | 看不懂英文 adapter 文件名 | [适配器索引](适配器索引.md)。 |
 | 看全局完成度和 Binance 对照目标 | [总览/exchange_api_completion_matrix.md](总览/exchange_api_completion_matrix.md)。 |
 | 看网关支持哪些交易所 | [总览/exchange_support_matrix.md](总览/exchange_support_matrix.md)。 |
-| 看 OKX/Bybit/MEXC/KuCoin Futures 跨所现货、合约、资金费率 API 收口 | [总览/exchange_adapter_interface_status.md](总览/exchange_adapter_interface_status.md) 的 `2026-06-10 Cross-Arb Gateway Closure`，以及 [跨所交易 API 审计与滑点捕获设计](../cross_exchange_api_audit_and_slippage_capture_design_zh.md)。 |
+| 看 OKX/Bybit/MEXC/KuCoin Futures 跨所现货、合约、资金费率 API 收口 | [总览/exchange_adapter_interface_status.md](总览/exchange_adapter_interface_status.md) 的 `2026-06-10 Cross-Arb Gateway Closure`。 |
 | 看 endpoint mapping 和 request/spec 工具链要求 | [总览/exchange_adapter_toolchain_completion_zh.md](总览/exchange_adapter_toolchain_completion_zh.md)。 |
 | 看通用安全、对账、费率、symbol、WS 规则 | `通用机制/` 下的文档。 |
 

@@ -160,6 +160,31 @@ mod tests {
         assert!(!text.contains("passphrase"));
         assert!(!text.contains("authorization"));
 
+        let templates = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategy-templates")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(templates.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(templates.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        let templates = value["templates"].as_array().unwrap();
+        assert!(templates
+            .iter()
+            .any(|item| item["template_id"] == "unified_arbitrage"));
+        assert!(templates.iter().all(|item| item["exchange_slots"]
+            .as_array()
+            .map(|slots| !slots.is_empty())
+            .unwrap_or(false)));
+
         let inventory = app
             .clone()
             .oneshot(
@@ -747,9 +772,9 @@ mod tests {
             [
                 "2026-06-07T12:00:00Z INFO strategy booted",
                 "2026-06-07T12:00:01Z DEBUG heartbeat ok",
-                "\u{1b}[2m2026-06-07T12:00:02.000000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::cross_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m cross-arb live runner status strategy_id=cross_arb_live",
-                "2026-06-07T12:00:02.250000Z INFO rustcta::cross_arb_live_runner: cross-arb trade event action=cross_arb_open_decision_audit lifecycle=cross_arb_open_decision_audit symbol=ESPORTS/USDT failure_reason=\"display-only row has no executable order drafts\"",
-                "\u{1b}[2m2026-06-07T12:00:02.500000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::cross_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m cross-arb trade event action=cross_arb_open lifecycle=open symbol=ESPORTS/USDT",
+                "\u{1b}[2m2026-06-07T12:00:02.000000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::unified_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m unified-arb live runner status strategy_id=unified_arb_live",
+                "2026-06-07T12:00:02.250000Z INFO rustcta::unified_arb_live_runner: unified-arb trade event action=unified_arb_open_decision_audit lifecycle=unified_arb_open_decision_audit symbol=ESPORTS/USDT failure_reason=\"display-only row has no executable order drafts\"",
+                "\u{1b}[2m2026-06-07T12:00:02.500000Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mrustcta::unified_arb_live_runner\u{1b}[0m\u{1b}[2m:\u{1b}[0m unified-arb trade event action=unified_arb_open lifecycle=open symbol=ESPORTS/USDT",
                 "2026-06-07 12:00:02.123 WARN stale book",
                 "2026-06-07T12:00:03Z ERROR token appeared in source log",
             ]
@@ -791,7 +816,7 @@ mod tests {
         assert_eq!(value["events"][1]["category"], "trade");
         assert_eq!(
             value["events"][1]["message"],
-            "2026-06-07T12:00:02.500000Z  INFO rustcta::cross_arb_live_runner: cross-arb trade event action=cross_arb_open lifecycle=open symbol=ESPORTS/USDT"
+            "2026-06-07T12:00:02.500000Z  INFO rustcta::unified_arb_live_runner: unified-arb trade event action=unified_arb_open lifecycle=open symbol=ESPORTS/USDT"
         );
         assert_eq!(
             value["events"][1]["occurred_at"],
@@ -1095,7 +1120,7 @@ mod tests {
                     "visible": "relationship"
                 }
             ],
-            "cross_arb_market_snapshots": [
+            "unified_arb_market_snapshots": [
                 {
                     "symbol": "ETH/USDT",
                     "token": "hidden",
@@ -1474,7 +1499,7 @@ mod tests {
                 "dry-run",
             ),
             (
-                "/api/cross-arb/dashboard",
+                "/api/unified-arb/dashboard",
                 "/data/hedge_policy/status",
                 "ready",
             ),
@@ -1673,7 +1698,7 @@ mod tests {
         );
         assert_eq!(value[0]["detail"]["balance_reconciliation"]["status"], "ok");
         assert_eq!(value[1]["strategy_id"], "contract-arb-local");
-        assert_eq!(value[1]["strategy_kind"], "cross_exchange_arbitrage");
+        assert_eq!(value[1]["strategy_kind"], "unified_arbitrage");
         assert_eq!(
             value[1]["detail"]["arbitrage_relationships"][0]["visible"],
             "relationship"
@@ -1826,12 +1851,12 @@ mod tests {
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let legacy_path = temp_dir.join("dashboard_snapshot.json");
-        let extra_path = temp_dir.join("spot_futures_snapshot.json");
+        let extra_path = temp_dir.join("unified_arbitrage_snapshot.json");
         std::fs::write(
             &legacy_path,
             serde_json::json!({
                 "status": "running",
-                "cross_arb_dashboard": {
+                "unified_arb_dashboard": {
                     "summary": {"active": true}
                 }
             })
@@ -1842,8 +1867,8 @@ mod tests {
             &extra_path,
             serde_json::json!({
                 "schema_version": 1,
-                "strategy_id": "spot_futures_arb_live",
-                "strategy_kind": "spot_futures_arbitrage",
+                "strategy_id": "unified_arb_live",
+                "strategy_kind": "unified_arbitrage",
                 "run_id": "server-live",
                 "status": null,
                 "generated_at": "2026-06-10T16:00:00Z",
@@ -1882,17 +1907,20 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|snapshot| snapshot["strategy_kind"] == "cross_exchange_arbitrage"));
-        let spot_futures = value
+            .any(|snapshot| snapshot["strategy_kind"] == "unified_arbitrage"));
+        let unified = value
             .as_array()
             .unwrap()
             .iter()
-            .find(|snapshot| snapshot["strategy_kind"] == "spot_futures_arbitrage")
+            .find(|snapshot| {
+                snapshot["strategy_kind"] == "unified_arbitrage"
+                    && snapshot["source"] == "typed_runtime_snapshot"
+            })
             .unwrap();
-        assert_eq!(spot_futures["strategy_id"], "spot_futures_arb_live");
-        assert_eq!(spot_futures["source"], "typed_runtime_snapshot");
+        assert_eq!(unified["strategy_id"], "unified_arb_live");
+        assert_eq!(unified["source"], "typed_runtime_snapshot");
         assert_eq!(
-            spot_futures["detail"]["active_symbols"][0],
+            unified["detail"]["active_symbols"][0],
             serde_json::json!("ORDI/USDT")
         );
 
@@ -1900,14 +1928,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extra_snapshot_paths_should_aggregate_cross_arb_shard_dashboards() {
+    async fn extra_snapshot_paths_should_aggregate_unified_arb_shard_dashboards() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rustcta-control-api-cross-arb-shards-test-{}",
+            "rustcta-control-api-unified-arb-shards-test-{}",
             Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
-        let shard0 = temp_dir.join("cross_arb_shard_0.json");
-        let shard1 = temp_dir.join("cross_arb_shard_1.json");
+        let shard0 = temp_dir.join("unified_arb_shard_0.json");
+        let shard1 = temp_dir.join("unified_arb_shard_1.json");
         for (path, shard_id, symbol) in [(&shard0, 0, "EDGE/USDT"), (&shard1, 1, "DRIFT/USDT")] {
             std::fs::write(
                 path,
@@ -1921,9 +1949,9 @@ mod tests {
                         "exchange": "binance",
                         "symbol": symbol
                     }],
-                    "cross_arb_dashboard": {
+                    "unified_arb_dashboard": {
                         "summary": {
-                            "strategy_id": format!("cross_arb_live_shard_{shard_id}")
+                            "strategy_id": format!("unified_arb_live_shard_{shard_id}")
                         },
                         "opportunities": [{
                             "opportunity_id": format!("opp-{shard_id}"),
@@ -1947,26 +1975,26 @@ mod tests {
         assert!(snapshot
             .strategy_snapshots
             .iter()
-            .any(|snapshot| snapshot.strategy_id == "cross_arb_live_shard_0"));
+            .any(|snapshot| snapshot.strategy_id == "unified_arb_live_shard_0"));
         assert!(snapshot
             .strategy_snapshots
             .iter()
-            .any(|snapshot| snapshot.strategy_id == "cross_arb_live_shard_1"));
+            .any(|snapshot| snapshot.strategy_id == "unified_arb_live_shard_1"));
 
         std::fs::remove_dir_all(temp_dir).ok();
     }
 
     #[tokio::test]
-    async fn cross_arb_dashboard_should_use_runner_dashboard_snapshot() {
+    async fn unified_arb_dashboard_should_use_runner_dashboard_snapshot() {
         let legacy = serde_json::json!({
             "generated_at": "2026-06-08T10:00:00Z",
             "live_trading_enabled": true,
             "risk_events": [],
-            "cross_arb_dashboard": {
-                "data_source": "cross-exchange-arbitrage-live-runner",
+            "unified_arb_dashboard": {
+                "data_source": "unified-arbitrage-runtime",
                 "online": true,
                 "summary": {
-                    "strategy_id": "cross_arb_live",
+                    "strategy_id": "unified_arb_live",
                     "enabled_exchanges": ["binance", "bitget", "gateio"],
                     "configured_symbols": 3,
                     "api_secret": "hidden"
@@ -2021,7 +2049,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/cross-arb/dashboard")
+                    .uri("/api/unified-arb/dashboard")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2032,10 +2060,7 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            value["data"]["data_source"],
-            "cross-exchange-arbitrage-live-runner"
-        );
+        assert_eq!(value["data"]["data_source"], "unified-arbitrage-runtime");
         assert_eq!(value["data"]["summary"]["configured_symbols"], 3);
         assert_eq!(value["data"]["arbitrage_results"][0]["bundle_id"], "arb-1");
         assert_eq!(
@@ -2060,7 +2085,7 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value[0]["strategy_kind"], "cross_exchange_arbitrage");
+        assert_eq!(value[0]["strategy_kind"], "unified_arbitrage");
         assert_eq!(value[0]["detail"]["exchange_status"][0]["status"], "ready");
         assert!(!value.to_string().contains("api_secret"));
 
@@ -2068,7 +2093,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/cross-arb/instruments")
+                    .uri("/api/unified-arb/instruments")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2088,7 +2113,7 @@ mod tests {
         let market_snapshots = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/cross-arb/market-snapshots")
+                    .uri("/api/unified-arb/market-snapshots")
                     .body(Body::empty())
                     .unwrap(),
             )

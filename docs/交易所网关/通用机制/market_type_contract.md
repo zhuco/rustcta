@@ -23,16 +23,30 @@ endpoint mapping 和 adapter 文档应同时表达两层含义：
 - `market_type`: 项目内部归一化类型，例如 `perpetual` 或 `futures`。
 - `exchange_product_type` / `exchange_namespace` / notes: 交易所官方产品线或 API namespace，例如 Binance `fapi`/USD-M Futures、OKX `SWAP`、Gate `futures`、Bybit `linear`。
 
+## 余额查询作用域
+
+`BalancesRequest.market_type` 是可选字段，但它不是新增一种市场类型：
+
+- `Some(MarketType::Spot)`：查询交易所现货/经典现货分区余额。
+- `Some(MarketType::Perpetual)`：查询交易所永续合约分区余额。
+- `None`：查询账户级余额快照。支持统一账户、组合保证金或 UTA 的交易所应把它映射到官方账户级接口；不支持或账号未开通时，调用方可以回退到显式 `Spot` + `Perpetual` 查询。
+
+不要新增 `MarketType::Unified`，也不要让调用方靠响应里的 `MarketType::Perpetual` 推断统一账户。统一账户是账户/资金作用域，不是交易品种。当前 `ExchangeBalance` DTO 还没有独立的 balance scope 字段，账户级响应里的 `market_type` 只能作为交易所主产品线锚点保留；调用方必须按请求的 `market_type=None` 或上层检查模式判断它是账户级余额。
+
+当前控制台余额检查策略是：
+
+- Binance、Bybit：按统一账户查询并展示为统一账户余额。
+- Bitget、Gate.io：先用 `market_type=None` 探测 UTA/Unified Account；若账号不支持或未开通，则回退经典现货和永续分区。
+- 其它交易所：默认显式查询 `Spot` 和 `Perpetual` 分区。
+
 ## 兼容别名
 
 当前仓库有历史兼容路径会把部分字符串映射到永续：
 
-- `strategies/cross-exchange-arbitrage` 的运行时配置会把 `perpetual`、`perp`、`future`、`futures`、`swap` 解析为 SDK `MarketType::Perpetual`。
+- `strategies/unified-arbitrage` 的运行时配置应使用 `perpetual` 表达永续合约。
 - `crates/rustcta-runtime-control/src/live_preflight/config.rs` 会把 `perpetual`、`perp`、`future`、`futures` 解析为 `MarketType::Perpetual`。
 - `crates/rustcta-runtime-control/src/risk/disabled_registry.rs` 会把 `perpetual`、`perp`、`future`、`futures` 解析为 `MarketType::Perpetual`。
-- `crates/rustcta-cross-arb-live-runner/src/lib.rs` 会把 SDK `MarketType::Futures` 归一化为网关 `MarketType::Perpetual`，用于兼容旧跨所套利配置。
-
-这些兼容入口只服务旧配置迁移和交易所外部命名过渡。不要只凭 `market_type: futures` 判断它是永续；必须结合 adapter 的 instrument 规则或交易所产品线声明。
+这些兼容入口只服务交易所外部命名过渡。不要只凭 `market_type: futures` 判断它是永续；必须结合 adapter 的 instrument 规则或交易所产品线声明。
 
 注意：通用 serde 直接反序列化 `rustcta_types::MarketType` 或 `rustcta_strategy_sdk::MarketType` 时，`futures` 会落到 `MarketType::Futures`，不会自动等价于 `Perpetual`。只有上面列出的兼容解析器会做别名归一化。
 

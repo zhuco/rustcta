@@ -2,8 +2,8 @@ use rustcta_exchange_api::{
     AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
     CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
     OpenOrdersRequest, OrderListConditionalLeg, OrderListLegType, OrderListRequest,
-    PlaceOrderRequest, PositionsRequest, QueryOrderRequest, QuoteMarketOrderRequest,
-    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    PlaceOrderRequest, PositionMode, PositionsRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    RecentFillsRequest, SymbolAccountConfigRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
@@ -17,6 +17,7 @@ use super::test_support::{
     perpetual_symbol_scope, private_config, spawn_rest_server, symbol_scope,
 };
 use super::BinanceGatewayAdapter;
+use crate::adapters::GatewayAdapter;
 
 #[test]
 fn binance_signing_should_match_documented_example() {
@@ -89,6 +90,72 @@ async fn binance_adapter_should_load_balances_from_signed_account_rest() {
         .expect("request spec");
     assert_eq!(request.path, "/api/v3/account");
     assert_signed_request(&request);
+}
+
+#[tokio::test]
+async fn binance_adapter_should_fallback_to_portfolio_balances_for_unified_account() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!([
+            {"asset": "USDT", "balance": "0", "availableBalance": "0"}
+        ]),
+        json!({
+            "totalEquity": "156.70",
+            "totalWalletBalance": "156.12"
+        }),
+    ])
+    .await;
+    let adapter = BinanceGatewayAdapter::new(private_config(base_url)).expect("adapter");
+
+    let response = adapter
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("portfolio-balances"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("portfolio balances");
+
+    assert_eq!(response.balances.len(), 1);
+    assert_eq!(response.balances[0].market_type, MarketType::Perpetual);
+    assert_eq!(response.balances[0].balances[0].asset, "USDT");
+    assert_eq!(response.balances[0].balances[0].total, 156.70);
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests[0].path, "/fapi/v2/balance");
+    assert_eq!(requests[1].path, "/sapi/v1/portfolio/account");
+    assert_signed_request(&requests[0]);
+    assert_signed_request(&requests[1]);
+}
+
+#[tokio::test]
+async fn binance_adapter_should_treat_omitted_balance_market_type_as_account_level() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "accountEquity": "42.50",
+        "totalAvailableBalance": "40.25"
+    })])
+    .await;
+    let adapter = BinanceGatewayAdapter::new(private_config(base_url)).expect("adapter");
+
+    let response = adapter
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("account-level-balances"),
+            exchange: exchange_id(),
+            market_type: None,
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("account-level balances");
+
+    assert_eq!(response.balances.len(), 1);
+    assert_eq!(response.balances[0].market_type, MarketType::Perpetual);
+    assert_eq!(response.balances[0].balances[0].asset, "USDT");
+    assert_eq!(response.balances[0].balances[0].total, 42.50);
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/sapi/v1/portfolio/account");
+    assert_signed_request(&requests[0]);
 }
 
 #[tokio::test]
@@ -959,5 +1026,28 @@ async fn binance_adapter_should_load_recent_fills_from_signed_rest() {
         Some("28457")
     );
     assert_eq!(request.query.get("limit").map(String::as_str), Some("50"));
+    assert_signed_request(&request);
+}
+
+#[tokio::test]
+async fn binance_adapter_should_load_perpetual_position_mode_from_signed_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "dualSidePosition": true
+    })])
+    .await;
+    let adapter = BinanceGatewayAdapter::new(private_config(base_url)).expect("adapter");
+
+    let response = adapter
+        .get_symbol_account_config(SymbolAccountConfigRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("position-mode"),
+            symbol: perpetual_symbol_scope("BTCUSDT"),
+        })
+        .await
+        .expect("position mode");
+
+    assert_eq!(response.config.position_mode, Some(PositionMode::Hedge));
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.path, "/fapi/v1/positionSide/dual");
     assert_signed_request(&request);
 }

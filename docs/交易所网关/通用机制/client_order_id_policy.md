@@ -1,10 +1,12 @@
 # Client Order ID Policy
 
-RustCTA now centralizes client order ID generation in `retired exchange tree/client_order_id.rs`.
+RustCTA now centralizes client order ID capability and reconciliation policy in
+`crates/rustcta-exchange-api/src/order.rs` and
+`crates/rustcta-exchange-gateway/src/reconciliation.rs`.
 
-The shared generator is the default path for new unified order flows. If a caller supplies a
-`client_order_id`, adapters should validate it with `validate_client_order_id()` before sending it
-to an exchange.
+`ClientOrderIdPolicy` defines the shared validation envelope. If a caller
+supplies a `client_order_id`, adapters should validate it against venue
+constraints before sending it to an exchange.
 
 Format uses conservative exchange and market prefixes:
 
@@ -24,12 +26,13 @@ Current policy notes:
 - Paper uses a separate compatibility policy that allows lowercase hyphenated RustCTA idempotency
   IDs such as `crossarb-ls-mk-1-deadbeef`.
 - Duplicate client IDs are treated as unsafe and should be avoided globally.
-- MEXC Spot, CoinEx Spot, Binance Spot, OKX Spot, Paper, and the legacy compatibility wrapper use
-  this central generator when an order request omits `client_order_id`.
+- Venue adapters should either preserve the caller-supplied `client_order_id`
+  or explicitly declare `supports_client_order_id=false`.
 - Caller-provided IDs are validated before submission; invalid values are rejected before an API
   request is built.
 - Validation is currently format-based. Prefix-to-exchange matching is intentionally not enforced
   yet so existing explicit IDs can migrate gradually.
 
-To add a new exchange, extend `policy_for()` with the venue's max length, allowed characters,
-market support, and documented duplicate behavior.
+To add a new exchange, document the venue's max length, allowed characters,
+market support, and duplicate behavior in its adapter capability profile and
+fixtures.

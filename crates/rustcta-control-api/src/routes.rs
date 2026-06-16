@@ -9,8 +9,10 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{
     read_models, ControlApiConfigSummary, ControlApiState, ControlApiStateSnapshot,
-    CreateStrategyRequest, CredentialStatusResponse, LegacyDashboardReadView, StrategyProcessView,
-    StrategySnapshotEnvelope, StrategySnapshotSource, SystemResourceSnapshot, WorkspaceSummary,
+    CreateStrategyRequest, CredentialStatusResponse, LegacyDashboardReadView,
+    StrategyExchangeSlotView, StrategyProcessView, StrategySnapshotEnvelope,
+    StrategySnapshotSource, StrategyTemplateCatalog, StrategyTemplateFieldOptionView,
+    StrategyTemplateFieldView, StrategyTemplateView, SystemResourceSnapshot, WorkspaceSummary,
     CONTROL_API_SCHEMA_VERSION,
 };
 
@@ -287,6 +289,184 @@ pub async fn strategies(
     )
 }
 
+pub async fn strategy_templates() -> Json<StrategyTemplateCatalog> {
+    Json(StrategyTemplateCatalog {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        templates: strategy_template_catalog(),
+    })
+}
+
+fn strategy_template_catalog() -> Vec<StrategyTemplateView> {
+    let common_fields = vec![
+        template_field(
+            "max_total_notional_usdt",
+            "最大总名义本金",
+            "number",
+            "1000",
+            Some("USDT"),
+            true,
+        ),
+        template_field(
+            "max_single_order_usdt",
+            "每单金额",
+            "number",
+            "50",
+            Some("USDT"),
+            true,
+        ),
+        template_field(
+            "max_slippage_pct",
+            "最大滑点",
+            "number",
+            "0.08",
+            Some("%"),
+            true,
+        ),
+        template_field("cooldown_ms", "下单冷却", "number", "500", Some("ms"), true),
+    ];
+
+    vec![
+        StrategyTemplateView {
+            template_id: "hedged_grid".to_string(),
+            strategy_kind: "hedged_grid".to_string(),
+            label: "对冲网格".to_string(),
+            description: "单账户多空双开网格。".to_string(),
+            exchange_slots: vec![exchange_slot("execution", "交易所", "perpetual", true)],
+            common_fields: Vec::new(),
+            strategy_fields: vec![
+                template_field("symbol", "交易对", "text", "BTC/USDT", None, true),
+                template_select_field(
+                    "grid_spacing_mode",
+                    "类型",
+                    "pct",
+                    true,
+                    &[("pct", "等比"), ("abs", "等差")],
+                ),
+                template_field("grid_spacing", "间距", "number", "0.25", Some("%/U"), true),
+                template_field("grid_order_count", "挂单", "number", "8", None, true),
+                template_field(
+                    "order_notional_usdt",
+                    "每格USDT",
+                    "number",
+                    "50",
+                    None,
+                    true,
+                ),
+            ],
+        },
+        StrategyTemplateView {
+            template_id: "unified_arbitrage".to_string(),
+            strategy_kind: "unified_arbitrage".to_string(),
+            label: "跨所合约对冲".to_string(),
+            description: "两个永续交易所之间按开仓净边际和平仓净利阈值执行双边对冲。".to_string(),
+            exchange_slots: vec![
+                exchange_slot("long", "做多交易所", "perpetual", true),
+                exchange_slot("short", "做空交易所", "perpetual", true),
+            ],
+            common_fields,
+            strategy_fields: vec![
+                template_field(
+                    "symbols",
+                    "交易对列表",
+                    "text",
+                    "BTC/USDT,ETH/USDT,SOL/USDT",
+                    None,
+                    true,
+                ),
+                template_field(
+                    "min_open_raw_spread_pct",
+                    "开仓原始价差",
+                    "number",
+                    "0.12",
+                    Some("%"),
+                    true,
+                ),
+                template_field(
+                    "min_open_net_edge_pct",
+                    "开仓净边际",
+                    "number",
+                    "0.04",
+                    Some("%"),
+                    true,
+                ),
+                template_field(
+                    "close_min_net_profit_pct",
+                    "平仓净利",
+                    "number",
+                    "0.03",
+                    Some("%"),
+                    true,
+                ),
+                template_field(
+                    "max_close_spread_pct",
+                    "最大平仓价差",
+                    "number",
+                    "0.08",
+                    Some("%"),
+                    true,
+                ),
+            ],
+        },
+    ]
+}
+
+fn exchange_slot(
+    slot_id: &str,
+    label: &str,
+    market_type: &str,
+    required: bool,
+) -> StrategyExchangeSlotView {
+    StrategyExchangeSlotView {
+        slot_id: slot_id.to_string(),
+        label: label.to_string(),
+        market_type: market_type.to_string(),
+        required,
+    }
+}
+
+fn template_field(
+    field_id: &str,
+    label: &str,
+    input_type: &str,
+    default_value: &str,
+    unit: Option<&str>,
+    required: bool,
+) -> StrategyTemplateFieldView {
+    StrategyTemplateFieldView {
+        field_id: field_id.to_string(),
+        label: label.to_string(),
+        input_type: input_type.to_string(),
+        default_value: default_value.to_string(),
+        unit: unit.map(str::to_string),
+        required,
+        options: Vec::new(),
+    }
+}
+
+fn template_select_field(
+    field_id: &str,
+    label: &str,
+    default_value: &str,
+    required: bool,
+    options: &[(&str, &str)],
+) -> StrategyTemplateFieldView {
+    StrategyTemplateFieldView {
+        field_id: field_id.to_string(),
+        label: label.to_string(),
+        input_type: "select".to_string(),
+        default_value: default_value.to_string(),
+        unit: None,
+        required,
+        options: options
+            .iter()
+            .map(|(value, label)| StrategyTemplateFieldOptionView {
+                value: (*value).to_string(),
+                label: (*label).to_string(),
+            })
+            .collect(),
+    }
+}
+
 pub async fn create_strategy(
     State(state): State<ControlApiState>,
     Json(request): Json<CreateStrategyRequest>,
@@ -556,15 +736,15 @@ pub async fn spot_arb_dashboard(
     legacy_strategy_detail_view(state, "spot_spot_taker_arbitrage").await
 }
 
-pub async fn cross_arb_dashboard(
+pub async fn unified_arb_dashboard(
     State(state): State<ControlApiState>,
 ) -> Json<LegacyDashboardReadView> {
-    legacy_strategy_detail_view(state, "cross_exchange_arbitrage").await
+    legacy_strategy_detail_view(state, "unified_arbitrage").await
 }
 
-pub async fn cross_arb_instruments(State(state): State<ControlApiState>) -> Json<Value> {
+pub async fn unified_arb_instruments(State(state): State<ControlApiState>) -> Json<Value> {
     let snapshot = state.snapshot().await;
-    let detail = legacy_strategy_detail(&snapshot, "cross_exchange_arbitrage");
+    let detail = legacy_strategy_detail(&snapshot, "unified_arbitrage");
     let instruments = detail
         .and_then(|detail| detail.get("instruments"))
         .cloned()
@@ -583,12 +763,11 @@ pub async fn cross_arb_instruments(State(state): State<ControlApiState>) -> Json
     })))
 }
 
-pub async fn cross_arb_market_snapshots(State(state): State<ControlApiState>) -> Json<Value> {
+pub async fn unified_arb_market_snapshots(State(state): State<ControlApiState>) -> Json<Value> {
     let snapshot = state.snapshot().await;
-    let snapshots =
-        legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "market_snapshots")
-            .or_else(|| legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "snapshots"))
-            .unwrap_or_else(|| Value::Array(Vec::new()));
+    let snapshots = legacy_strategy_field(&snapshot, "unified_arbitrage", "market_snapshots")
+        .or_else(|| legacy_strategy_field(&snapshot, "unified_arbitrage", "snapshots"))
+        .unwrap_or_else(|| Value::Array(Vec::new()));
     let coverage_ok = snapshots.as_array().is_some_and(|rows| !rows.is_empty());
     Json(read_models::secret_free_legacy_value(&json!({
         "schema_version": CONTROL_API_SCHEMA_VERSION,
@@ -875,7 +1054,7 @@ async fn legacy_cross_field(
     state: ControlApiState,
     field: &'static str,
 ) -> Json<LegacyDashboardReadView> {
-    legacy_strategy_field_view(state, "cross_exchange_arbitrage", field).await
+    legacy_strategy_field_view(state, "unified_arbitrage", field).await
 }
 
 async fn legacy_strategy_field_view(
@@ -904,7 +1083,7 @@ async fn legacy_scanner_field(
     field: &'static str,
 ) -> Json<LegacyDashboardReadView> {
     let snapshot = state.snapshot().await;
-    let data = legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "scanner")
+    let data = legacy_strategy_field(&snapshot, "unified_arbitrage", "scanner")
         .and_then(|scanner| scanner.get(field).cloned())
         .or_else(|| match field {
             "symbol_coverage" => Some(snapshot.symbols.scanner.symbol_coverage.clone()),
@@ -920,7 +1099,7 @@ async fn legacy_hedge_policy_field(
     field: &'static str,
 ) -> Json<LegacyDashboardReadView> {
     let snapshot = state.snapshot().await;
-    let data = legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "hedge_policy")
+    let data = legacy_strategy_field(&snapshot, "unified_arbitrage", "hedge_policy")
         .and_then(|policy| policy.get(field).cloned())
         .unwrap_or(Value::Null);
     legacy_view_from_value(snapshot.generated_at, data)

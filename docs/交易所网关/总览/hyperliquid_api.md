@@ -62,7 +62,7 @@
 - 费率/资金费：`metaAndAssetCtxs` 获取资金费率等参数；支付/收取结果可通过 `userFundings` 订阅或 `userFunding` 查询。
 
 ## 兼容性与后续实现提示
-- 现有 `retired exchange tree/hyperliquid.rs` 未启用且缺少 WS、批量单、成交/历史查询等能力，实现时应以本清单为目标，统一走 `/info` 与 `/exchange` 规范。
+- 现有 `crates/rustcta-exchange-gateway/src/adapters/hyperliquid/` 应以本清单为目标，统一走 `/info` 与 `/exchange` 规范补齐 WS、批量单、成交/历史查询等能力。
 - 单向持仓是交易所限制，若策略需要反手应显式平仓后再开反向，或使用 `reduceOnly` 避免反向加仓。
 - 对接时保持地址小写、`nonce` 使用 ms 级时间戳，失败时遵循官方限流（HTTP 429）退避；WS `userEvents`/`orderUpdates` 不可多重订阅。
 

@@ -225,13 +225,13 @@ impl GateIoGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
         self.ensure_optional_supported_market(request.market_type)?;
-        let market_type = request.market_type.unwrap_or(MarketType::Spot);
         let (tenant_id, account_id) =
             self.context_account(&request.context, "gateio.get_balances")?;
-        let endpoint = match market_type {
-            MarketType::Spot => "/spot/accounts",
-            MarketType::Perpetual => "/futures/usdt/accounts",
-            _ => unreachable!("checked by ensure_optional_supported_market"),
+        let (market_type, endpoint) = match request.market_type {
+            Some(MarketType::Spot) => (MarketType::Spot, "/spot/accounts"),
+            Some(MarketType::Perpetual) => (MarketType::Perpetual, "/futures/usdt/accounts"),
+            Some(_) => unreachable!("checked by ensure_optional_supported_market"),
+            None => (MarketType::Perpetual, "/unified/accounts"),
         };
         let value = self
             .send_signed_get("gateio.get_balances", endpoint, &HashMap::new())

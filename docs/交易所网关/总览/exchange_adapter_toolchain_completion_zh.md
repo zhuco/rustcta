@@ -403,7 +403,7 @@ Request-spec 必须校验：
 | `audit_gateway_adapters.py` | `scripts/audit_gateway_adapters.py` | 扫描 adapter、capability、endpoint mapping、fixture、request-spec 覆盖 |
 | `validate_exchange_endpoint_mapping.py` | `scripts/validate_exchange_endpoint_mapping.py` | 校验 endpoint mapping schema |
 | `sanitize_exchange_fixture.py` | `scripts/sanitize_exchange_fixture.py` | 脱敏真实响应 |
-| `exchange_live_probe` | `crates/rustcta-exchange-gateway/retired root bin directory/exchange_live_probe.rs` | 只读 live validation |
+| `exchange_live_probe` | `tools/ops` 或 `apps/gateway` 下的只读 probe 命令 | 只读 live validation |
 | `generate_exchange_capability_docs.py` | `scripts/generate_exchange_capability_docs.py` | 从 capability 和 endpoint mapping 生成文档 |
 
 只读 live probe 至少检查：
@@ -441,7 +441,8 @@ Request-spec 必须校验：
 
 - 37 个 adapter 全部在 inventory 中。
 - inventory 与 `crates/rustcta-exchange-gateway/src/adapters/` 目录一致。
-- 没有把 legacy `retired exchange tree/*` 当成本阶段新增范围。
+- 没有把旧 root exchange tree 当成本阶段新增范围；新增能力进入
+  `crates/rustcta-exchange-gateway/src/adapters/`。
 
 ### 阶段 1：Capability v2
 
@@ -691,7 +692,7 @@ cargo run -p rustcta-exchange-gateway --bin exchange_live_probe -- --read-only -
 | 5 | WebSocket runtime 基础设施 | `crates/rustcta-exchange-gateway/src/streams.rs`, `crates/rustcta-exchange-api/src/streams.rs` | `StreamSession`、`SubscriptionRegistry`、`SubscriptionAck`、`UnsubscribeRequest`、`HeartbeatPolicy`、`AuthRenewalPolicy`、`ListenKeyLease`、runtime 测试 | 依赖 1；不要迁移具体 adapter，只提供通用 runtime 和测试 |
 | 6 | Orderbook state machine 和 WS resync | `crates/rustcta-exchange-gateway/src/streams.rs`, `crates/rustcta-exchange-gateway/src/orderbook_state.rs` | snapshot/delta state machine、sequence gap、checksum hook、`ResyncReason`、测试 | 依赖 5；只做通用状态机，不改各 adapter parser |
 | 7 | REST reconciliation 和批量操作 planner | `crates/rustcta-exchange-gateway/src/reconciliation.rs`, `crates/rustcta-exchange-gateway/src/batch.rs`, `crates/rustcta-exchange-api/src/order.rs` | `ReconcilePlan`、`RetryReconcilePolicy`、`UnknownOrderPolicy`、`ClientOrderIdPolicy`、`BatchPlanner`、`BatchItemResult` | 依赖 3、4；保持现有 batch response 兼容 |
-| 8 | Audit、fixture sanitizer、live read-only validator | `scripts/audit_gateway_adapters.py`, `scripts/sanitize_exchange_fixture.py`, `crates/rustcta-exchange-gateway/retired root bin directory/exchange_live_probe.rs`, `docs/交易所网关/总览/exchange_adapter_toolchain_status_zh.md` | adapter 覆盖审计、fixture 脱敏工具、只读 live probe、状态文档生成入口 | 依赖 2 到 7；初版可只支持 Binance/OKX，后续 adapter 任务补数据 |
+| 8 | Audit、fixture sanitizer、live read-only validator | `scripts/audit_gateway_adapters.py`, `scripts/sanitize_exchange_fixture.py`, `tools/ops` 或 `apps/gateway` 下的只读 probe 命令, `docs/交易所网关/总览/exchange_adapter_toolchain_status_zh.md` | adapter 覆盖审计、fixture 脱敏工具、只读 live probe、状态文档生成入口 | 依赖 2 到 7；初版可只支持 Binance/OKX，后续 adapter 任务补数据 |
 
 ### Adapter 迁移任务 9-20
 

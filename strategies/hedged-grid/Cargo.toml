@@ -10,7 +10,13 @@ async-trait.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 rustcta-strategy-sdk.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+
+[[bin]]
+name = "hedged-grid-runtime"
+path = "src/bin/hedged_grid_runtime.rs"

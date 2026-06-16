@@ -207,15 +207,18 @@ pub(super) fn string_or_number(value: Option<&Value>) -> Option<String> {
 }
 
 pub(super) fn decimal_value_to_f64(value: Option<&Value>) -> ExchangeApiResult<Option<f64>> {
-    value
-        .map(|value| {
-            let text = string_or_number(Some(value)).unwrap_or_else(|| value.to_string());
-            text.parse::<f64>()
-                .map_err(|error| ExchangeApiError::InvalidRequest {
-                    message: format!("invalid Bybit decimal value {text}: {error}"),
-                })
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let text = string_or_number(Some(value)).unwrap_or_else(|| value.to_string());
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    text.parse::<f64>()
+        .map(Some)
+        .map_err(|error| ExchangeApiError::InvalidRequest {
+            message: format!("invalid Bybit decimal value {text}: {error}"),
         })
-        .transpose()
 }
 
 pub(super) fn value_as_i64(value: &Value) -> Option<i64> {

@@ -1,0 +1,12 @@
+dry_run: false
+enable_live_orders: true
+execution_endpoint: http://127.0.0.1:18081
+execution_market_type: perpetual
+grid_order_count: 2
+grid_spacing_bps: 25.0
+grid_spacing_mode: pct
+hedge_exchange: binance
+max_inventory_quote: '22'
+order_notional_usdt: 5.5
+spot_exchange: binance
+symbol: SOLUSDC

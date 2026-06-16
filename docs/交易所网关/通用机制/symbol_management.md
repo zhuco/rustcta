@@ -1,7 +1,13 @@
 # Symbol Management
 
-RustCTA keeps the existing market symbol utilities, and adds a unified exchange symbol registry in
-`retired exchange tree/symbol_registry.rs` for Spot and Perpetual order validation.
+RustCTA keeps market symbol utilities in the shared exchange contracts:
+
+- `crates/rustcta-types/src/lib.rs` owns `ExchangeSymbol` and canonical market
+  identifiers.
+- `crates/rustcta-exchange-api/src/market.rs` owns `SymbolRulesRequest` and
+  `SymbolRulesResponse`.
+- `crates/rustcta-exchange-gateway/src/adapters/<exchange>/` maps venue
+  symbols and rules.
 
 `SymbolKey` is keyed by:
 
@@ -13,7 +19,7 @@ Market type semantics are defined in [market_type_contract.md](market_type_contr
 Perpetual symbols must use `MarketType::Perpetual`; `MarketType::Futures` is reserved for
 dated/delivery futures.
 
-The registry also exposes typed projections:
+The shared contracts expose typed projections:
 
 - `SpotSymbol` for spot instruments
 - `PerpetualSymbol` for perpetual instruments
@@ -38,7 +44,7 @@ Perpetual example:
   richer common instrument model.
 - OKX swap symbol: `BTC-USDT-SWAP`
 
-The registry supports:
+The symbol/rules flow supports:
 
 - `internal_to_exchange(exchange, market_type, internal_symbol)`
 - `exchange_to_internal(exchange, market_type, exchange_symbol)`

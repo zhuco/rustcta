@@ -7,17 +7,21 @@ use rustcta_exchange_api::{
     CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
     ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
     OrderListConditionalLeg, OrderListLegType, OrderListOrderLeg, OrderListRequest,
-    OrderListResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
-    RecentFillsRequest, RecentFillsResponse, ReconcilePlan, ReconcileTrigger, RetryReconcilePolicy,
-    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    OrderListResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionMode,
+    PositionsRequest, PositionsResponse, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, ReconcilePlan,
+    ReconcileTrigger, RetryReconcilePolicy, SymbolAccountConfig, SymbolAccountConfigRequest,
+    SymbolAccountConfigResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
-    ExchangeError, ExchangeErrorClass, MarketType, OrderSide, OrderType, PositionSide,
+    AssetBalance, ExchangeBalance, ExchangeError, ExchangeErrorClass, MarketType, OrderSide,
+    OrderType, PositionSide, SchemaVersion,
 };
 use serde_json::Value;
 
-use super::parser::normalize_binance_symbol;
+use super::parser::{
+    decimal_text_to_f64, normalize_binance_symbol, string_or_number, validation_error,
+};
 use super::private_parser::{
     parse_account_balances, parse_binance_cancel_all_orders, parse_fee_snapshots,
     parse_open_orders, parse_order_state, parse_positions, parse_recent_fills,
@@ -360,7 +364,8 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        let market_type = request.market_type.unwrap_or(MarketType::Spot);
+        let account_level = request.market_type.is_none();
+        let market_type = request.market_type.unwrap_or(MarketType::Perpetual);
         self.ensure_supported_market(market_type)?;
         let (tenant_id, account_id) = self.context_account(&request.context)?;
         let endpoint = match market_type {
@@ -368,27 +373,142 @@ impl BinanceGatewayAdapter {
             MarketType::Perpetual => "/fapi/v2/balance",
             _ => unreachable!("checked by ensure_supported_market"),
         };
-        let value = self
-            .send_signed_get_for_market(
-                "binance.get_balances",
+        let request_exchange = request.exchange.clone();
+        let request_id = request.context.request_id.clone();
+        let balances = if market_type == MarketType::Perpetual {
+            if account_level {
+                match self
+                    .get_portfolio_balances(tenant_id.clone(), account_id.clone(), &request.assets)
+                    .await
+                {
+                    Ok(portfolio_balances)
+                        if stable_balance_total(&portfolio_balances) > f64::EPSILON =>
+                    {
+                        portfolio_balances
+                    }
+                    Ok(_) | Err(_) => {
+                        let value = self
+                            .send_signed_get_for_market(
+                                "binance.get_balances",
+                                market_type,
+                                endpoint,
+                                &HashMap::new(),
+                            )
+                            .await?;
+                        parse_account_balances(
+                            &self.exchange_id,
+                            tenant_id,
+                            account_id,
+                            market_type,
+                            &request.assets,
+                            &value,
+                        )?
+                    }
+                }
+            } else {
+                let regular = self
+                    .send_signed_get_for_market(
+                        "binance.get_balances",
+                        market_type,
+                        endpoint,
+                        &HashMap::new(),
+                    )
+                    .await
+                    .and_then(|value| {
+                        parse_account_balances(
+                            &self.exchange_id,
+                            tenant_id.clone(),
+                            account_id.clone(),
+                            market_type,
+                            &request.assets,
+                            &value,
+                        )
+                    });
+                match regular {
+                    Ok(balances) if stable_balance_total(&balances) > f64::EPSILON => balances,
+                    Ok(balances) => match self
+                        .get_portfolio_balances(
+                            tenant_id.clone(),
+                            account_id.clone(),
+                            &request.assets,
+                        )
+                        .await
+                    {
+                        Ok(portfolio_balances)
+                            if stable_balance_total(&portfolio_balances) > f64::EPSILON =>
+                        {
+                            portfolio_balances
+                        }
+                        Ok(_) | Err(_) => balances,
+                    },
+                    Err(error) => match self
+                        .get_portfolio_balances(
+                            tenant_id.clone(),
+                            account_id.clone(),
+                            &request.assets,
+                        )
+                        .await
+                    {
+                        Ok(portfolio_balances) => portfolio_balances,
+                        Err(_) => return Err(error),
+                    },
+                }
+            }
+        } else {
+            let value = self
+                .send_signed_get_for_market(
+                    "binance.get_balances",
+                    market_type,
+                    endpoint,
+                    &HashMap::new(),
+                )
+                .await?;
+            parse_account_balances(
+                &self.exchange_id,
+                tenant_id,
+                account_id,
                 market_type,
-                endpoint,
+                &request.assets,
+                &value,
+            )?
+        };
+        Ok(BalancesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request_exchange, request_id),
+            balances,
+        })
+    }
+
+    async fn get_portfolio_balances(
+        &self,
+        tenant_id: rustcta_exchange_api::TenantId,
+        account_id: rustcta_exchange_api::AccountId,
+        assets: &[String],
+    ) -> ExchangeApiResult<Vec<ExchangeBalance>> {
+        let account = self
+            .send_signed_get(
+                "binance.get_portfolio_balances",
+                "/sapi/v1/portfolio/account",
                 &HashMap::new(),
             )
             .await?;
-        let balances = parse_account_balances(
-            &self.exchange_id,
-            tenant_id,
-            account_id,
-            market_type,
-            &request.assets,
-            &value,
-        )?;
-        Ok(BalancesResponse {
-            schema_version: EXCHANGE_API_SCHEMA_VERSION,
-            metadata: response_metadata(request.exchange, request.context.request_id),
-            balances,
-        })
+        if let Some(total) = portfolio_account_total(&account)? {
+            return Ok(single_portfolio_balance(
+                &self.exchange_id,
+                tenant_id,
+                account_id,
+                "USDT",
+                total,
+            )?);
+        }
+        let value = self
+            .send_signed_get(
+                "binance.get_portfolio_balances",
+                "/sapi/v1/portfolio/balance",
+                &HashMap::new(),
+            )
+            .await?;
+        parse_portfolio_balance_rows(&self.exchange_id, tenant_id, account_id, assets, &value)
     }
 
     pub(super) async fn get_positions_impl(
@@ -664,6 +784,188 @@ impl BinanceGatewayAdapter {
             fills,
         })
     }
+
+    pub(super) async fn get_symbol_account_config_impl(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        if request.symbol.market_type != MarketType::Perpetual {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "binance.symbol_account_config_non_usdm",
+            });
+        }
+        let value = self
+            .send_signed_get_for_market(
+                "binance.get_position_mode",
+                MarketType::Perpetual,
+                "/fapi/v1/positionSide/dual",
+                &HashMap::new(),
+            )
+            .await?;
+        Ok(SymbolAccountConfigResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(
+                request.symbol.exchange.clone(),
+                request.context.request_id,
+            ),
+            config: SymbolAccountConfig {
+                symbol: request.symbol,
+                position_mode: Some(parse_binance_position_mode(&value)?),
+                margin_mode: None,
+                leverage: None,
+                max_leverage: None,
+                updated_at: chrono::Utc::now(),
+            },
+        })
+    }
+}
+
+fn stable_balance_total(balances: &[ExchangeBalance]) -> f64 {
+    balances
+        .iter()
+        .flat_map(|balance| balance.balances.iter())
+        .filter(|balance| stable_asset(&balance.asset))
+        .map(|balance| balance.total)
+        .sum()
+}
+
+fn portfolio_account_total(value: &Value) -> ExchangeApiResult<Option<f64>> {
+    for field in [
+        "totalEquity",
+        "totalMarginBalance",
+        "totalWalletBalance",
+        "accountEquity",
+    ] {
+        if let Some(text) = string_or_number(value.get(field)) {
+            let total = decimal_text_to_f64(&text)?;
+            if total > f64::EPSILON {
+                return Ok(Some(total));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn single_portfolio_balance(
+    exchange_id: &rustcta_exchange_api::ExchangeId,
+    tenant_id: rustcta_exchange_api::TenantId,
+    account_id: rustcta_exchange_api::AccountId,
+    asset: &str,
+    total: f64,
+) -> ExchangeApiResult<Vec<ExchangeBalance>> {
+    Ok(vec![ExchangeBalance {
+        schema_version: SchemaVersion::current(),
+        tenant_id,
+        account_id,
+        exchange_id: exchange_id.clone(),
+        market_type: MarketType::Perpetual,
+        balances: vec![AssetBalance::new(asset, total, total, 0.0).map_err(validation_error)?],
+        observed_at: chrono::Utc::now(),
+    }])
+}
+
+fn parse_portfolio_balance_rows(
+    exchange_id: &rustcta_exchange_api::ExchangeId,
+    tenant_id: rustcta_exchange_api::TenantId,
+    account_id: rustcta_exchange_api::AccountId,
+    assets: &[String],
+    value: &Value,
+) -> ExchangeApiResult<Vec<ExchangeBalance>> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: "binance portfolio balance response is not an array".to_string(),
+        })?;
+    let requested = assets
+        .iter()
+        .map(|asset| asset.trim().to_ascii_uppercase())
+        .filter(|asset| !asset.is_empty())
+        .collect::<Vec<_>>();
+    let mut balances = Vec::new();
+    for row in rows {
+        let asset = row
+            .get("asset")
+            .and_then(Value::as_str)
+            .unwrap_or("USDT")
+            .trim()
+            .to_ascii_uppercase();
+        if !stable_asset(&asset) || (!requested.is_empty() && !requested.contains(&asset)) {
+            continue;
+        }
+        let Some(total) = portfolio_balance_row_total(row)? else {
+            continue;
+        };
+        if total <= f64::EPSILON && requested.is_empty() {
+            continue;
+        }
+        let available = portfolio_balance_row_available(row)?.unwrap_or(total);
+        balances.push(
+            AssetBalance::new(asset, total, available, (total - available).max(0.0))
+                .map_err(validation_error)?,
+        );
+    }
+    Ok(vec![ExchangeBalance {
+        schema_version: SchemaVersion::current(),
+        tenant_id,
+        account_id,
+        exchange_id: exchange_id.clone(),
+        market_type: MarketType::Perpetual,
+        balances,
+        observed_at: chrono::Utc::now(),
+    }])
+}
+
+fn portfolio_balance_row_total(row: &Value) -> ExchangeApiResult<Option<f64>> {
+    for field in [
+        "totalWalletBalance",
+        "walletBalance",
+        "umWalletBalance",
+        "cmWalletBalance",
+        "crossMarginFree",
+    ] {
+        if let Some(text) = string_or_number(row.get(field)) {
+            return Ok(Some(decimal_text_to_f64(&text)?));
+        }
+    }
+    Ok(None)
+}
+
+fn portfolio_balance_row_available(row: &Value) -> ExchangeApiResult<Option<f64>> {
+    for field in ["crossMarginFree", "availableBalance", "available"] {
+        if let Some(text) = string_or_number(row.get(field)) {
+            return Ok(Some(decimal_text_to_f64(&text)?));
+        }
+    }
+    Ok(None)
+}
+
+fn stable_asset(asset: &str) -> bool {
+    matches!(
+        asset.trim().to_ascii_uppercase().as_str(),
+        "USDT" | "USDC" | "BUSD" | "FDUSD"
+    )
+}
+
+fn parse_binance_position_mode(value: &Value) -> ExchangeApiResult<PositionMode> {
+    let dual = value
+        .get("dualSidePosition")
+        .and_then(|value| {
+            value
+                .as_bool()
+                .or_else(|| value.as_str().map(|text| text.eq_ignore_ascii_case("true")))
+        })
+        .ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: format!(
+                "binance positionSide/dual response missing dualSidePosition: {value}"
+            ),
+        })?;
+    Ok(if dual {
+        PositionMode::Hedge
+    } else {
+        PositionMode::OneWay
+    })
 }
 
 fn binance_place_order_params(
@@ -681,15 +983,12 @@ fn binance_place_order_params(
     }
     let mut params = HashMap::new();
     params.insert("side".to_string(), binance_side(request.side).to_string());
-    params.insert(
-        "type".to_string(),
-        binance_order_type(
-            request.order_type,
-            request.post_only,
-            request.symbol.market_type,
-        )
-        .to_string(),
+    let order_type = binance_order_type(
+        request.order_type,
+        request.post_only,
+        request.symbol.market_type,
     );
+    params.insert("type".to_string(), order_type.to_string());
     if request.order_type == OrderType::Market {
         if let Some(quote_quantity) = request.quote_quantity.as_deref() {
             insert_non_empty(&mut params, "quoteOrderQty", quote_quantity)?;
@@ -705,11 +1004,13 @@ fn binance_place_order_params(
                 message: "binance limit-style order requires price".to_string(),
             })?;
         insert_non_empty(&mut params, "price", price)?;
-        params.insert(
-            "timeInForce".to_string(),
-            binance_time_in_force(request.order_type, request.time_in_force, request.post_only)
-                .to_string(),
-        );
+        if !(request.symbol.market_type == MarketType::Spot && order_type == "LIMIT_MAKER") {
+            params.insert(
+                "timeInForce".to_string(),
+                binance_time_in_force(request.order_type, request.time_in_force, request.post_only)
+                    .to_string(),
+            );
+        }
     }
     if let Some(client_order_id) = request.client_order_id.as_deref() {
         insert_non_empty(&mut params, "newClientOrderId", client_order_id)?;

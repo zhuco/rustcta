@@ -55,16 +55,10 @@ fn print_legacy_spec_should_generate_basic_fields() {
 fn validate_spec_should_accept_checked_in_small_runtime_specs() {
     for (spec_name, strategy_id, strategy_kind, arg_count) in [
         (
-            "cross_arb_live.spec.json",
-            "cross_arb_live",
-            "cross_exchange_arbitrage",
-            22,
-        ),
-        (
-            "funding_arb_live.spec.json",
-            "funding_arb_live",
-            "funding_arbitrage",
-            10,
+            "unified_arb_live.spec.json",
+            "unified_arb_live",
+            "unified_arbitrage",
+            25,
         ),
         (
             "spot_spot_live_dry_run.spec.json",
@@ -138,7 +132,7 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
     }
 }
 
-fn assert_root_free_supervisor_command(spec_name: &str, command: &str, args: &[Value]) {
+fn assert_root_free_supervisor_command(spec_name: &str, _command: &str, args: &[Value]) {
     let arg_strings = args
         .iter()
         .map(|arg| arg.as_str().expect("supervisor arg should be a string"))
@@ -147,8 +141,6 @@ fn assert_root_free_supervisor_command(spec_name: &str, command: &str, args: &[V
         !arg_strings.windows(2).any(|window| matches!(
             window,
             ["--bin", "rustcta"]
-                | ["--bin", "cross_arb_live"]
-                | ["--bin", "funding_arb_live"]
                 | ["--bin", "account_position_reporter"]
                 | ["--bin", "trend_report"]
                 | ["--bin", "exchange_order_canary"]
@@ -160,20 +152,11 @@ fn assert_root_free_supervisor_command(spec_name: &str, command: &str, args: &[V
     );
 
     match spec_name {
-        "cross_arb_live.spec.json" => {
-            assert_eq!(
-                command, "target/release/cross-exchange-arbitrage-live-runner",
-                "{spec_name} should launch the release live runner"
-            );
-            assert!(arg_strings.contains(&"direct_websocket"));
-            assert!(arg_strings.contains(&"--trade-ledger-path"));
-            assert!(arg_strings.contains(&"logs/cross_exchange_arbitrage/trade_events.jsonl"));
-            assert!(!arg_strings.contains(&"--enable-live-trading"));
-        }
-        "funding_arb_live.spec.json" => {
+        "unified_arb_live.spec.json" => {
             assert!(arg_strings.contains(&"-p"));
-            assert!(arg_strings.contains(&"rustcta-strategy-funding-arbitrage"));
-            assert!(arg_strings.contains(&"funding-arbitrage-runtime"));
+            assert!(arg_strings.contains(&"rustcta-strategy-unified-arbitrage"));
+            assert!(arg_strings.contains(&"unified-arbitrage-runtime"));
+            assert!(arg_strings.contains(&"--command-queue"));
         }
         "spot_spot_live_dry_run.spec.json" => {
             assert!(arg_strings.contains(&"-p"));

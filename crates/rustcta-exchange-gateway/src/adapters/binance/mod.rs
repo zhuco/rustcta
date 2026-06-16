@@ -10,8 +10,8 @@ use rustcta_exchange_api::{
     OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
     OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
     PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolAccountConfigRequest,
+    SymbolAccountConfigResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -256,6 +256,13 @@ impl GatewayAdapter for BinanceGatewayAdapter {
             rate_limit_used: None,
             message: Some("binance spot and USD-M perpetual REST gateway adapter".to_string()),
         }
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        self.get_symbol_account_config_impl(request).await
     }
 }
 

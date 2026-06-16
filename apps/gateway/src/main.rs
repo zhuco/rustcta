@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use rustcta_exchange_gateway::gateway_router;
-use rustcta_gateway_app::GatewayAppConfig;
+use rustcta_gateway_app::{strategy_platform_router, GatewayAppConfig};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -18,6 +18,7 @@ async fn main() -> Result<()> {
         config.bind_addr,
         config.adapters.join(",")
     );
-    axum::serve(listener, gateway_router(gateway)).await?;
+    let app = gateway_router(gateway.clone()).merge(strategy_platform_router(gateway));
+    axum::serve(listener, app).await?;
     Ok(())
 }

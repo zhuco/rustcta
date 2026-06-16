@@ -551,8 +551,8 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
     }
 
     let cross_detail = legacy
-        .get("cross_arb_dashboard")
-        .or_else(|| legacy.get("cross_arb"))
+        .get("unified_arb_dashboard")
+        .or_else(|| legacy.get("unified_arb"))
         .filter(|value| value.is_object())
         .map(secret_free_value)
         .unwrap_or_else(|| {
@@ -562,14 +562,14 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
                 (
                     "summary",
                     legacy
-                        .get("cross_arb_summary")
+                        .get("unified_arb_summary")
                         .cloned()
                         .or_else(|| legacy.get("summary").cloned()),
                 ),
                 (
                     "settings",
                     legacy
-                        .get("cross_arb_settings")
+                        .get("unified_arb_settings")
                         .cloned()
                         .or_else(|| legacy.get("settings").cloned()),
                 ),
@@ -595,7 +595,7 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
                 (
                     "market_snapshots",
                     legacy
-                        .get("cross_arb_market_snapshots")
+                        .get("unified_arb_market_snapshots")
                         .cloned()
                         .or_else(|| legacy.get("market_snapshots").cloned()),
                 ),
@@ -640,7 +640,7 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
         snapshots.push(StrategySnapshotEnvelope {
             schema_version: CONTROL_API_SCHEMA_VERSION,
             strategy_id: strategy_id.to_string(),
-            strategy_kind: "cross_exchange_arbitrage".to_string(),
+            strategy_kind: "unified_arbitrage".to_string(),
             run_id: None,
             status: None,
             generated_at,

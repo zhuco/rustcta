@@ -8,9 +8,9 @@ REMOTE_LOG_DIR="${RUSTCTA_REMOTE_LOG_DIR:-$REMOTE_ROOT/logs}"
 LOCAL_LOG_DIR="${RUSTCTA_LOCAL_LOG_DIR:-logs/server}"
 SERVICE_PREFIX="${RUSTCTA_SERVICE_PREFIX:-}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
-DEFAULT_LIVE_SERVICE="${RUSTCTA_LIVE_SERVICE:-cross-arb-live}"
-DEFAULT_LIVE_BIN="${RUSTCTA_LIVE_BIN:-cross-exchange-arbitrage-live-runner}"
-DEFAULT_LIVE_CONFIG="${RUSTCTA_LIVE_CONFIG:-config/cross_exchange_arbitrage_usdt.yml}"
+DEFAULT_LIVE_SERVICE="${RUSTCTA_LIVE_SERVICE:-unified-arb-live}"
+DEFAULT_LIVE_BIN="${RUSTCTA_LIVE_BIN:-unified-arbitrage-runtime}"
+DEFAULT_LIVE_CONFIG="${RUSTCTA_LIVE_CONFIG:-config/unified_arbitrage_usdt.yml}"
 DEFAULT_MONITOR_SERVICE="${RUSTCTA_MONITOR_SERVICE:-control-api}"
 DEFAULT_MONITOR_BIN="${RUSTCTA_MONITOR_BIN:-rustcta-control-api}"
 DEFAULT_MONITOR_REMOTE_BIN_DIR="${RUSTCTA_MONITOR_REMOTE_BIN_DIR:-$REMOTE_BIN_DIR}"
@@ -22,7 +22,7 @@ DEFAULT_WEB_STATIC_DIR="${RUSTCTA_WEB_STATIC_DIR:-web-ui/dioxus/dist}"
 DEFAULT_WEB_REMOTE_STATIC_DIR="${RUSTCTA_WEB_REMOTE_STATIC_DIR:-$REMOTE_ROOT/web-ui/dioxus/dist}"
 DEFAULT_SYSTEMD_USER_DIR="${RUSTCTA_SYSTEMD_USER_DIR:-config/systemd/user}"
 DEFAULT_REMOTE_SYSTEMD_USER_DIR="${RUSTCTA_REMOTE_SYSTEMD_USER_DIR:-/home/cta/.config/systemd/user}"
-OBSOLETE_SERVICES=(${RUSTCTA_OBSOLETE_SERVICES:-cross-arb-ws-observe control-api-8091})
+OBSOLETE_SERVICES=(${RUSTCTA_OBSOLETE_SERVICES:-control-api-8091})
 
 usage() {
   cat <<'USAGE'
@@ -46,15 +46,15 @@ Usage:
   scripts/rustcta_server.sh clean-stack
   scripts/rustcta_server.sh deploy-monitor [cargo args...]
   scripts/rustcta_server.sh deploy-control-panel [cargo args...]
-  scripts/rustcta_server.sh deploy-cross-arb-live-stack [cargo args...]
+  scripts/rustcta_server.sh deploy-unified-arb-live-stack [cargo args...]
 
 Defaults:
   RUSTCTA_SSH_TARGET=cta@45.77.253.180
   RUSTCTA_REMOTE_ROOT=/home/cta/rustcta
   RUSTCTA_REMOTE_BIN_DIR=/home/cta/rustcta/target/release
-  RUSTCTA_LIVE_SERVICE=cross-arb-live
-  RUSTCTA_LIVE_BIN=cross-exchange-arbitrage-live-runner
-  RUSTCTA_LIVE_CONFIG=config/cross_exchange_arbitrage_usdt.yml
+  RUSTCTA_LIVE_SERVICE=unified-arb-live
+  RUSTCTA_LIVE_BIN=unified-arbitrage-runtime
+  RUSTCTA_LIVE_CONFIG=config/unified_arbitrage_usdt.yml
   RUSTCTA_MONITOR_SERVICE=control-api
   RUSTCTA_MONITOR_BIN=rustcta-control-api
   RUSTCTA_MONITOR_REMOTE_BIN_DIR=/home/cta/rustcta/target/release
@@ -66,21 +66,21 @@ Defaults:
   RUSTCTA_WEB_REMOTE_STATIC_DIR=/home/cta/rustcta/web-ui/dioxus/dist
   RUSTCTA_SYSTEMD_USER_DIR=config/systemd/user
   RUSTCTA_REMOTE_SYSTEMD_USER_DIR=/home/cta/.config/systemd/user
-  RUSTCTA_OBSOLETE_SERVICES="cross-arb-ws-observe control-api-8091"
+  RUSTCTA_OBSOLETE_SERVICES="control-api-8091"
 
 Examples:
   scripts/rustcta_server.sh check
-  scripts/rustcta_server.sh logs cross-arb-live 200
-  scripts/rustcta_server.sh follow cross-arb-live
-  scripts/rustcta_server.sh build cross-exchange-arbitrage-live-runner
-  scripts/rustcta_server.sh deploy-bin cross-exchange-arbitrage-live-runner
+  scripts/rustcta_server.sh logs unified-arb-live 200
+  scripts/rustcta_server.sh follow unified-arb-live
+  scripts/rustcta_server.sh build unified-arbitrage-runtime
+  scripts/rustcta_server.sh deploy-bin unified-arbitrage-runtime
   scripts/rustcta_server.sh deploy-live
   scripts/rustcta_server.sh deploy-live-config
   scripts/rustcta_server.sh deploy-systemd-units
   scripts/rustcta_server.sh clean-stack
   scripts/rustcta_server.sh deploy-monitor
   scripts/rustcta_server.sh deploy-control-panel
-  scripts/rustcta_server.sh deploy-cross-arb-live-stack
+  scripts/rustcta_server.sh deploy-unified-arb-live-stack
 USAGE
 }
 
@@ -159,7 +159,14 @@ deploy_systemd_units() {
     units+=("$DEFAULT_SYSTEMD_USER_DIR/$(service_name "$DEFAULT_GATEWAY_SERVICE")")
   fi
   rsync -av "${units[@]}" "$SSH_TARGET:$DEFAULT_REMOTE_SYSTEMD_USER_DIR/"
-  remote "systemctl --user daemon-reload && systemctl --user enable $(service_name "$DEFAULT_LIVE_SERVICE") $(service_name "$DEFAULT_MONITOR_SERVICE")"
+  local enable_units=(
+    "$(service_name "$DEFAULT_LIVE_SERVICE")"
+    "$(service_name "$DEFAULT_MONITOR_SERVICE")"
+  )
+  if [[ -f "$DEFAULT_SYSTEMD_USER_DIR/$(service_name "$DEFAULT_GATEWAY_SERVICE")" ]]; then
+    enable_units+=("$(service_name "$DEFAULT_GATEWAY_SERVICE")")
+  fi
+  remote "systemctl --user daemon-reload && systemctl --user enable ${enable_units[*]}"
 }
 
 remote_unit_exists() {
@@ -375,7 +382,7 @@ case "$cmd" in
   deploy-control-panel)
     deploy_control_panel "$@"
     ;;
-  deploy-cross-arb-live-stack)
+  deploy-unified-arb-live-stack)
     deploy_live_stack "$@"
     ;;
   ""|-h|--help|help)

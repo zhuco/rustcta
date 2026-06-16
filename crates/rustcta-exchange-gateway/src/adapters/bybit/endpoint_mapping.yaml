@@ -138,7 +138,7 @@ endpoints:
     support: spec_only
     response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bybit/open_interest.json }
   - operation: get_balances
-    product: perpetual
+    product: spot_perpetual
     transport: rest
     method: GET
     path: /v5/account/wallet-balance

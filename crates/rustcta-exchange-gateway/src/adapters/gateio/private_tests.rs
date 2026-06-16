@@ -32,6 +32,57 @@ async fn gateio_adapter_should_keep_private_operations_unsupported_without_crede
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
 }
 
+#[tokio::test]
+async fn gateio_adapter_should_query_unified_balances_when_market_type_is_omitted() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "user_id": 10001,
+        "balances": {
+            "USDT": {
+                "available": "12",
+                "freeze": "1",
+                "equity": "13"
+            },
+            "BTC": {
+                "available": "0.1",
+                "freeze": "0",
+                "equity": "0.1"
+            }
+        },
+        "unified_account_total_equity": "13"
+    })])
+    .await;
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("gate-key".to_string()),
+        api_secret: Some("gate-secret".to_string()),
+        enabled_private_rest: true,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let balances = adapter
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("unified-balances"),
+            exchange: exchange_id(),
+            market_type: None,
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("balances");
+    assert_eq!(balances.balances.len(), 1);
+    assert_eq!(balances.balances[0].market_type, MarketType::Perpetual);
+    assert_eq!(balances.balances[0].balances.len(), 1);
+    assert_eq!(balances.balances[0].balances[0].asset, "USDT");
+    assert_eq!(balances.balances[0].balances[0].total, 13.0);
+    assert_eq!(balances.balances[0].balances[0].available, 12.0);
+    assert_eq!(balances.balances[0].balances[0].locked, 1.0);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_signed_request(&requests[0], "/unified/accounts");
+}
+
 #[test]
 fn gateio_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {

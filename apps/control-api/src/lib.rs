@@ -11,7 +11,7 @@ use rustcta_control_api::{
     router, ControlApiState, CreateStrategyRequest, StrategyProcessView, CONTROL_API_SCHEMA_VERSION,
 };
 use rustcta_event_ledger::JsonlLedger;
-use rustcta_supervisor::LifecycleCommandRecord;
+use rustcta_supervisor::{LifecycleCommandRecord, SupervisorError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -26,11 +26,11 @@ use tokio_tungstenite::connect_async;
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8091";
 const DEFAULT_TENANT_ID: &str = "local";
 const DEFAULT_SUPERVISOR_REGISTRY_PATH: &str = "run/supervisor/registry.json";
-const DEFAULT_LOCAL_CREDENTIAL_STATUS_STORE: &str = "data/control_api/local_credentials.env";
+const DEFAULT_LOCAL_CREDENTIAL_STATUS_STORE: &str = "data/control_api/exchange_api_keys.env";
 const DEFAULT_ACCOUNTS_CONFIG: &str = "config/accounts.yml";
 const DEFAULT_STRATEGY_LOG_TAIL_LINES: usize = 800;
 const DEFAULT_STRATEGY_LOG_TAIL_BYTES: usize = 256 * 1024;
-const CROSS_ARB_STRATEGY_ID: &str = "cross_arb_live";
+const UNIFIED_ARB_STRATEGY_ID: &str = "unified_arb_live";
 const LOCAL_STRATEGY_CONFIG_REF: &str = "local-agent:strategy-config";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +115,7 @@ impl ControlApiAppConfig {
                 &vars,
                 "RUSTCTA_CONTROL_API_CREDENTIAL_STATUS_STORE",
             )
+            .or_else(|| path_value(&vars, "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE"))
             .or_else(|| path_value(&vars, "EXCHANGE_API_KEY_STORE"))
             .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCAL_CREDENTIAL_STATUS_STORE)),
             accounts_config: path_value(&vars, "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG")
@@ -163,10 +164,10 @@ impl ControlApiAppConfig {
     pub fn build_router(&self) -> Result<Router> {
         let state = self.build_state()?;
         let mut api = router(state.clone());
-        api = api.merge(local_credentials_router(LocalCredentialState {
-            credential_status_store: self.credential_status_store.clone(),
-            accounts_config: self.accounts_config.clone(),
-        }));
+        api = api.merge(local_credentials_router(LocalCredentialState::new(
+            self.credential_status_store.clone(),
+            self.accounts_config.clone(),
+        )));
         if self.local_agent.is_some() {
             api = api.merge(local_mutation_router(state.clone()));
         }
@@ -176,6 +177,8 @@ impl ControlApiAppConfig {
                 side_effects.clone(),
                 state,
             )));
+        } else {
+            api = api.merge(local_empty_balance_history_router());
         }
         let app = match &self.static_dir {
             Some(static_dir) => {
@@ -190,7 +193,7 @@ impl ControlApiAppConfig {
         Ok(app)
     }
 
-    pub async fn clean_cross_arb_exchange_config_on_startup(&self) -> Result<()> {
+    pub async fn clean_unified_arb_exchange_config_on_startup(&self) -> Result<()> {
         let (Some(agent), Some(side_effects)) = (&self.local_agent, &self.local_side_effects)
         else {
             return Ok(());
@@ -202,11 +205,11 @@ impl ControlApiAppConfig {
         let state =
             LocalSideEffectState::new(agent.clone(), side_effects.clone(), self.build_state()?);
         let operation_id = local_operation_id();
-        match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+        match load_unified_arb_exchange_config(&state, &operation_id, true).await {
             Ok(view) => {
                 if view.cleaned_on_read {
                     eprintln!(
-                        "rustcta-control-api cleaned cross-arb exchange config on startup: cleaned_invalid_count={} removed_exchanges={:?}",
+                        "rustcta-control-api cleaned unified-arb exchange config on startup: cleaned_invalid_count={} removed_exchanges={:?}",
                         view.cleaned_invalid_count, view.removed_exchanges
                     );
                 }
@@ -217,7 +220,7 @@ impl ControlApiAppConfig {
                     .and_then(Value::as_str)
                     .unwrap_or("unknown");
                 eprintln!(
-                    "rustcta-control-api skipped cross-arb exchange config startup cleanup: http_status={} status={}",
+                    "rustcta-control-api skipped unified-arb exchange config startup cleanup: http_status={} status={}",
                     status_code, status
                 );
             }
@@ -329,6 +332,19 @@ struct EndpointLatencyResult {
 struct LocalCredentialState {
     credential_status_store: PathBuf,
     accounts_config: PathBuf,
+    checks: Arc<Mutex<BTreeMap<String, ExchangeAccountCheck>>>,
+    restart_required: Arc<Mutex<bool>>,
+}
+
+impl LocalCredentialState {
+    fn new(credential_status_store: PathBuf, accounts_config: PathBuf) -> Self {
+        Self {
+            credential_status_store,
+            accounts_config,
+            checks: Arc::new(Mutex::new(BTreeMap::new())),
+            restart_required: Arc::new(Mutex::new(false)),
+        }
+    }
 }
 
 impl LocalSideEffectState {
@@ -349,6 +365,7 @@ impl LocalSideEffectState {
 fn local_mutation_router(state: ControlApiState) -> Router {
     Router::new()
         .route("/api/strategies", post(local_create_strategy))
+        .route("/api/strategies/:id", delete(local_delete_strategy))
         .route("/api/commands", post(local_command))
         .route("/api/strategies/:id/command", post(local_strategy_command))
         .with_state(state)
@@ -367,22 +384,23 @@ fn local_agent_router(state: LocalSideEffectState) -> Router {
             get(local_agent_strategy_config_draft).post(local_agent_strategy_config),
         )
         .route(
-            "/api/local-agent/cross-arb/exchanges",
-            get(local_agent_cross_arb_exchanges).post(local_agent_save_cross_arb_exchanges),
+            "/api/local-agent/unified-arb/exchanges",
+            get(local_agent_unified_arb_exchanges).post(local_agent_save_unified_arb_exchanges),
         )
         .route(
-            "/api/local-agent/cross-arb/settings",
-            get(local_agent_cross_arb_settings).post(local_agent_save_cross_arb_settings),
+            "/api/local-agent/unified-arb/settings",
+            get(local_agent_unified_arb_settings).post(local_agent_save_unified_arb_settings),
         )
         .route(
-            "/api/local-agent/cross-arb/exchanges/:exchange",
-            delete(local_agent_delete_cross_arb_exchange),
+            "/api/local-agent/unified-arb/exchanges/:exchange",
+            delete(local_agent_delete_unified_arb_exchange),
         )
         .route("/api/local-agent/commands", post(local_agent_command))
         .route(
             "/api/local-agent/history/:kind/status",
             get(local_agent_history_status),
         )
+        .route("/api/balance-history", get(local_agent_balance_history))
         .with_state(state)
 }
 
@@ -392,7 +410,31 @@ fn local_credentials_router(state: LocalCredentialState) -> Router {
             "/api/local-credentials/status",
             get(local_credential_status),
         )
+        .route(
+            "/api/exchange-api-keys",
+            get(exchange_api_keys).post(update_exchange_api_keys),
+        )
+        .route("/api/exchange-api-keys/test", post(test_exchange_api_keys))
+        .route(
+            "/api/exchange-api-keys/:exchange",
+            delete(delete_exchange_api_keys),
+        )
         .with_state(state)
+}
+
+fn local_empty_balance_history_router() -> Router {
+    Router::new().route("/api/balance-history", get(local_empty_balance_history))
+}
+
+async fn local_empty_balance_history() -> (StatusCode, Json<Value>) {
+    local_json_response(
+        StatusCode::OK,
+        json!({
+            "schema_version": CONTROL_API_SCHEMA_VERSION,
+            "rows": [],
+            "local_path_exposed": false,
+        }),
+    )
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -416,6 +458,28 @@ struct ExchangeApiKeyExchangeStatus {
     credential_namespace: String,
     is_default_account: bool,
     fields: Vec<ExchangeApiKeyFieldStatus>,
+    connection: ExchangeAccountCheck,
+    balances: Vec<ExchangeAccountBalanceView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ExchangeAccountCheck {
+    status: String,
+    last_tested_at: Option<chrono::DateTime<Utc>>,
+    unified_total_usdt: Option<f64>,
+    spot_total_usdt: Option<f64>,
+    perp_total_usdt: Option<f64>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExchangeAccountBalanceView {
+    market_type: String,
+    asset: String,
+    total: f64,
+    available: f64,
+    locked: f64,
+    valuation_usdt: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -440,8 +504,28 @@ struct ExchangeApiKeyStatusResponse {
     exchanges: Vec<ExchangeApiKeyExchangeStatus>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ExchangeApiKeyUpdateRequest {
+    #[serde(default)]
+    exchange: String,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    credential_namespace: Option<String>,
+    #[serde(default)]
+    exchange_account_id: Option<String>,
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    api_secret: Option<String>,
+    #[serde(default)]
+    passphrase: Option<String>,
+    #[serde(default)]
+    clear: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
-struct CrossArbExchangeConfigUpdateRequest {
+struct UnifiedArbExchangeConfigUpdateRequest {
     #[serde(default)]
     strategy_id: Option<String>,
     #[serde(default)]
@@ -453,7 +537,7 @@ struct CrossArbExchangeConfigUpdateRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct CrossArbSettingsUpdateRequest {
+struct UnifiedArbSettingsUpdateRequest {
     #[serde(default)]
     strategy_id: Option<String>,
     #[serde(default)]
@@ -568,64 +652,147 @@ async fn local_credential_status(State(state): State<LocalCredentialState>) -> R
     }
 }
 
+async fn exchange_api_keys(State(state): State<LocalCredentialState>) -> Response {
+    match exchange_api_key_status(&state).await {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "accepted": false,
+                "error": error.to_string(),
+                "local_path_exposed": false,
+            })),
+        )
+            .into_response(),
+    }
+}
+
+async fn update_exchange_api_keys(
+    State(state): State<LocalCredentialState>,
+    Json(request): Json<ExchangeApiKeyUpdateRequest>,
+) -> (StatusCode, Json<Value>) {
+    match apply_exchange_api_key_update(&state, request).await {
+        Ok(status) => local_json_response(
+            StatusCode::OK,
+            json!({
+                "accepted": true,
+                "status": status,
+                "local_path_exposed": false,
+            }),
+        ),
+        Err((status_code, value)) => local_json_response(status_code, value),
+    }
+}
+
+async fn delete_exchange_api_keys(
+    State(state): State<LocalCredentialState>,
+    AxumPath(exchange): AxumPath<String>,
+) -> (StatusCode, Json<Value>) {
+    let request = ExchangeApiKeyUpdateRequest {
+        exchange,
+        clear: true,
+        ..ExchangeApiKeyUpdateRequest::default()
+    };
+    update_exchange_api_keys(State(state), Json(request)).await
+}
+
+async fn test_exchange_api_keys(
+    State(state): State<LocalCredentialState>,
+    Json(request): Json<ExchangeApiKeyUpdateRequest>,
+) -> (StatusCode, Json<Value>) {
+    let Some(schema) = exchange_api_key_schema(&request.exchange) else {
+        return local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "accepted": false,
+                "error": "unsupported_exchange",
+                "local_path_exposed": false,
+            }),
+        );
+    };
+    let values = match read_local_credential_status_source(&state.credential_status_store).await {
+        Ok(values) => values,
+        Err(error) => {
+            return local_json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({
+                    "accepted": false,
+                    "error": error.to_string(),
+                    "local_path_exposed": false,
+                }),
+            )
+        }
+    };
+    let account_id = normalize_account_id(request.account_id.as_deref().unwrap_or("default"));
+    let credential_namespace =
+        normalized_credential_namespace(schema, request.credential_namespace.as_deref());
+    let missing =
+        missing_required_credential_fields(&values, schema, &account_id, &credential_namespace);
+    let accepted = missing.is_empty();
+    let check = ExchangeAccountCheck {
+        status: if accepted { "ok" } else { "error" }.to_string(),
+        last_tested_at: Some(Utc::now()),
+        error: (!accepted).then(|| {
+            format!(
+                "missing required credential field(s): {}",
+                missing.join(", ")
+            )
+        }),
+        ..ExchangeAccountCheck::default()
+    };
+    state.checks.lock().await.insert(
+        exchange_account_check_key(schema.exchange, &account_id, &credential_namespace),
+        check.clone(),
+    );
+    match exchange_api_key_status(&state).await {
+        Ok(status) => local_json_response(
+            StatusCode::OK,
+            json!({
+                "accepted": accepted,
+                "check": check,
+                "status": status,
+                "local_path_exposed": false,
+            }),
+        ),
+        Err(error) => local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "accepted": false,
+                "error": error.to_string(),
+                "local_path_exposed": false,
+            }),
+        ),
+    }
+}
+
 async fn exchange_api_key_status(
     state: &LocalCredentialState,
 ) -> Result<ExchangeApiKeyStatusResponse> {
     let values = read_local_credential_status_source(&state.credential_status_store).await?;
     let account_manager_accounts =
         account_manager_accounts_for_status(&state.accounts_config).await;
+    let checks = state.checks.lock().await.clone();
+    let restart_required = *state.restart_required.lock().await;
     let supported_schemas = exchange_api_key_schemas().iter().collect::<Vec<_>>();
     let supported_exchanges = supported_schemas
         .iter()
-        .map(|schema| exchange_schema_status(&values, schema, "default", false, true))
+        .map(|schema| exchange_schema_status(&values, schema, false, true, &checks))
         .collect::<Vec<_>>();
     let mut exchanges = Vec::new();
-    let mut seen_accounts = std::collections::BTreeSet::new();
     for schema in supported_schemas {
-        for account in account_manager_accounts
+        let enabled = account_manager_accounts
             .iter()
-            .filter(|account| account.exchange.eq_ignore_ascii_case(schema.exchange))
-        {
-            let account_id = normalize_account_id(&account.account_id);
-            let credential_namespace = account.credential_namespace.trim().to_ascii_uppercase();
-            if seen_accounts.insert((
-                schema.exchange.to_string(),
-                account_id.clone(),
-                credential_namespace.clone(),
-            )) {
-                let status = exchange_schema_status_for_namespace(
-                    &values,
-                    schema,
-                    &account_id,
-                    &credential_namespace,
-                    true,
-                    account.enabled,
-                );
-                if exchange_status_has_configured_field(&status) {
-                    exchanges.push(status);
-                }
-            }
-        }
-        for (account_id, credential_namespace) in discovered_configured_accounts(&values, schema) {
-            if seen_accounts.insert((
-                schema.exchange.to_string(),
-                account_id.clone(),
-                credential_namespace.clone(),
-            )) {
-                exchanges.push(exchange_schema_status_for_namespace(
-                    &values,
-                    schema,
-                    &account_id,
-                    &credential_namespace,
-                    true,
-                    false,
-                ));
-            }
+            .find(|account| account.exchange.eq_ignore_ascii_case(schema.exchange))
+            .map(|account| account.enabled)
+            .unwrap_or(true);
+        let status = exchange_schema_status(&values, schema, true, enabled, &checks);
+        if exchange_status_has_configured_field(&status) {
+            exchanges.push(status);
         }
     }
     Ok(ExchangeApiKeyStatusResponse {
         store_path: "local-agent:exchange-api-key-store".to_string(),
-        restart_required: false,
+        restart_required,
         enabled_exchanges: account_manager_accounts
             .iter()
             .filter(|account| account.enabled)
@@ -827,7 +994,7 @@ async fn selected_latency_targets(
     let mut targets = fallback_exchange_latency_targets();
     merge_latency_targets(
         &mut targets,
-        latency_targets_from_cross_arb_config(state).await,
+        latency_targets_from_unified_arb_config(state).await,
     );
     merge_latency_targets(
         &mut targets,
@@ -932,18 +1099,18 @@ fn gateway_latency_targets_from_request(rows: Option<&[Value]>) -> Vec<ExchangeL
         .collect()
 }
 
-async fn latency_targets_from_cross_arb_config(
+async fn latency_targets_from_unified_arb_config(
     state: &LocalSideEffectState,
 ) -> Vec<ExchangeLatencyTarget> {
     let operation_id = local_operation_id();
-    let Ok(view) = load_cross_arb_exchange_config(state, &operation_id, false).await else {
+    let Ok(view) = load_unified_arb_exchange_config(state, &operation_id, false).await else {
         return Vec::new();
     };
     view.exchange_map
         .iter()
         .filter_map(|(exchange, config)| {
-            let rest_url = cross_arb_rest_probe_url(config).unwrap_or_default();
-            let ws_url = cross_arb_ws_probe_url(config).unwrap_or_default();
+            let rest_url = unified_arb_rest_probe_url(config).unwrap_or_default();
+            let ws_url = unified_arb_ws_probe_url(config).unwrap_or_default();
             if rest_url.is_empty() && ws_url.is_empty() {
                 return None;
             }
@@ -958,7 +1125,7 @@ async fn latency_targets_from_cross_arb_config(
         .collect()
 }
 
-fn cross_arb_rest_probe_url(config: &Value) -> Option<String> {
+fn unified_arb_rest_probe_url(config: &Value) -> Option<String> {
     text_field_any(
         config,
         &[
@@ -970,7 +1137,7 @@ fn cross_arb_rest_probe_url(config: &Value) -> Option<String> {
     .or_else(|| route_endpoint(config, &["rest_public", "public_rest", "rest"]))
 }
 
-fn cross_arb_ws_probe_url(config: &Value) -> Option<String> {
+fn unified_arb_ws_probe_url(config: &Value) -> Option<String> {
     text_field_any(
         config,
         &["private_ws_url", "public_ws_url", "ws_url", "websocket_url"],
@@ -1401,6 +1568,243 @@ fn exchange_status_has_configured_field(status: &ExchangeApiKeyExchangeStatus) -
     status.fields.iter().any(|field| field.configured)
 }
 
+async fn apply_exchange_api_key_update(
+    state: &LocalCredentialState,
+    request: ExchangeApiKeyUpdateRequest,
+) -> std::result::Result<ExchangeApiKeyStatusResponse, (StatusCode, Value)> {
+    let Some(schema) = exchange_api_key_schema(&request.exchange) else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            json!({
+                "accepted": false,
+                "error": "unsupported_exchange",
+                "local_path_exposed": false,
+            }),
+        ));
+    };
+    let account_id = normalize_account_id(request.account_id.as_deref().unwrap_or("default"));
+    let credential_namespace =
+        normalized_credential_namespace(schema, request.credential_namespace.as_deref());
+
+    let mut values = read_local_credential_status_source(&state.credential_status_store)
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({
+                    "accepted": false,
+                    "error": error.to_string(),
+                    "local_path_exposed": false,
+                }),
+            )
+        })?;
+
+    if request.clear {
+        clear_exchange_api_key_values(&mut values, schema, &account_id, &credential_namespace);
+        state
+            .checks
+            .lock()
+            .await
+            .remove(&exchange_account_check_key(
+                schema.exchange,
+                &account_id,
+                &credential_namespace,
+            ));
+    } else {
+        for field in schema.fields {
+            let Some(value) = request_value_for_field(&request, field.field) else {
+                continue;
+            };
+            clear_exchange_api_key_field_values(
+                &mut values,
+                schema,
+                field,
+                &account_id,
+                &credential_namespace,
+            );
+            values.insert(
+                store_env_key_for_field(schema, field, &account_id, &credential_namespace),
+                value,
+            );
+        }
+        state
+            .checks
+            .lock()
+            .await
+            .remove(&exchange_account_check_key(
+                schema.exchange,
+                &account_id,
+                &credential_namespace,
+            ));
+    }
+
+    write_local_credential_status_source(&state.credential_status_store, &values)
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({
+                    "accepted": false,
+                    "error": error.to_string(),
+                    "local_path_exposed": false,
+                }),
+            )
+        })?;
+    *state.restart_required.lock().await = true;
+    exchange_api_key_status(state).await.map_err(|error| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "accepted": false,
+                "error": error.to_string(),
+                "local_path_exposed": false,
+            }),
+        )
+    })
+}
+
+fn clear_exchange_api_key_values(
+    values: &mut BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: &str,
+) {
+    for field in schema.fields {
+        clear_exchange_api_key_field_values(
+            values,
+            schema,
+            field,
+            account_id,
+            credential_namespace,
+        );
+    }
+}
+
+fn clear_exchange_api_key_field_values(
+    values: &mut BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+) {
+    for key in managed_env_keys_for_field(schema, field, account_id, credential_namespace) {
+        values.remove(&key);
+    }
+}
+
+fn managed_env_keys_for_field(
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+) -> Vec<String> {
+    let mut keys = field
+        .aliases
+        .iter()
+        .map(|alias| (*alias).to_string())
+        .collect::<Vec<_>>();
+    keys.push(preferred_store_env_key(schema.exchange, field.field));
+    keys.push(account_env_key(schema, account_id, field.field));
+    keys.extend(namespace_env_keys(credential_namespace, field.field));
+    keys.retain(|key| is_shell_env_key(key));
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn store_env_key_for_field(
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+) -> String {
+    if account_id != "default" {
+        return account_env_key(schema, account_id, field.field);
+    }
+    let default_prefix = env_exchange_prefix(schema.exchange);
+    if !credential_namespace.eq_ignore_ascii_case(&default_prefix) {
+        return namespace_env_keys(credential_namespace, field.field)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| preferred_store_env_key(schema.exchange, field.field));
+    }
+    preferred_store_env_key(schema.exchange, field.field)
+}
+
+fn preferred_store_env_key(exchange: &str, field: &str) -> String {
+    match (
+        exchange.trim().to_ascii_lowercase().as_str(),
+        field.trim().to_ascii_lowercase().as_str(),
+    ) {
+        ("binance", "api_key") => "BINANCE_API_KEY".to_string(),
+        ("binance", "api_secret") => "BINANCE_API_SECRET".to_string(),
+        ("gate", "account_id") => "GATEIO_ACCOUNT_ID".to_string(),
+        ("gate", "api_key") => "GATEIO_API_KEY".to_string(),
+        ("gate", "api_secret") => "GATEIO_API_SECRET".to_string(),
+        ("hyperliquid", "api_key") => "HYPERLIQUID_WALLET_ADDRESS".to_string(),
+        ("hyperliquid", "api_secret") => "HYPERLIQUID_PRIVATE_KEY".to_string(),
+        ("bitmart", "passphrase") => "BITMART_API_MEMO".to_string(),
+        ("okx", "passphrase") => "OKX_PASSPHRASE".to_string(),
+        (_, "api_key") => format!("{}_API_KEY", env_exchange_prefix(exchange)),
+        (_, "api_secret") => format!("{}_API_SECRET", env_exchange_prefix(exchange)),
+        (_, "passphrase") => format!("{}_PASSPHRASE", env_exchange_prefix(exchange)),
+        (_, "account_id") => format!("{}_ACCOUNT_ID", env_exchange_prefix(exchange)),
+        _ => format!(
+            "{}_{}",
+            env_exchange_prefix(exchange),
+            field.to_ascii_uppercase()
+        ),
+    }
+}
+
+fn request_value_for_field(request: &ExchangeApiKeyUpdateRequest, field: &str) -> Option<String> {
+    let value = match field {
+        "account_id" => request.exchange_account_id.as_deref(),
+        "api_key" => request.api_key.as_deref(),
+        "api_secret" => request.api_secret.as_deref(),
+        "passphrase" => request.passphrase.as_deref(),
+        _ => None,
+    }?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn missing_required_credential_fields(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: &str,
+) -> Vec<String> {
+    schema
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .filter(|field| {
+            configured_field_value_for_namespace(
+                values,
+                schema,
+                field,
+                account_id,
+                credential_namespace,
+            )
+            .is_none()
+        })
+        .map(|field| field.field.to_string())
+        .collect()
+}
+
+fn normalized_credential_namespace(
+    schema: &ExchangeApiKeySchema,
+    credential_namespace: Option<&str>,
+) -> String {
+    let namespace = credential_namespace.unwrap_or_default().trim();
+    if namespace.is_empty() || namespace == "-" {
+        canonical_credential_namespace(schema)
+    } else {
+        namespace.to_ascii_uppercase()
+    }
+}
+
 async fn account_manager_accounts_for_status(path: &PathBuf) -> Vec<AccountManagerAccountStatus> {
     read_account_manager_accounts(path)
         .await
@@ -1415,35 +1819,39 @@ async fn read_account_manager_accounts(path: &PathBuf) -> Result<Vec<AccountMana
     };
     let config: AccountManagerConfigFile =
         serde_yaml::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
-    let mut accounts = config
-        .accounts
-        .into_iter()
-        .map(|(account_id, account)| {
-            let name = account
-                .name
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or(account_id.as_str())
-                .to_string();
-            let exchange = account.exchange.trim().to_ascii_lowercase();
-            let env_prefix = account.env_prefix.trim().to_ascii_uppercase();
-            AccountManagerAccountStatus {
-                credential_namespace: credential_namespace_for_env_prefix(
-                    &exchange,
-                    &account_id,
-                    &env_prefix,
-                ),
-                account_id,
-                name,
-                exchange,
-                account_type: account.account_type.unwrap_or_default(),
-                description: account.description.unwrap_or_default(),
-                env_prefix,
-                enabled: account.enabled,
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut accounts_by_exchange = BTreeMap::new();
+    for (_account_id, account) in config.accounts {
+        let _legacy_name = account.name.as_deref();
+        let _legacy_env_prefix = account.env_prefix.as_str();
+        let exchange = account.exchange.trim().to_ascii_lowercase();
+        if exchange.is_empty() {
+            continue;
+        }
+        let env_prefix = env_exchange_prefix(&exchange);
+        let next = AccountManagerAccountStatus {
+            credential_namespace: env_prefix.clone(),
+            account_id: canonical_account_id(),
+            name: format!("{exchange}_main"),
+            exchange: exchange.clone(),
+            account_type: account.account_type.unwrap_or_default(),
+            description: account.description.unwrap_or_default(),
+            env_prefix,
+            enabled: account.enabled,
+        };
+        accounts_by_exchange
+            .entry(exchange)
+            .and_modify(|existing: &mut AccountManagerAccountStatus| {
+                existing.enabled = existing.enabled || next.enabled;
+                if existing.account_type.is_empty() && !next.account_type.is_empty() {
+                    existing.account_type = next.account_type.clone();
+                }
+                if existing.description.is_empty() && !next.description.is_empty() {
+                    existing.description = next.description.clone();
+                }
+            })
+            .or_insert(next);
+    }
+    let mut accounts = accounts_by_exchange.into_values().collect::<Vec<_>>();
     accounts.sort_by(|left, right| {
         left.exchange
             .cmp(&right.exchange)
@@ -1455,13 +1863,12 @@ async fn read_account_manager_accounts(path: &PathBuf) -> Result<Vec<AccountMana
 fn exchange_schema_status(
     values: &BTreeMap<String, String>,
     schema: &ExchangeApiKeySchema,
-    account_id: &str,
     include_values: bool,
     enabled: bool,
+    checks: &BTreeMap<String, ExchangeAccountCheck>,
 ) -> ExchangeApiKeyExchangeStatus {
-    let normalized_account_id = normalize_account_id(account_id);
-    let credential_namespace =
-        credential_namespace_for_account(schema, &normalized_account_id, None);
+    let normalized_account_id = canonical_account_id();
+    let credential_namespace = canonical_credential_namespace(schema);
     exchange_schema_status_for_namespace(
         values,
         schema,
@@ -1469,6 +1876,7 @@ fn exchange_schema_status(
         &credential_namespace,
         include_values,
         enabled,
+        checks,
     )
 }
 
@@ -1479,8 +1887,20 @@ fn exchange_schema_status_for_namespace(
     credential_namespace: &str,
     include_values: bool,
     enabled: bool,
+    checks: &BTreeMap<String, ExchangeAccountCheck>,
 ) -> ExchangeApiKeyExchangeStatus {
     let normalized_account_id = normalize_account_id(account_id);
+    let check = checks
+        .get(&exchange_account_check_key(
+            schema.exchange,
+            &normalized_account_id,
+            credential_namespace,
+        ))
+        .cloned()
+        .unwrap_or_else(|| ExchangeAccountCheck {
+            status: "untested".to_string(),
+            ..ExchangeAccountCheck::default()
+        });
     ExchangeApiKeyExchangeStatus {
         exchange: schema.exchange.to_string(),
         label: schema.label.to_string(),
@@ -1503,7 +1923,58 @@ fn exchange_schema_status_for_namespace(
                 )
             })
             .collect(),
+        balances: account_check_balances(&check),
+        connection: check,
     }
+}
+
+fn exchange_account_check_key(
+    exchange: &str,
+    account_id: &str,
+    credential_namespace: &str,
+) -> String {
+    format!(
+        "{}:{}:{}",
+        exchange.trim().to_ascii_lowercase(),
+        normalize_account_id(account_id),
+        credential_namespace.trim().to_ascii_uppercase()
+    )
+}
+
+fn account_check_balances(check: &ExchangeAccountCheck) -> Vec<ExchangeAccountBalanceView> {
+    let mut balances = Vec::new();
+    if let Some(value) = check.unified_total_usdt {
+        balances.push(ExchangeAccountBalanceView {
+            market_type: "unified".to_string(),
+            asset: "USDT".to_string(),
+            total: value,
+            available: value,
+            locked: 0.0,
+            valuation_usdt: Some(value),
+        });
+        return balances;
+    }
+    if let Some(value) = check.spot_total_usdt {
+        balances.push(ExchangeAccountBalanceView {
+            market_type: "spot".to_string(),
+            asset: "USDT".to_string(),
+            total: value,
+            available: value,
+            locked: 0.0,
+            valuation_usdt: Some(value),
+        });
+    }
+    if let Some(value) = check.perp_total_usdt {
+        balances.push(ExchangeAccountBalanceView {
+            market_type: "perp".to_string(),
+            asset: "USDT".to_string(),
+            total: value,
+            available: value,
+            locked: 0.0,
+            valuation_usdt: Some(value),
+        });
+    }
+    balances
 }
 
 fn api_key_field_status_for_namespace(
@@ -1591,118 +2062,12 @@ fn configured_field_value_for_namespace(
         })
 }
 
-fn discovered_configured_accounts(
-    values: &BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-) -> Vec<(String, String)> {
-    let mut accounts = BTreeMap::new();
-    let default_namespace = env_exchange_prefix(schema.exchange);
-    if schema.fields.iter().any(|field| {
-        configured_field_value_for_namespace(values, schema, field, "default", &default_namespace)
-            .is_some()
-    }) {
-        accounts.insert("default".to_string(), default_namespace);
-    }
-    for key in configured_env_key_names(values) {
-        if let Some((account_id, credential_namespace)) =
-            account_namespace_from_env_key(schema, &key)
-        {
-            accounts.insert(account_id, credential_namespace);
-        }
-    }
-    accounts.into_iter().collect()
+fn canonical_account_id() -> String {
+    "default".to_string()
 }
 
-fn configured_env_key_names(values: &BTreeMap<String, String>) -> Vec<String> {
-    values
-        .iter()
-        .filter(|(_, value)| !value.trim().is_empty())
-        .map(|(key, _)| key.clone())
-        .chain(
-            std::env::vars()
-                .filter(|(_, value)| !value.trim().is_empty())
-                .map(|(key, _)| key),
-        )
-        .collect()
-}
-
-fn account_namespace_from_env_key(
-    schema: &ExchangeApiKeySchema,
-    key: &str,
-) -> Option<(String, String)> {
-    let key = key.trim().to_ascii_uppercase();
-    let prefix = format!("{}__", env_exchange_prefix(schema.exchange));
-    let rest = key.strip_prefix(&prefix)?;
-    for field in schema.fields {
-        let field = field.field.to_ascii_uppercase();
-        let legacy_suffix = format!("__{field}");
-        if let Some(raw_account) = rest.strip_suffix(&legacy_suffix) {
-            let account_id = normalize_account_id(raw_account);
-            if account_id != "default" {
-                return Some((
-                    account_id.clone(),
-                    credential_namespace_for_account(schema, &account_id, None),
-                ));
-            }
-        }
-        let suffix = format!("_{field}");
-        if let Some(raw_account) = rest.strip_suffix(&suffix) {
-            let account_id = normalize_account_id(raw_account);
-            if account_id != "default" {
-                return Some((
-                    account_id.clone(),
-                    credential_namespace_for_account(schema, &account_id, None),
-                ));
-            }
-        }
-    }
-    None
-}
-
-fn credential_namespace_for_account(
-    schema: &ExchangeApiKeySchema,
-    account_id: &str,
-    credential_namespace: Option<&str>,
-) -> String {
-    let configured = credential_namespace
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_uppercase());
-    if let Some(namespace) = configured {
-        return namespace;
-    }
-    let account_id = normalize_account_id(account_id);
-    if account_id == "default" {
-        env_exchange_prefix(schema.exchange)
-    } else {
-        format!(
-            "{}__{}_",
-            env_exchange_prefix(schema.exchange),
-            account_id.to_ascii_uppercase().replace('-', "_")
-        )
-    }
-}
-
-fn credential_namespace_for_env_prefix(
-    exchange: &str,
-    account_id: &str,
-    env_prefix: &str,
-) -> String {
-    let default_prefix = env_exchange_prefix(exchange);
-    let configured_prefix = env_prefix.trim();
-    if !configured_prefix.is_empty() {
-        return configured_prefix.to_ascii_uppercase();
-    }
-    let account_id = normalize_account_id(account_id);
-    if account_id == "default" {
-        default_prefix
-    } else {
-        format!(
-            "{}__{}_",
-            default_prefix,
-            account_id.to_ascii_uppercase().replace('-', "_")
-        )
-    }
+fn canonical_credential_namespace(schema: &ExchangeApiKeySchema) -> String {
+    env_exchange_prefix(schema.exchange)
 }
 
 fn normalize_account_id(value: &str) -> String {
@@ -1817,7 +2182,7 @@ fn exchange_api_key_schemas() -> &'static [ExchangeApiKeySchema] {
                 "GATE_USER_ID",
                 "GATEIO_USER_ID",
             ],
-            required: true,
+            required: false,
         },
         ExchangeApiFieldSchema {
             field: "api_key",
@@ -1938,13 +2303,23 @@ fn exchange_api_key_schemas() -> &'static [ExchangeApiKeySchema] {
         ExchangeApiFieldSchema {
             field: "api_key",
             label: "API Key",
-            aliases: &["BINANCE_SPOT_API_KEY", "BINANCE_API_KEY"],
+            aliases: &[
+                "BINANCE_FUTURES_API_KEY",
+                "BINANCE_USDM_API_KEY",
+                "BINANCE_SPOT_API_KEY",
+                "BINANCE_API_KEY",
+            ],
             required: true,
         },
         ExchangeApiFieldSchema {
             field: "api_secret",
             label: "API Secret",
-            aliases: &["BINANCE_SPOT_API_SECRET", "BINANCE_API_SECRET"],
+            aliases: &[
+                "BINANCE_FUTURES_API_SECRET",
+                "BINANCE_USDM_API_SECRET",
+                "BINANCE_SPOT_API_SECRET",
+                "BINANCE_API_SECRET",
+            ],
             required: true,
         },
     ];
@@ -2028,6 +2403,14 @@ fn exchange_api_key_schemas() -> &'static [ExchangeApiKeySchema] {
     SCHEMAS
 }
 
+fn exchange_api_key_schema(exchange: &str) -> Option<&'static ExchangeApiKeySchema> {
+    let exchange = exchange.trim().to_ascii_lowercase();
+    exchange_api_key_schemas().iter().find(|schema| {
+        schema.exchange.eq_ignore_ascii_case(&exchange)
+            || (schema.exchange == "gate" && matches!(exchange.as_str(), "gateio" | "gate.io"))
+    })
+}
+
 async fn read_local_credential_status_source(path: &PathBuf) -> Result<BTreeMap<String, String>> {
     let content = match tokio::fs::read_to_string(path).await {
         Ok(content) => content,
@@ -2049,6 +2432,61 @@ async fn read_local_credential_status_source(path: &PathBuf) -> Result<BTreeMap<
         }
     }
     Ok(values)
+}
+
+async fn write_local_credential_status_source(
+    path: &PathBuf,
+    values: &BTreeMap<String, String>,
+) -> Result<()> {
+    let mut content = String::from(
+        "# Managed by rustcta-control-api. Do not commit this file.\n\
+         # WebUI writes here; gateway and strategy services read this same env-store.\n",
+    );
+    for (key, value) in values {
+        if is_shell_env_key(key) && !value.trim().is_empty() {
+            content.push_str(key);
+            content.push('=');
+            content.push_str(&shell_quote_env_value(value));
+            content.push('\n');
+        }
+    }
+    let operation_id = local_operation_id();
+    atomic_write_local_file(path, &content, &operation_id)
+        .await
+        .with_context(|| format!("write credential env-store {}", path.display()))?;
+    set_credential_store_permissions(path).await?;
+    Ok(())
+}
+
+async fn set_credential_store_permissions(path: &PathBuf) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .with_context(|| format!("chmod 0600 {}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
+fn shell_quote_env_value(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+fn gateway_exchange_id(exchange: &str) -> Option<&'static str> {
+    match exchange.trim().to_ascii_lowercase().as_str() {
+        "binance" => Some("binance"),
+        "bitget" => Some("bitget"),
+        "bybit" => Some("bybit"),
+        "gate" | "gateio" => Some("gateio"),
+        _ => None,
+    }
 }
 
 fn parse_shell_env_value(value: &str) -> String {
@@ -2099,6 +2537,7 @@ async fn local_create_strategy(
         );
     }
 
+    let request_for_config = request.clone();
     let (process, spec) = match request.into_process_and_spec(Utc::now()) {
         Ok(value) => value,
         Err(field) => {
@@ -2115,6 +2554,21 @@ async fn local_create_strategy(
         }
     };
 
+    if let Err(error) =
+        write_generated_strategy_config(&request_for_config, &process.config_path).await
+    {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "strategy_config_write_failed",
+                "error": error.to_string(),
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
     if state
         .record_operator_audit(
             "create_strategy",
@@ -2122,6 +2576,7 @@ async fn local_create_strategy(
             json!({
                 "strategy_id": process.strategy_id,
                 "strategy_kind": process.strategy_kind,
+                "template_id": request_for_config.template_id,
                 "would_submit_order": false,
             }),
         )
@@ -2153,6 +2608,445 @@ async fn local_create_strategy(
             }),
         ),
     }
+}
+
+async fn local_delete_strategy(
+    State(state): State<ControlApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> (StatusCode, Json<Value>) {
+    let strategy_id = id.trim().to_string();
+    if strategy_id.is_empty() {
+        return local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "missing_strategy_id",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    if !state.audit_ledger_configured() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_ledger_not_configured",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    if state
+        .record_operator_audit(
+            "delete_strategy",
+            "local-agent",
+            json!({
+                "strategy_id": strategy_id,
+                "would_submit_order": false,
+                "local_path_exposed": false,
+            }),
+        )
+        .await
+        .is_err()
+    {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    match state.delete_strategy(&strategy_id).await {
+        Ok(process) => {
+            let config_deleted = delete_generated_strategy_config(&process.config_path).await;
+            local_json_response(
+                StatusCode::OK,
+                json!({
+                    "schema_version": CONTROL_API_SCHEMA_VERSION,
+                    "accepted": true,
+                    "status": "deleted",
+                    "config_deleted": config_deleted,
+                    "strategy": StrategyProcessView::from(process),
+                    "local_path_exposed": false,
+                }),
+            )
+        }
+        Err(SupervisorError::NotFound { .. }) => local_json_response(
+            StatusCode::NOT_FOUND,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "strategy_not_found",
+                "strategy_id": strategy_id,
+                "local_path_exposed": false,
+            }),
+        ),
+        Err(error) => local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "strategy_delete_failed",
+                "error": error.to_string(),
+                "local_path_exposed": false,
+            }),
+        ),
+    }
+}
+
+async fn delete_generated_strategy_config(config_path: &str) -> bool {
+    let Some(path) = generated_strategy_config_delete_path(config_path) else {
+        return false;
+    };
+    tokio::fs::remove_file(path).await.is_ok()
+}
+
+fn generated_strategy_config_delete_path(config_path: &str) -> Option<PathBuf> {
+    let path = Path::new(config_path.trim());
+    if path.is_absolute() {
+        return None;
+    }
+    let components = path.components().collect::<Vec<_>>();
+    let [Component::Normal(first), Component::Normal(second), Component::Normal(file)] =
+        components.as_slice()
+    else {
+        return None;
+    };
+    if first.to_str() != Some("config") || second.to_str() != Some("generated") {
+        return None;
+    }
+    let extension = Path::new(file)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if extension != "yml" && extension != "yaml" {
+        return None;
+    }
+    Some(path.to_path_buf())
+}
+
+async fn write_generated_strategy_config(
+    request: &CreateStrategyRequest,
+    config_path: &str,
+) -> Result<()> {
+    if request.exchange_accounts.is_null() && request.risk.is_null() && request.params.is_null() {
+        return Ok(());
+    }
+    let path = PathBuf::from(config_path);
+    if path.as_os_str().is_empty()
+        || config_path.starts_with("local-agent:")
+        || config_path.starts_with("memory:")
+    {
+        return Ok(());
+    }
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let payload = generated_strategy_runtime_config(request);
+    let content = serde_yaml::to_string(&payload).context("serialize generated strategy config")?;
+    tokio::fs::write(&path, content)
+        .await
+        .with_context(|| format!("write {}", path.display()))
+}
+
+fn generated_strategy_runtime_config(request: &CreateStrategyRequest) -> Value {
+    let template_id = request.template_id.as_deref().unwrap_or_default();
+    match request.strategy_kind.as_str() {
+        "hedged_grid" => hedged_grid_runtime_config(request),
+        "unified_arbitrage" => unified_arbitrage_runtime_config(request),
+        _ if template_id == "hedged_grid" => hedged_grid_runtime_config(request),
+        _ if template_id == "unified_arbitrage" => unified_arbitrage_runtime_config(request),
+        _ => json!({
+            "schema_version": CONTROL_API_SCHEMA_VERSION,
+            "strategy_id": request.strategy_id,
+            "strategy_kind": request.strategy_kind,
+            "template_id": request.template_id,
+            "run_mode": request.run_mode,
+            "tenant_id": request.tenant_id,
+            "exchange_accounts": request.exchange_accounts,
+            "risk": request.risk,
+            "params": request.params,
+            "generated_at": Utc::now(),
+            "generated_by": "rustcta-control-api",
+        }),
+    }
+}
+
+fn hedged_grid_runtime_config(request: &CreateStrategyRequest) -> Value {
+    let execution_exchange = exchange_slot_exchange(&request.exchange_accounts, "execution");
+    let base_exchange = execution_exchange
+        .clone()
+        .or_else(|| exchange_slot_exchange(&request.exchange_accounts, "base"))
+        .or_else(|| exchange_slot_exchange(&request.exchange_accounts, "long"))
+        .unwrap_or_else(|| "binance".to_string());
+    let hedge_exchange = execution_exchange
+        .or_else(|| exchange_slot_exchange(&request.exchange_accounts, "hedge"))
+        .or_else(|| exchange_slot_exchange(&request.exchange_accounts, "short"))
+        .unwrap_or_else(|| base_exchange.clone());
+    let spacing_mode = param_string(&request.params, "grid_spacing_mode", "pct");
+    let spacing_is_abs = spacing_mode == "abs";
+    let spacing = param_f64(
+        &request.params,
+        "grid_spacing",
+        param_f64(&request.params, "grid_spacing_pct", 0.25),
+    );
+    let grid_order_count = param_f64(
+        &request.params,
+        "grid_order_count",
+        param_f64(&request.params, "grid_levels", 8.0),
+    )
+    .round()
+    .max(1.0) as u64;
+    let order_notional = param_f64(&request.params, "order_notional_usdt", 50.0);
+    let max_inventory_quote = risk_string(&request.risk, "max_total_notional_usdt", "");
+    let max_inventory_quote = if max_inventory_quote.is_empty() {
+        (order_notional * grid_order_count as f64 * 2.0).to_string()
+    } else {
+        max_inventory_quote
+    };
+    let mut config = json!({
+        "symbol": normalize_slash_symbol(&param_string(&request.params, "symbol", "BTC/USDT")),
+        "spot_exchange": base_exchange,
+        "hedge_exchange": hedge_exchange,
+        "grid_spacing_bps": percent_to_bps(if spacing_is_abs { 0.25 } else { spacing }),
+        "grid_spacing_mode": spacing_mode,
+        "grid_order_count": grid_order_count,
+        "order_notional_usdt": order_notional,
+        "max_inventory_quote": max_inventory_quote,
+        "dry_run": !run_mode_is_live(request),
+        "enable_live_orders": run_mode_is_live(request),
+        "execution_market_type": param_string(&request.params, "execution_market_type", "perpetual"),
+        "execution_endpoint": param_string(&request.params, "execution_endpoint", "http://127.0.0.1:18081"),
+    });
+    if spacing_is_abs {
+        config["grid_spacing_abs"] = json!(spacing);
+    }
+    config
+}
+
+fn unified_arbitrage_runtime_config(request: &CreateStrategyRequest) -> Value {
+    let venues = paired_exchanges(request, "long", "short", "binance", "okx");
+    let target_notional = risk_f64(&request.risk, "max_single_order_usdt", 50.0);
+    let open_spread = percent_to_ratio(param_f64(&request.params, "min_open_raw_spread_pct", 0.12));
+    let open_edge = percent_to_ratio(param_f64(&request.params, "min_open_net_edge_pct", 0.04));
+    let close_profit =
+        percent_to_ratio(param_f64(&request.params, "close_min_net_profit_pct", 0.03));
+    let symbols = symbols_from_params(&request.params);
+    let first_symbol = symbols
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "BTCUSDT".to_string());
+    json!({
+        "strategy_kind": "unified_arbitrage",
+        "mode": if run_mode_is_live(request) { "live" } else { "observe" },
+        "trading_mode": if run_mode_is_live(request) { "live" } else { "paper" },
+        "enable_live_trading": run_mode_is_live(request),
+        "market": {
+            "quote_asset": "USDT",
+            "stale_book_ms": risk_u64(&request.risk, "max_book_age_ms", 800),
+            "funding_snapshot_max_age_ms": risk_u64(&request.risk, "max_book_age_ms", 800).max(5_000),
+        },
+        "defaults": {
+            "sizing": {
+                "min_order_notional_usdt": risk_f64(&request.risk, "min_single_order_usdt", 5.0),
+                "max_order_notional_usdt": target_notional,
+                "max_position_notional_usdt": risk_f64(&request.risk, "max_total_notional_usdt", 1000.0),
+                "max_route_notional_usdt": risk_f64(&request.risk, "max_total_notional_usdt", 1000.0),
+                "max_symbol_notional_usdt": risk_f64(&request.risk, "max_total_notional_usdt", 1000.0),
+                "max_exchange_notional_usdt": risk_f64(&request.risk, "max_total_notional_usdt", 1000.0),
+                "max_total_notional_usdt": risk_f64(&request.risk, "max_total_notional_usdt", 1000.0),
+            },
+            "thresholds": {
+                "min_open_spread_bps": open_spread * 10_000.0,
+                "min_open_net_edge_bps": open_edge * 10_000.0,
+                "close_spread_bps": close_profit * 10_000.0,
+            },
+            "execution": {
+                "preferred_open_style": "dual_taker",
+                "preferred_close_style": "dual_taker_reduce_only",
+                "taker_slippage_bps": percent_to_bps(risk_f64(&request.risk, "max_slippage_pct", 0.08)),
+            },
+            "risk": {
+                "max_open_bundles": 10,
+                "max_positions_per_exchange": 10,
+                "max_active_bundles_per_symbol": 1,
+            },
+        },
+        "routes": [{
+            "route_id": "route_1",
+            "enabled": true,
+            "kind": "perp_perp_spread",
+            "symbol": normalize_slash_symbol(&first_symbol),
+            "legs": {
+                "long": {
+                    "exchange": venues.first().cloned().unwrap_or_else(|| "binance".to_string()),
+                    "market_type": "perpetual",
+                    "side_on_open": "buy",
+                    "position_side": "long"
+                },
+                "short": {
+                    "exchange": venues.get(1).cloned().unwrap_or_else(|| "okx".to_string()),
+                    "market_type": "perpetual",
+                    "side_on_open": "sell",
+                    "position_side": "short"
+                }
+            }
+        }],
+    })
+}
+
+fn run_mode_is_live(request: &CreateStrategyRequest) -> bool {
+    request
+        .run_mode
+        .as_deref()
+        .map(|mode| mode.eq_ignore_ascii_case("live"))
+        .unwrap_or(false)
+}
+
+fn paired_exchanges(
+    request: &CreateStrategyRequest,
+    left_slot: &str,
+    right_slot: &str,
+    default_left: &str,
+    default_right: &str,
+) -> Vec<String> {
+    let mut venues = Vec::new();
+    venues.push(
+        exchange_slot_exchange(&request.exchange_accounts, left_slot)
+            .unwrap_or_else(|| default_left.to_string()),
+    );
+    venues.push(
+        exchange_slot_exchange(&request.exchange_accounts, right_slot)
+            .unwrap_or_else(|| default_right.to_string()),
+    );
+    venues.sort();
+    venues.dedup();
+    venues
+}
+
+fn exchange_slot_exchange(accounts: &Value, slot: &str) -> Option<String> {
+    accounts.get(slot).and_then(exchange_account_value_exchange)
+}
+
+fn exchange_account_value_exchange(value: &Value) -> Option<String> {
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    raw.split(':')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_exchange_id)
+}
+
+fn symbols_from_params(params: &Value) -> Vec<String> {
+    param_string(params, "symbols", "BTC/USDT")
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_slash_symbol)
+        .collect::<Vec<_>>()
+}
+
+fn normalize_slash_symbol(symbol: &str) -> String {
+    let symbol = symbol.trim().to_ascii_uppercase();
+    if symbol.is_empty() {
+        return symbol;
+    }
+    let compact = symbol
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>();
+    for quote in ["USDT", "USDC", "USD", "BTC", "ETH"] {
+        if let Some(base) = compact.strip_suffix(quote) {
+            if !base.is_empty() {
+                return format!("{base}/{quote}");
+            }
+        }
+    }
+    symbol.replace('-', "/").replace('_', "/")
+}
+
+fn normalize_exchange_id(exchange: &str) -> String {
+    match exchange
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', '_', ' '], "")
+        .as_str()
+    {
+        "binance" | "binancespot" | "binanceusdm" => "binance".to_string(),
+        "okx" | "okex" => "okx".to_string(),
+        "bybit" | "bybitunified" => "bybit".to_string(),
+        "bitget" => "bitget".to_string(),
+        "gate" | "gateio" => "gateio".to_string(),
+        value => value.to_string(),
+    }
+}
+
+fn risk_string(risk: &Value, field: &str, default: &str) -> String {
+    value_string(risk, field).unwrap_or_else(|| default.to_string())
+}
+
+fn param_string(params: &Value, field: &str, default: &str) -> String {
+    value_string(params, field).unwrap_or_else(|| default.to_string())
+}
+
+fn value_string(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(ToString::to_string)
+                .or_else(|| value.as_f64().map(|number| number.to_string()))
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn risk_f64(risk: &Value, field: &str, default: f64) -> f64 {
+    value_f64(risk, field).unwrap_or(default)
+}
+
+fn param_f64(params: &Value, field: &str, default: f64) -> f64 {
+    value_f64(params, field).unwrap_or(default)
+}
+
+fn value_f64(value: &Value, field: &str) -> Option<f64> {
+    value.get(field).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str()?.trim().parse::<f64>().ok())
+    })
+}
+
+fn risk_u64(risk: &Value, field: &str, default: u64) -> u64 {
+    risk.get(field)
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
+        })
+        .unwrap_or(default)
+}
+
+fn percent_to_ratio(value: f64) -> f64 {
+    value / 100.0
+}
+
+fn percent_to_bps(value: f64) -> f64 {
+    value * 100.0
 }
 
 async fn local_strategy_command(
@@ -2510,35 +3404,35 @@ async fn local_agent_strategy_config(
     )
 }
 
-async fn local_agent_cross_arb_exchanges(
+async fn local_agent_unified_arb_exchanges(
     State(state): State<LocalSideEffectState>,
 ) -> (StatusCode, Json<Value>) {
     let operation_id = local_operation_id();
-    match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+    match load_unified_arb_exchange_config(&state, &operation_id, true).await {
         Ok(view) => local_json_response(
             StatusCode::OK,
-            cross_arb_exchange_config_response(&view, &operation_id, false, false),
+            unified_arb_exchange_config_response(&view, &operation_id, false, false),
         ),
         Err(response) => response,
     }
 }
 
-async fn local_agent_cross_arb_settings(
+async fn local_agent_unified_arb_settings(
     State(state): State<LocalSideEffectState>,
 ) -> (StatusCode, Json<Value>) {
     let operation_id = local_operation_id();
-    match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+    match load_unified_arb_exchange_config(&state, &operation_id, true).await {
         Ok(view) => local_json_response(
             StatusCode::OK,
-            cross_arb_settings_response(&view, &operation_id, false, false),
+            unified_arb_settings_response(&view, &operation_id, false, false),
         ),
         Err(response) => response,
     }
 }
 
-async fn local_agent_save_cross_arb_settings(
+async fn local_agent_save_unified_arb_settings(
     State(state): State<LocalSideEffectState>,
-    Json(request): Json<CrossArbSettingsUpdateRequest>,
+    Json(request): Json<UnifiedArbSettingsUpdateRequest>,
 ) -> (StatusCode, Json<Value>) {
     let operation_id = local_operation_id();
     if request.apply && state.config.command_queue_path.is_none() {
@@ -2553,7 +3447,7 @@ async fn local_agent_save_cross_arb_settings(
             }),
         );
     }
-    let mut view = match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+    let mut view = match load_unified_arb_exchange_config(&state, &operation_id, true).await {
         Ok(view) => view,
         Err(response) => return response,
     };
@@ -2562,41 +3456,45 @@ async fn local_agent_save_cross_arb_settings(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(CROSS_ARB_STRATEGY_ID)
+        .unwrap_or(UNIFIED_ARB_STRATEGY_ID)
         .to_string();
-    apply_cross_arb_settings_update(&mut view.root, &request);
+    apply_unified_arb_settings_update(&mut view.root, &request);
     let (exchange_map, cleaned_invalid_count, removed_exchanges) =
-        sanitize_cross_arb_exchange_map(view.root.get("exchanges"));
+        sanitize_unified_arb_exchange_map(view.root.get("exchanges"));
     view.exchange_map = exchange_map;
     view.exchanges = exchange_rows_from_map(&view.exchange_map);
     view.enabled_exchanges = enabled_exchanges_from_root_or_map(&view.root, &view.exchange_map);
     view.cleaned_invalid_count += cleaned_invalid_count;
     view.removed_exchanges.extend(removed_exchanges);
-    sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
+    sync_unified_arb_exchanges_into_root(
+        &mut view.root,
+        &view.exchange_map,
+        &view.enabled_exchanges,
+    );
 
-    match persist_cross_arb_config(
+    match persist_unified_arb_config(
         &state,
         &view,
         &operation_id,
         &strategy_id,
-        "local_agent_cross_arb_settings_save",
+        "local_agent_unified_arb_settings_save",
         request.apply,
-        "update_cross_arb_settings",
-        cross_arb_settings_command_payload(&view, &request, &strategy_id),
+        "update_unified_arb_settings",
+        unified_arb_settings_command_payload(&view, &request, &strategy_id),
     )
     .await
     {
         Ok(realtime_queued) => local_json_response(
             StatusCode::ACCEPTED,
-            cross_arb_settings_response(&view, &operation_id, true, realtime_queued),
+            unified_arb_settings_response(&view, &operation_id, true, realtime_queued),
         ),
         Err(response) => response,
     }
 }
 
-async fn local_agent_save_cross_arb_exchanges(
+async fn local_agent_save_unified_arb_exchanges(
     State(state): State<LocalSideEffectState>,
-    Json(request): Json<CrossArbExchangeConfigUpdateRequest>,
+    Json(request): Json<UnifiedArbExchangeConfigUpdateRequest>,
 ) -> (StatusCode, Json<Value>) {
     let operation_id = local_operation_id();
     if request.apply && state.config.command_queue_path.is_none() {
@@ -2611,7 +3509,7 @@ async fn local_agent_save_cross_arb_exchanges(
             }),
         );
     }
-    let mut view = match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+    let mut view = match load_unified_arb_exchange_config(&state, &operation_id, true).await {
         Ok(view) => view,
         Err(response) => return response,
     };
@@ -2620,7 +3518,7 @@ async fn local_agent_save_cross_arb_exchanges(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(CROSS_ARB_STRATEGY_ID)
+        .unwrap_or(UNIFIED_ARB_STRATEGY_ID)
         .to_string();
 
     let mut next = if request.replace {
@@ -2641,7 +3539,8 @@ async fn local_agent_save_cross_arb_exchanges(
                     .and_then(Value::as_str)
                     .and_then(|exchange| find_exchange_config(&view.exchange_map, exchange))
             });
-        if let Some((key, config)) = normalize_cross_arb_exchange_row(exchange_hint, row, existing)
+        if let Some((key, config)) =
+            normalize_unified_arb_exchange_row(exchange_hint, row, existing)
         {
             next.insert(key, config);
         } else {
@@ -2652,16 +3551,20 @@ async fn local_agent_save_cross_arb_exchanges(
     view.exchanges = exchange_rows_from_map(&view.exchange_map);
     view.enabled_exchanges = enabled_exchanges_from_map(&view.exchange_map);
     view.cleaned_invalid_count += invalid_rows;
-    sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
+    sync_unified_arb_exchanges_into_root(
+        &mut view.root,
+        &view.exchange_map,
+        &view.enabled_exchanges,
+    );
 
-    match persist_cross_arb_config(
+    match persist_unified_arb_config(
         &state,
         &view,
         &operation_id,
         &strategy_id,
-        "local_agent_cross_arb_exchange_config_save",
+        "local_agent_unified_arb_exchange_config_save",
         request.apply,
-        "update_cross_arb_exchange_config",
+        "update_unified_arb_exchange_config",
         json!({
             "strategy_id": strategy_id,
             "enabled_exchanges": view.enabled_exchanges,
@@ -2672,13 +3575,13 @@ async fn local_agent_save_cross_arb_exchanges(
     {
         Ok(realtime_queued) => local_json_response(
             StatusCode::ACCEPTED,
-            cross_arb_exchange_config_response(&view, &operation_id, true, realtime_queued),
+            unified_arb_exchange_config_response(&view, &operation_id, true, realtime_queued),
         ),
         Err(response) => response,
     }
 }
 
-async fn local_agent_delete_cross_arb_exchange(
+async fn local_agent_delete_unified_arb_exchange(
     State(state): State<LocalSideEffectState>,
     AxumPath(exchange): AxumPath<String>,
 ) -> (StatusCode, Json<Value>) {
@@ -2695,7 +3598,7 @@ async fn local_agent_delete_cross_arb_exchange(
             }),
         );
     }
-    let mut view = match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+    let mut view = match load_unified_arb_exchange_config(&state, &operation_id, true).await {
         Ok(view) => view,
         Err(response) => return response,
     };
@@ -2718,18 +3621,22 @@ async fn local_agent_delete_cross_arb_exchange(
     view.removed_exchanges.push(remove_key.clone());
     view.exchanges = exchange_rows_from_map(&view.exchange_map);
     view.enabled_exchanges = enabled_exchanges_from_map(&view.exchange_map);
-    sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
+    sync_unified_arb_exchanges_into_root(
+        &mut view.root,
+        &view.exchange_map,
+        &view.enabled_exchanges,
+    );
 
-    match persist_cross_arb_config(
+    match persist_unified_arb_config(
         &state,
         &view,
         &operation_id,
-        CROSS_ARB_STRATEGY_ID,
-        "local_agent_cross_arb_exchange_config_delete",
+        UNIFIED_ARB_STRATEGY_ID,
+        "local_agent_unified_arb_exchange_config_delete",
         true,
-        "update_cross_arb_exchange_config",
+        "update_unified_arb_exchange_config",
         json!({
-            "strategy_id": CROSS_ARB_STRATEGY_ID,
+            "strategy_id": UNIFIED_ARB_STRATEGY_ID,
             "enabled_exchanges": view.enabled_exchanges,
             "exchanges": view.exchanges,
         }),
@@ -2738,7 +3645,7 @@ async fn local_agent_delete_cross_arb_exchange(
     {
         Ok(realtime_queued) => {
             let mut response =
-                cross_arb_exchange_config_response(&view, &operation_id, true, realtime_queued);
+                unified_arb_exchange_config_response(&view, &operation_id, true, realtime_queued);
             if let Some(map) = response.as_object_mut() {
                 map.insert("removed_exchange".to_string(), Value::String(remove_key));
             }
@@ -2749,7 +3656,7 @@ async fn local_agent_delete_cross_arb_exchange(
 }
 
 #[derive(Debug, Clone)]
-struct CrossArbExchangeConfigView {
+struct UnifiedArbExchangeConfigView {
     root: Value,
     exchange_map: Map<String, Value>,
     exchanges: Vec<Value>,
@@ -2759,11 +3666,11 @@ struct CrossArbExchangeConfigView {
     cleaned_on_read: bool,
 }
 
-async fn load_cross_arb_exchange_config(
+async fn load_unified_arb_exchange_config(
     state: &LocalSideEffectState,
     operation_id: &str,
     persist_cleaned: bool,
-) -> Result<CrossArbExchangeConfigView, (StatusCode, Json<Value>)> {
+) -> Result<UnifiedArbExchangeConfigView, (StatusCode, Json<Value>)> {
     let Some(path) = state.config.strategy_config_path.as_ref() else {
         return Err(local_json_response(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -2826,9 +3733,9 @@ async fn load_cross_arb_exchange_config(
 
     let previous_root = root.clone();
     let (exchange_map, cleaned_invalid_count, removed_exchanges) =
-        sanitize_cross_arb_exchange_map(root.get("exchanges"));
+        sanitize_unified_arb_exchange_map(root.get("exchanges"));
     let enabled_exchanges = enabled_exchanges_from_root_or_map(&root, &exchange_map);
-    sync_cross_arb_exchanges_into_root(&mut root, &exchange_map, &enabled_exchanges);
+    sync_unified_arb_exchanges_into_root(&mut root, &exchange_map, &enabled_exchanges);
     let cleaned_on_read = root != previous_root;
     if persist_cleaned && cleaned_on_read {
         if !state.control.audit_ledger_configured() {
@@ -2847,7 +3754,7 @@ async fn load_cross_arb_exchange_config(
         if state
             .control
             .record_operator_audit(
-                "local_agent_cross_arb_exchange_config_clean",
+                "local_agent_unified_arb_exchange_config_clean",
                 state.agent.agent_id.clone(),
                 json!({
                     "operation_id": operation_id,
@@ -2889,7 +3796,7 @@ async fn load_cross_arb_exchange_config(
             ));
         }
     }
-    Ok(CrossArbExchangeConfigView {
+    Ok(UnifiedArbExchangeConfigView {
         root,
         exchanges: exchange_rows_from_map(&exchange_map),
         exchange_map,
@@ -2900,9 +3807,9 @@ async fn load_cross_arb_exchange_config(
     })
 }
 
-async fn persist_cross_arb_config(
+async fn persist_unified_arb_config(
     state: &LocalSideEffectState,
-    view: &CrossArbExchangeConfigView,
+    view: &UnifiedArbExchangeConfigView,
     operation_id: &str,
     strategy_id: &str,
     action: &str,
@@ -3032,8 +3939,8 @@ async fn persist_cross_arb_config(
     Ok(true)
 }
 
-fn cross_arb_exchange_config_response(
-    view: &CrossArbExchangeConfigView,
+fn unified_arb_exchange_config_response(
+    view: &UnifiedArbExchangeConfigView,
     operation_id: &str,
     accepted: bool,
     realtime_queued: bool,
@@ -3045,7 +3952,7 @@ fn cross_arb_exchange_config_response(
         "status": "ok",
         "operation_id": operation_id,
         "path": LOCAL_STRATEGY_CONFIG_REF,
-        "strategy_id": CROSS_ARB_STRATEGY_ID,
+        "strategy_id": UNIFIED_ARB_STRATEGY_ID,
         "exchanges": view.exchanges,
         "enabled_exchanges": view.enabled_exchanges,
         "cleaned_on_read": view.cleaned_on_read,
@@ -3059,13 +3966,13 @@ fn cross_arb_exchange_config_response(
     })
 }
 
-fn cross_arb_settings_response(
-    view: &CrossArbExchangeConfigView,
+fn unified_arb_settings_response(
+    view: &UnifiedArbExchangeConfigView,
     operation_id: &str,
     accepted: bool,
     realtime_queued: bool,
 ) -> Value {
-    let settings = cross_arb_settings_view(&view.root, &view.enabled_exchanges);
+    let settings = unified_arb_settings_view(&view.root, &view.enabled_exchanges);
     json!({
         "schema_version": 1,
         "configured": true,
@@ -3073,7 +3980,7 @@ fn cross_arb_settings_response(
         "status": "ok",
         "operation_id": operation_id,
         "path": LOCAL_STRATEGY_CONFIG_REF,
-        "strategy_id": CROSS_ARB_STRATEGY_ID,
+        "strategy_id": UNIFIED_ARB_STRATEGY_ID,
         "settings": settings,
         "realtime": {
             "requested": accepted,
@@ -3083,7 +3990,7 @@ fn cross_arb_settings_response(
     })
 }
 
-fn cross_arb_settings_view(root: &Value, enabled_exchanges: &[String]) -> Value {
+fn unified_arb_settings_view(root: &Value, enabled_exchanges: &[String]) -> Value {
     let thresholds = root.get("thresholds").unwrap_or(&Value::Null);
     let dual_taker = root.get("dual_taker").unwrap_or(&Value::Null);
     let slippage_capture = root.get("slippage_capture").unwrap_or(&Value::Null);
@@ -3209,7 +4116,7 @@ fn cross_arb_settings_view(root: &Value, enabled_exchanges: &[String]) -> Value 
     })
 }
 
-fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsUpdateRequest) {
+fn apply_unified_arb_settings_update(root: &mut Value, request: &UnifiedArbSettingsUpdateRequest) {
     if !root.is_object() {
         *root = json!({});
     }
@@ -3402,12 +4309,12 @@ fn apply_cross_arb_settings_update(root: &mut Value, request: &CrossArbSettingsU
     }
 }
 
-fn cross_arb_settings_command_payload(
-    view: &CrossArbExchangeConfigView,
-    request: &CrossArbSettingsUpdateRequest,
+fn unified_arb_settings_command_payload(
+    view: &UnifiedArbExchangeConfigView,
+    request: &UnifiedArbSettingsUpdateRequest,
     strategy_id: &str,
 ) -> Value {
-    let mut payload = cross_arb_settings_view(&view.root, &view.enabled_exchanges);
+    let mut payload = unified_arb_settings_view(&view.root, &view.enabled_exchanges);
     if let Some(object) = payload.as_object_mut() {
         object.insert(
             "strategy_id".to_string(),
@@ -3481,7 +4388,7 @@ fn sanitized_nonnegative(value: Option<f64>) -> Option<f64> {
 fn normalized_symbols(symbols: Option<&[String]>) -> Option<Vec<Value>> {
     let symbols = symbols?
         .iter()
-        .filter_map(|symbol| normalize_cross_arb_symbol(symbol))
+        .filter_map(|symbol| normalize_unified_arb_symbol(symbol))
         .fold(Vec::<String>::new(), |mut symbols, symbol| {
             if !symbols.contains(&symbol) {
                 symbols.push(symbol);
@@ -3491,7 +4398,7 @@ fn normalized_symbols(symbols: Option<&[String]>) -> Option<Vec<Value>> {
     Some(symbols.into_iter().map(Value::String).collect())
 }
 
-fn normalize_cross_arb_symbol(symbol: &str) -> Option<String> {
+fn normalize_unified_arb_symbol(symbol: &str) -> Option<String> {
     let symbol = symbol.trim().to_ascii_uppercase();
     if symbol.is_empty() || symbol == "-" {
         return None;
@@ -3591,7 +4498,7 @@ fn ensure_object_path<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Map<Str
     current
 }
 
-fn sanitize_cross_arb_exchange_map(
+fn sanitize_unified_arb_exchange_map(
     value: Option<&Value>,
 ) -> (Map<String, Value>, usize, Vec<String>) {
     let mut cleaned_invalid_count = 0usize;
@@ -3600,7 +4507,7 @@ fn sanitize_cross_arb_exchange_map(
     match value {
         Some(Value::Object(rows)) => {
             for (exchange, row) in rows {
-                match normalize_cross_arb_exchange_row(exchange, row, None) {
+                match normalize_unified_arb_exchange_row(exchange, row, None) {
                     Some((key, config)) => {
                         map.insert(key, config);
                     }
@@ -3619,7 +4526,7 @@ fn sanitize_cross_arb_exchange_map(
                     .get("exchange")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                match normalize_cross_arb_exchange_row(exchange, row, None) {
+                match normalize_unified_arb_exchange_row(exchange, row, None) {
                     Some((key, config)) => {
                         map.insert(key, config);
                     }
@@ -3633,7 +4540,7 @@ fn sanitize_cross_arb_exchange_map(
     (map, cleaned_invalid_count, removed_exchanges)
 }
 
-fn normalize_cross_arb_exchange_row(
+fn normalize_unified_arb_exchange_row(
     exchange_hint: &str,
     row: &Value,
     base: Option<&Value>,
@@ -3654,11 +4561,11 @@ fn normalize_cross_arb_exchange_row(
         }
         object.insert(field.clone(), value.clone());
     }
-    normalize_cross_arb_exchange_fields(&key, &mut object);
+    normalize_unified_arb_exchange_fields(&key, &mut object);
     Some((key, Value::Object(object)))
 }
 
-fn normalize_cross_arb_exchange_fields(exchange: &str, object: &mut Map<String, Value>) {
+fn normalize_unified_arb_exchange_fields(exchange: &str, object: &mut Map<String, Value>) {
     let enabled = object
         .get("enabled")
         .and_then(Value::as_bool)
@@ -3740,7 +4647,7 @@ fn normalize_u64_with_default(object: &mut Map<String, Value>, field: &str, defa
     object.insert(field.to_string(), Value::from(value));
 }
 
-fn sync_cross_arb_exchanges_into_root(
+fn sync_unified_arb_exchanges_into_root(
     root: &mut Value,
     exchange_map: &Map<String, Value>,
     enabled_exchanges: &[String],
@@ -3998,6 +4905,104 @@ async fn local_agent_history_status(
     )
 }
 
+async fn local_agent_balance_history(
+    State(state): State<LocalSideEffectState>,
+) -> (StatusCode, Json<Value>) {
+    let mut rows = read_profit_history_rows(state.config.strategy_profit_history_path.as_ref())
+        .await
+        .unwrap_or_default();
+    if rows.is_empty() {
+        rows = read_balance_history_rows(state.config.balance_history_path.as_ref())
+            .await
+            .unwrap_or_default();
+    }
+    local_json_response(
+        StatusCode::OK,
+        json!({
+            "schema_version": CONTROL_API_SCHEMA_VERSION,
+            "rows": rows,
+            "local_path_exposed": false,
+        }),
+    )
+}
+
+async fn read_profit_history_rows(path: Option<&PathBuf>) -> std::io::Result<Vec<Value>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let raw = tokio::fs::read_to_string(path).await?;
+    let mut cumulative_profit = 0.0;
+    let mut rows = Vec::new();
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let profit = first_profit_number(&value).unwrap_or_default();
+        cumulative_profit += profit;
+        let timestamp = [
+            "recorded_at",
+            "closed_at",
+            "settled_at",
+            "planned_at",
+            "timestamp",
+            "time",
+        ]
+        .iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .unwrap_or("-");
+        rows.push(json!({
+            "timestamp_ms": history_timestamp_ms(&value).unwrap_or(rows.len() as f64),
+            "timestamp": timestamp,
+            "profit_usdt": cumulative_profit,
+            "event_profit_usdt": profit,
+            "symbol": value.get("canonical_symbol").or_else(|| value.get("symbol")).cloned().unwrap_or(Value::Null),
+            "exchange": value.get("exchange").or_else(|| value.get("long_exchange")).cloned().unwrap_or(Value::Null),
+            "detail": value.get("lifecycle").or_else(|| value.get("event_kind")).cloned().unwrap_or(Value::Null),
+        }));
+    }
+    Ok(rows)
+}
+
+async fn read_balance_history_rows(path: Option<&PathBuf>) -> std::io::Result<Vec<Value>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let raw = tokio::fs::read_to_string(path).await?;
+    let value = serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null);
+    Ok(value.as_array().cloned().unwrap_or_default())
+}
+
+fn first_profit_number(value: &Value) -> Option<f64> {
+    [
+        "actual_pnl_usdt",
+        "realized_profit_usdt",
+        "net_profit_usdt",
+        "profit_usdt",
+        "funding_pnl_usdt",
+        "funding_fee_usdt",
+    ]
+    .iter()
+    .find_map(|key| value.get(*key).and_then(Value::as_f64))
+}
+
+fn history_timestamp_ms(value: &Value) -> Option<f64> {
+    [
+        "recorded_at",
+        "closed_at",
+        "settled_at",
+        "planned_at",
+        "timestamp",
+        "time",
+    ]
+    .iter()
+    .find_map(|key| value.get(*key).and_then(Value::as_str))
+    .and_then(|value| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .ok()
+            .map(|timestamp| timestamp.timestamp_millis() as f64)
+    })
+}
+
 fn local_json_response(status: StatusCode, value: Value) -> (StatusCode, Json<Value>) {
     (status, Json(value))
 }
@@ -4228,6 +5233,14 @@ mod tests {
     use tower::ServiceExt;
 
     #[test]
+    fn gateway_check_helpers_should_map_ui_exchanges() {
+        assert_eq!(gateway_exchange_id("binance"), Some("binance"));
+        assert_eq!(gateway_exchange_id("gate"), Some("gateio"));
+        assert_eq!(gateway_exchange_id("gateio"), Some("gateio"));
+        assert_eq!(gateway_exchange_id("unknown"), None);
+    }
+
+    #[test]
     fn config_should_parse_control_api_environment_without_process_globals() {
         let config = ControlApiAppConfig::from_env_iter([
             ("RUSTCTA_CONTROL_API_BIND", "127.0.0.1:19090"),
@@ -4372,7 +5385,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_credential_status_should_use_account_manager_env_prefix_and_mask_values() {
+    async fn local_credential_status_should_collapse_accounts_to_canonical_exchange_account() {
         let temp_dir = std::env::current_dir()
             .unwrap()
             .join("target/tmp")
@@ -4399,7 +5412,7 @@ accounts:
         .unwrap();
         std::fs::write(
             &store_path,
-            "BINANCE_3_API_KEY='abcd1234efgh5678'\nBINANCE_3_API_SECRET='secret1234567890'\n",
+            "BINANCE_API_KEY='abcd1234efgh5678'\nBINANCE_API_SECRET='secret1234567890'\n",
         )
         .unwrap();
         let accounts_path_text = accounts_path.to_string_lossy().to_string();
@@ -4433,11 +5446,11 @@ accounts:
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             value["account_manager_accounts"][0]["account_id"],
-            "binance_hcr"
+            "default"
         );
         assert_eq!(
             value["account_manager_accounts"][0]["credential_namespace"],
-            "BINANCE_3"
+            "BINANCE"
         );
         assert_eq!(value["store_path"], "local-agent:exchange-api-key-store");
         let raw = std::str::from_utf8(&body).unwrap();
@@ -4466,6 +5479,254 @@ accounts:
         assert_eq!(post.status(), StatusCode::METHOD_NOT_ALLOWED);
 
         std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn exchange_api_keys_should_write_mask_and_clear_unified_env_store() {
+        let temp_dir = std::env::current_dir()
+            .unwrap()
+            .join("target/tmp")
+            .join(format!(
+                "rustcta-control-api-exchange-api-keys-{}",
+                std::process::id()
+            ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let accounts_path = temp_dir.join("accounts.yml");
+        let store_path = temp_dir.join("exchange_api_keys.env");
+        std::fs::write(
+            &accounts_path,
+            r#"
+accounts:
+  binance:
+    name: Binance
+    exchange: binance
+    env_prefix: BINANCE
+    enabled: true
+"#,
+        )
+        .unwrap();
+        let accounts_path_text = accounts_path.to_string_lossy().to_string();
+        let store_path_text = store_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            (
+                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
+                store_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG",
+                accounts_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let save = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "binance",
+                            "account_id": "default",
+                            "api_key": "abcd1234efgh5678",
+                            "api_secret": "secret1234567890"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(save.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(save.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_text = std::str::from_utf8(&body).unwrap();
+        assert!(!body_text.contains("abcd1234efgh5678"));
+        assert!(!body_text.contains("secret1234567890"));
+        assert!(body_text.contains("abcd...5678"));
+        assert!(body_text.contains("\"restart_required\":true"));
+
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(store.contains("BINANCE_API_KEY='abcd1234efgh5678'"));
+        assert!(store.contains("BINANCE_API_SECRET='secret1234567890'"));
+        assert!(!store.contains("BINANCE_FUTURES_API_KEY"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            assert_eq!(
+                std::fs::metadata(&store_path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        let test = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys/test")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "binance",
+                            "account_id": "default"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(test.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(test.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["accepted"], true);
+        assert_eq!(value["check"]["status"], "ok");
+
+        let clear = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "binance",
+                            "account_id": "default",
+                            "clear": true
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(clear.status(), StatusCode::OK);
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(!store.contains("BINANCE_API_KEY"));
+        assert!(!store.contains("BINANCE_API_SECRET"));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_create_strategy_should_write_generated_template_config() {
+        let temp_dir = std::env::current_dir()
+            .unwrap()
+            .join("target/tmp")
+            .join(format!(
+                "rustcta-control-api-create-strategy-{}",
+                std::process::id()
+            ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let config_path = temp_dir.join("generated").join("unified_arb_live.yml");
+        let audit_path = temp_dir.join("audit.jsonl");
+        let registry_path = temp_dir.join("registry.json");
+        let store_path = temp_dir.join("credentials.env");
+        let audit_path_text = audit_path.to_string_lossy().to_string();
+        let registry_path_text = registry_path.to_string_lossy().to_string();
+        let store_path_text = store_path.to_string_lossy().to_string();
+        let config_path_text = config_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "local-agent"),
+            (
+                "RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH",
+                audit_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
+                registry_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_CREDENTIAL_STATUS_STORE",
+                store_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/strategies")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "strategy_id": "unified_arb_live",
+                            "strategy_kind": "unified_arbitrage",
+                            "template_id": "unified_arbitrage",
+                            "run_mode": "dry_run",
+                            "tenant_id": "local",
+                            "config_path": config_path_text,
+                            "working_dir": ".",
+                            "exchange_accounts": {
+                                "long": "binance:default:BINANCE",
+                                "short": "okx:default:OKX"
+                            },
+                            "risk": {
+                                "max_total_notional_usdt": "1000"
+                            },
+                            "params": {
+                                "symbols": "BTCUSDT,ETHUSDT",
+                                "min_open_net_edge_pct": "0.04"
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved = std::fs::read_to_string(&config_path).unwrap();
+        assert!(saved.contains("unified_arbitrage"));
+        assert!(saved.contains("perp_perp_spread"));
+        assert!(saved.contains("max_total_notional_usdt"));
+        assert!(saved.contains("BTC/USDT"));
+        assert!(!saved.contains("template_id"));
+        assert!(!saved.contains("exchange_accounts"));
+        assert!(!saved.contains("api_secret"));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[test]
+    fn generated_hedged_grid_config_should_normalize_symbol_and_exchange() {
+        let request = CreateStrategyRequest {
+            strategy_id: "hedged_grid_live".to_string(),
+            strategy_kind: "hedged_grid".to_string(),
+            template_id: Some("hedged_grid".to_string()),
+            run_mode: Some("dry_run".to_string()),
+            run_id: None,
+            tenant_id: Some("local".to_string()),
+            config_path: "config/generated/hedged_grid_live.yml".to_string(),
+            log_path: None,
+            command: None,
+            args: Vec::new(),
+            working_dir: Some(".".to_string()),
+            exchange_accounts: serde_json::json!({
+                "execution": "Binance_USDM:default:BINANCE"
+            }),
+            risk: serde_json::json!({}),
+            params: serde_json::json!({
+                "symbol": "btc-usdt",
+                "grid_spacing": "0.25",
+                "grid_order_count": "8",
+                "order_notional_usdt": "50"
+            }),
+        };
+
+        let config = hedged_grid_runtime_config(&request);
+
+        assert_eq!(config["symbol"], "BTC/USDT");
+        assert_eq!(config["spot_exchange"], "binance");
+        assert_eq!(config["hedge_exchange"], "binance");
     }
 
     #[tokio::test]
@@ -4592,7 +5853,7 @@ accounts:
                     .header(axum::http::header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         serde_json::json!({
-                            "strategy_id": "cross_arb_live",
+                            "strategy_id": "unified_arb_live",
                             "content": "mode: simulation\n",
                             "restart": true
                         })
@@ -4622,12 +5883,12 @@ accounts:
         );
         let command_log = std::fs::read_to_string(&command_path).unwrap();
         assert!(command_log.contains("\"command\":\"restart_strategy\""));
-        assert!(command_log.contains("\"strategy_id\":\"cross_arb_live\""));
+        assert!(command_log.contains("\"strategy_id\":\"unified_arb_live\""));
         assert!(command_log.contains("\"restart_script_executed\":false"));
         assert!(!marker_path.exists());
         let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
         assert!(ledger_log.contains("local_agent_strategy_config_edit"));
-        assert!(ledger_log.contains("cross_arb_live"));
+        assert!(ledger_log.contains("unified_arb_live"));
         assert!(!ledger_log.contains("api_secret"));
 
         let audit = app
@@ -4654,9 +5915,9 @@ accounts:
     }
 
     #[tokio::test]
-    async fn local_agent_cross_arb_exchange_config_should_clean_on_startup() {
+    async fn local_agent_unified_arb_exchange_config_should_clean_on_startup() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rustcta-control-api-cross-arb-startup-clean-{}",
+            "rustcta-control-api-unified-arb-startup-clean-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -4691,7 +5952,7 @@ exchanges:
         ]);
 
         config
-            .clean_cross_arb_exchange_config_on_startup()
+            .clean_unified_arb_exchange_config_on_startup()
             .await
             .unwrap();
 
@@ -4700,16 +5961,16 @@ exchanges:
         assert!(cleaned_config["exchanges"].get("bad_row").is_none());
         assert_eq!(cleaned_config["enabled_exchanges"], json!(["binance"]));
         let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
-        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_clean"));
+        assert!(ledger_log.contains("local_agent_unified_arb_exchange_config_clean"));
         assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
 
         std::fs::remove_dir_all(temp_dir).ok();
     }
 
     #[tokio::test]
-    async fn local_agent_cross_arb_exchange_config_should_clean_persist_delete_and_queue() {
+    async fn local_agent_unified_arb_exchange_config_should_clean_persist_delete_and_queue() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rustcta-control-api-cross-arb-exchanges-{}",
+            "rustcta-control-api-unified-arb-exchanges-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -4764,7 +6025,7 @@ exchanges:
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/local-agent/cross-arb/exchanges")
+                    .uri("/api/local-agent/unified-arb/exchanges")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -4797,11 +6058,11 @@ exchanges:
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/local-agent/cross-arb/exchanges")
+                    .uri("/api/local-agent/unified-arb/exchanges")
                     .header(axum::http::header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         json!({
-                            "strategy_id": "cross_arb_live",
+                            "strategy_id": "unified_arb_live",
                             "apply": true,
                             "exchanges": [
                                 {
@@ -4840,7 +6101,7 @@ exchanges:
         assert_eq!(saved_config["exchanges"]["gate"]["enabled"], true);
         assert!(saved_config["exchanges"].get("gateio").is_none());
         let command_log = std::fs::read_to_string(&command_path).unwrap();
-        assert!(command_log.contains("\"command\":\"update_cross_arb_exchange_config\""));
+        assert!(command_log.contains("\"command\":\"update_unified_arb_exchange_config\""));
         assert!(command_log.contains("\"enabled_exchanges\":[\"gate\"]"));
 
         let merged = app
@@ -4848,11 +6109,11 @@ exchanges:
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/local-agent/cross-arb/exchanges")
+                    .uri("/api/local-agent/unified-arb/exchanges")
                     .header(axum::http::header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         json!({
-                            "strategy_id": "cross_arb_live",
+                            "strategy_id": "unified_arb_live",
                             "replace": false,
                             "apply": true,
                             "exchanges": [
@@ -4885,7 +6146,7 @@ exchanges:
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri("/api/local-agent/cross-arb/exchanges/gateio")
+                    .uri("/api/local-agent/unified-arb/exchanges/gateio")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -4904,18 +6165,18 @@ exchanges:
             3
         );
         let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
-        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_clean"));
-        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_save"));
-        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_delete"));
+        assert!(ledger_log.contains("local_agent_unified_arb_exchange_config_clean"));
+        assert!(ledger_log.contains("local_agent_unified_arb_exchange_config_save"));
+        assert!(ledger_log.contains("local_agent_unified_arb_exchange_config_delete"));
         assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
 
         std::fs::remove_dir_all(temp_dir).ok();
     }
 
     #[tokio::test]
-    async fn local_agent_cross_arb_settings_should_persist_open_and_close_thresholds() {
+    async fn local_agent_unified_arb_settings_should_persist_open_and_close_thresholds() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rustcta-control-api-cross-arb-settings-{}",
+            "rustcta-control-api-unified-arb-settings-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -4974,11 +6235,11 @@ exchanges:
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/local-agent/cross-arb/settings")
+                    .uri("/api/local-agent/unified-arb/settings")
                     .header(axum::http::header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         json!({
-                            "strategy_id": "cross_arb_live",
+                            "strategy_id": "unified_arb_live",
                             "apply": true,
                             "symbols": ["EDGE/USDT", "edge-usdt", "SPCX/USDT"],
                             "target_notional_usdt": 5.5,
@@ -5068,9 +6329,9 @@ exchanges:
             json!(["EDGE/USDT", "SPCX/USDT"])
         );
         let command_log = std::fs::read_to_string(&command_path).unwrap();
-        assert!(command_log.contains("\"command\":\"update_cross_arb_settings\""));
+        assert!(command_log.contains("\"command\":\"update_unified_arb_settings\""));
         let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
-        assert!(ledger_log.contains("local_agent_cross_arb_settings_save"));
+        assert!(ledger_log.contains("local_agent_unified_arb_settings_save"));
         assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
 
         std::fs::remove_dir_all(temp_dir).ok();
@@ -5231,11 +6492,11 @@ exchanges:
                 "processes": [
                     {
                         "schema_version": 1,
-                        "strategy_id": "cross_arb_live",
-                        "strategy_kind": "cross_exchange_arbitrage",
+                        "strategy_id": "unified_arb_live",
+                        "strategy_kind": "unified_arbitrage",
                         "run_id": "local",
                         "tenant_id": "local",
-                        "config_path": "config/cross_exchange_arbitrage_usdt.yml",
+                        "config_path": "config/unified_arbitrage_usdt.yml",
                         "status": "Running",
                         "process_id": 123,
                         "started_at": "2026-06-07T12:00:00Z",
@@ -5335,8 +6596,8 @@ exchanges:
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value.as_array().unwrap().len(), 2);
-        assert_eq!(value[0]["strategy_id"], "cross_arb_live");
-        assert_eq!(value[0]["strategy_kind"], "cross_exchange_arbitrage");
+        assert_eq!(value[0]["strategy_id"], "unified_arb_live");
+        assert_eq!(value[0]["strategy_kind"], "unified_arbitrage");
         assert_eq!(value[0]["status"], "Running");
         assert_eq!(value[1]["strategy_id"], "spot_spot_live_dry_run");
         assert_eq!(value[1]["strategy_kind"], "spot_spot_taker_arbitrage");
@@ -5346,7 +6607,7 @@ exchanges:
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/processes/cross_arb_live")
+                    .uri("/api/processes/unified_arb_live")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -5377,7 +6638,7 @@ exchanges:
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value.as_array().unwrap().len(), 2);
-        assert_eq!(value[0]["strategy_id"], "cross_arb_live");
+        assert_eq!(value[0]["strategy_id"], "unified_arb_live");
         assert!(value[0].get("log_path").is_none());
 
         let gateway = app
@@ -5528,7 +6789,7 @@ exchanges:
         )]);
         let app = config.build_router().unwrap();
 
-        for uri in ["/", "/workspace/cross_arb_live"] {
+        for uri in ["/", "/workspace/unified_arb_live"] {
             let response = app
                 .clone()
                 .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
@@ -5592,7 +6853,7 @@ exchanges:
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let registry_path = temp_dir.join("registry.json");
-        let log_path = temp_dir.join("cross-arb.log");
+        let log_path = temp_dir.join("unified-arb.log");
         std::fs::write(
             &log_path,
             [
@@ -5611,11 +6872,11 @@ exchanges:
                 "processes": [
                     {
                         "schema_version": 1,
-                        "strategy_id": "cross_arb_live",
-                        "strategy_kind": "cross_exchange_arbitrage",
+                        "strategy_id": "unified_arb_live",
+                        "strategy_kind": "unified_arbitrage",
                         "run_id": "local",
                         "tenant_id": "local",
-                        "config_path": "config/cross_exchange_arbitrage_usdt.yml",
+                        "config_path": "config/unified_arbitrage_usdt.yml",
                         "status": "Running",
                         "process_id": 123,
                         "started_at": "2026-06-07T12:00:00Z",
@@ -5646,7 +6907,7 @@ exchanges:
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/processes/cross_arb_live")
+                    .uri("/api/processes/unified_arb_live")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -5663,7 +6924,7 @@ exchanges:
         let logs = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/processes/cross_arb_live/logs")
+                    .uri("/api/processes/unified_arb_live/logs")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -5674,7 +6935,7 @@ exchanges:
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value["target"], "cross_arb_live");
+        assert_eq!(value["target"], "unified_arb_live");
         assert_eq!(value["configured"], true);
         assert_eq!(value["readable"], true);
         assert_eq!(value["event_count"], 2);

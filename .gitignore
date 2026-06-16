@@ -16,6 +16,11 @@ run/
 *.har
 help/*.log*
 data/
+!data/
+data/*
+!data/sql/
+data/sql/*
+!data/sql/unified_arbitrage.sql
 !src/data/
 !src/data/**
 !src/backtest/data/

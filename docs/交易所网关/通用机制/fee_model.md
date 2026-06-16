@@ -1,6 +1,16 @@
 # Fee Model
 
-RustCTA uses `src/execution/fee_model.rs` as the central fee source for arbitrage opportunity evaluation. Strategies should ask `FeeModel` for maker or taker fees instead of hardcoding per-strategy rates.
+RustCTA keeps fee data in the exchange/execution contracts and strategy-local
+models:
+
+- `crates/rustcta-exchange-api/src/market.rs` exposes `FeesRequest`,
+  `FeesResponse`, and `FeeRateSnapshot`.
+- `crates/rustcta-execution-api/src/lib.rs` records execution fee decisions.
+- `strategies/spot-spot-arbitrage/src/fees.rs` owns the current Spot
+  arbitrage `SpotFeeModel`.
+
+Strategies should ask their shared fee model or exchange fee API for maker or
+taker fees instead of hardcoding per-strategy rates.
 
 ## Priority
 
@@ -75,7 +85,9 @@ See `config/fees.yml` for the repository template.
 
 ## Strategy Usage
 
-`spot_spot_taker_arbitrage` loads `FeeModel` from `fee_config_path`, then applies existing strategy fee overrides as compatibility overlays. Opportunity detection uses the model for net spread and records:
+`strategies/spot-spot-arbitrage/` loads `SpotFeeModel` from `fee_config_path`,
+then applies existing strategy fee overrides as compatibility overlays.
+Opportunity detection uses the model for net spread and records:
 
 - buy and sell fee bps
 - buy and sell fee source

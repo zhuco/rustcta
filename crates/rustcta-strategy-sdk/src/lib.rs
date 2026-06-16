@@ -82,6 +82,162 @@ pub trait StrategyExecutionClient: Send + Sync {
     async fn submit_raw_intent(&self, intent: ExecutionIntent) -> SdkResult<ExecutionIntentAck>;
 }
 
+/// HTTP-backed implementation for runtimes hosted outside the execution router
+/// process. The strategy still emits SDK commands; gateway/risk routing remains
+/// owned by the remote platform endpoint.
+#[derive(Clone)]
+pub struct HttpStrategyExecutionClient {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl HttpStrategyExecutionClient {
+    pub fn new(base_url: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: trim_base_url(base_url.into()),
+        }
+    }
+
+    async fn post_json<T, R>(&self, path: &str, payload: &T) -> SdkResult<R>
+    where
+        T: Serialize + ?Sized,
+        R: for<'de> Deserialize<'de>,
+    {
+        let url = format!("{}/{}", self.base_url, path.trim_start_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(StrategySdkError::ExecutionRejected(format!(
+                "remote execution endpoint returned HTTP {status}: {body}"
+            )));
+        }
+        response
+            .json::<R>()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))
+    }
+}
+
+#[async_trait]
+impl StrategyExecutionClient for HttpStrategyExecutionClient {
+    async fn submit_order(&self, command: ExecutionOrderCommand) -> SdkResult<ExecutionOrderAck> {
+        self.post_json("strategy-execution/orders", &command).await
+    }
+
+    async fn cancel_order(&self, command: ExecutionCancelCommand) -> SdkResult<ExecutionCancelAck> {
+        self.post_json("strategy-execution/cancels", &command).await
+    }
+
+    async fn submit_raw_intent(&self, intent: ExecutionIntent) -> SdkResult<ExecutionIntentAck> {
+        self.post_json("strategy-execution/intents", &intent).await
+    }
+}
+
+#[derive(Clone)]
+pub struct HttpStrategyPlatformClient {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl HttpStrategyPlatformClient {
+    pub fn new(base_url: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: trim_base_url(base_url.into()),
+        }
+    }
+
+    pub async fn market_snapshot(
+        &self,
+        request: RuntimeMarketSnapshotRequest,
+    ) -> SdkResult<RuntimeMarketSnapshot> {
+        let url = format!("{}/strategy-platform/market-snapshot", self.base_url);
+        let response = self
+            .client
+            .post(url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(StrategySdkError::ExecutionRejected(format!(
+                "remote platform endpoint returned HTTP {status}: {body}"
+            )));
+        }
+        response
+            .json::<RuntimeMarketSnapshot>()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))
+    }
+
+    pub async fn recent_fills(
+        &self,
+        request: RuntimeRecentFillsRequest,
+    ) -> SdkResult<RuntimeRecentFills> {
+        let url = format!("{}/strategy-platform/recent-fills", self.base_url);
+        let response = self
+            .client
+            .post(url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(StrategySdkError::ExecutionRejected(format!(
+                "remote platform endpoint returned HTTP {status}: {body}"
+            )));
+        }
+        response
+            .json::<RuntimeRecentFills>()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))
+    }
+
+    pub async fn account_config(
+        &self,
+        request: RuntimeAccountConfigRequest,
+    ) -> SdkResult<RuntimeAccountConfig> {
+        let url = format!("{}/strategy-platform/account-config", self.base_url);
+        let response = self
+            .client
+            .post(url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(StrategySdkError::ExecutionRejected(format!(
+                "remote platform endpoint returned HTTP {status}: {body}"
+            )));
+        }
+        response
+            .json::<RuntimeAccountConfig>()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))
+    }
+}
+
+fn trim_base_url(mut value: String) -> String {
+    while value.ends_with('/') {
+        value.pop();
+    }
+    value
+}
+
 /// Runtime services and immutable identity provided to a strategy instance.
 #[derive(Clone)]
 pub struct StrategyContext {
@@ -371,6 +527,98 @@ pub struct MarketDataEvent {
     pub symbol: String,
     pub received_at: DateTime<Utc>,
     pub payload: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeMarketSnapshotRequest {
+    pub schema_version: u32,
+    pub tenant_id: String,
+    pub account_id: String,
+    pub run_id: String,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeMarketSnapshot {
+    pub schema_version: u32,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub best_bid: f64,
+    pub best_ask: f64,
+    pub last_price: f64,
+    pub mark_price: f64,
+    pub tick_size: f64,
+    pub step_size: f64,
+    pub min_qty: Option<f64>,
+    pub min_notional: Option<f64>,
+    pub received_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeRecentFillsRequest {
+    pub schema_version: u32,
+    pub tenant_id: String,
+    pub account_id: String,
+    pub run_id: String,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub start_time: Option<DateTime<Utc>>,
+    pub limit: Option<u32>,
+    pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeFill {
+    pub schema_version: u32,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub fill_id: Option<String>,
+    pub order_id: Option<String>,
+    pub client_order_id: Option<String>,
+    pub side: OrderSide,
+    pub position_side: String,
+    pub price: f64,
+    pub quantity: f64,
+    pub filled_at: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeRecentFills {
+    pub schema_version: u32,
+    pub fills: Vec<RuntimeFill>,
+    pub received_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeAccountConfigRequest {
+    pub schema_version: u32,
+    pub tenant_id: String,
+    pub account_id: String,
+    pub run_id: String,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeAccountConfig {
+    pub schema_version: u32,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub position_mode: Option<String>,
+    pub margin_mode: Option<String>,
+    pub leverage: Option<u32>,
+    pub max_leverage: Option<u32>,
+    pub received_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

@@ -2,7 +2,13 @@
 
 MEXC Spot and CoinEx Spot private user streams are not supported in this repository. Any future small live taker/taker test must confirm orders through REST.
 
-`src/execution/order_reconciliation.rs` provides reusable primitives only. It does not place orders.
+Reusable reconciliation primitives live in:
+
+- `crates/rustcta-exchange-gateway/src/reconciliation.rs`
+- `crates/rustcta-execution-api/src/lib.rs`
+- `crates/rustcta-execution-router/src/lib.rs`
+
+They do not place orders.
 
 Polling behavior:
 

@@ -9,7 +9,6 @@ members = [
     "crates/rustcta-strategy-sdk",
     "crates/rustcta-supervisor",
     "crates/rustcta-control-api",
-    "crates/rustcta-cross-arb-live-runner",
     "crates/rustcta-observability",
     "crates/rustcta-reporting",
     "crates/rustcta-smart-money",
@@ -21,10 +20,7 @@ members = [
     "tools/ops",
     "strategies/avellaneda-stoikov",
     "strategies/spot-spot-arbitrage",
-    "strategies/spot-futures-arbitrage",
-    "strategies/cross-exchange-arbitrage",
-    "strategies/funding-arbitrage",
-    "strategies/funding-spread-expansion-maker",
+    "strategies/unified-arbitrage",
     "strategies/hedged-grid",
     "strategies/mean-reversion",
     "strategies/poisson-market-maker",
@@ -35,7 +31,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.23"
+version = "0.3.24"
 edition = "2021"
 license = "UNLICENSED"
 publish = false

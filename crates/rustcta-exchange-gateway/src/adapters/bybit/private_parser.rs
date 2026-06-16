@@ -48,13 +48,16 @@ pub fn parse_balances(
         if !requested.is_empty() && !requested.contains(&asset) {
             continue;
         }
-        let total = decimal_value_to_f64(coin.get("walletBalance"))?.unwrap_or(0.0);
-        let available = decimal_value_to_f64(
-            coin.get("availableToWithdraw")
-                .or_else(|| coin.get("availableBalance")),
-        )?
-        .unwrap_or(total);
-        let locked = (total - available).max(0.0);
+        let free = decimal_value_to_f64(coin.get("free"))?;
+        let locked_field = decimal_value_to_f64(coin.get("locked"))?;
+        let total = first_decimal_field(coin, &["walletBalance", "equity"])?
+            .or_else(|| free.zip(locked_field).map(|(free, locked)| free + locked))
+            .or(free)
+            .unwrap_or(0.0);
+        let available =
+            first_decimal_field(coin, &["availableToWithdraw", "availableBalance", "free"])?
+                .unwrap_or(total);
+        let locked = locked_field.unwrap_or_else(|| (total - available).max(0.0));
         balances
             .push(AssetBalance::new(asset, total, available, locked).map_err(validation_error)?);
     }
@@ -67,6 +70,15 @@ pub fn parse_balances(
         balances,
         observed_at: Utc::now(),
     }])
+}
+
+fn first_decimal_field(value: &Value, fields: &[&str]) -> ExchangeApiResult<Option<f64>> {
+    for field in fields {
+        if let Some(parsed) = decimal_value_to_f64(value.get(*field))? {
+            return Ok(Some(parsed));
+        }
+    }
+    Ok(None)
 }
 
 pub fn parse_positions(

@@ -4,7 +4,7 @@
   "strategy_kind": "exchange_order_canary",
   "run_id": "local",
   "tenant_id": "local",
-  "config_path": "config/cross_exchange_arbitrage_usdt.yml",
+  "config_path": "config/unified_arbitrage_usdt.yml",
   "command": "cargo",
   "args": [
     "run",
@@ -14,7 +14,7 @@
     "canary",
     "exchange-order",
     "--config",
-    "config/cross_exchange_arbitrage_usdt.yml"
+    "config/unified_arbitrage_usdt.yml"
   ],
   "working_dir": ".",
   "log_path": "logs/supervisor/exchange_order_canary.log",

@@ -48,9 +48,29 @@ pub struct HedgedGridConfig {
     pub spot_exchange: String,
     pub hedge_exchange: String,
     pub grid_spacing_bps: f64,
+    #[serde(default = "default_grid_spacing_mode")]
+    pub grid_spacing_mode: String,
+    #[serde(default)]
+    pub grid_spacing_abs: Option<f64>,
+    #[serde(default = "default_grid_order_count")]
+    pub grid_order_count: u64,
+    #[serde(default = "default_order_notional_usdt")]
+    pub order_notional_usdt: f64,
     pub max_inventory_quote: String,
     #[serde(default)]
     pub dry_run: bool,
+}
+
+fn default_grid_spacing_mode() -> String {
+    "pct".to_string()
+}
+
+fn default_grid_order_count() -> u64 {
+    8
+}
+
+fn default_order_notional_usdt() -> f64 {
+    50.0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -477,6 +497,14 @@ pub fn config_schema() -> StrategyConfigSchema {
                 "spot_exchange": { "type": "string", "minLength": 1 },
                 "hedge_exchange": { "type": "string", "minLength": 1 },
                 "grid_spacing_bps": { "type": "number", "exclusiveMinimum": 0.0 },
+                "grid_spacing_mode": {
+                    "type": "string",
+                    "enum": ["pct", "abs"],
+                    "default": "pct"
+                },
+                "grid_spacing_abs": { "type": "number", "exclusiveMinimum": 0.0 },
+                "grid_order_count": { "type": "integer", "minimum": 1 },
+                "order_notional_usdt": { "type": "number", "exclusiveMinimum": 0.0 },
                 "max_inventory_quote": {
                     "type": "string",
                     "pattern": "^[0-9]+(\\.[0-9]+)?$"
