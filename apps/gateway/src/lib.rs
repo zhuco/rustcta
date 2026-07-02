@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 pub use config::{GatewayAppConfig, GatewayRestBaseUrls};
 use rustcta_exchange_api::{
     ExchangeClient, MarginMode, OrderBookRequest, PerpAccountControlProvider, PositionMode,
-    RecentFillsRequest, RequestContext, SymbolAccountConfigRequest, SymbolRulesRequest,
-    SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
+    PositionsRequest, RecentFillsRequest, RequestContext, SymbolAccountConfigRequest,
+    SymbolRulesRequest, SymbolScope, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_exchange_gateway::{
     AdapterBackedGateway, GatewayExchangeClient, InProcessGatewayClient,
@@ -52,6 +52,7 @@ pub fn strategy_platform_router(gateway: Arc<AdapterBackedGateway>) -> Router {
             "/strategy-platform/recent-fills",
             post(strategy_recent_fills),
         )
+        .route("/strategy-platform/positions", post(strategy_positions))
         .route(
             "/strategy-platform/account-config",
             post(strategy_account_config),
@@ -231,6 +232,38 @@ struct StrategyRecentFills {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct StrategyPositionsRequest {
+    schema_version: u32,
+    tenant_id: String,
+    account_id: String,
+    run_id: String,
+    exchange_id: String,
+    symbol: String,
+    market_type: StrategyMarketType,
+    requested_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct StrategyRuntimePosition {
+    schema_version: u32,
+    exchange_id: String,
+    symbol: String,
+    market_type: StrategyMarketType,
+    position_side: String,
+    quantity: f64,
+    entry_price: f64,
+    mark_price: f64,
+    observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct StrategyPositions {
+    schema_version: u32,
+    positions: Vec<StrategyRuntimePosition>,
+    received_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct StrategyAccountConfigRequest {
     schema_version: u32,
     tenant_id: String,
@@ -312,6 +345,16 @@ async fn strategy_recent_fills(
 ) -> Response {
     match load_strategy_recent_fills(state.gateway, request).await {
         Ok(fills) => Json(fills).into_response(),
+        Err(error) => platform_error(error).into_response(),
+    }
+}
+
+async fn strategy_positions(
+    State(state): State<StrategyPlatformState>,
+    Json(request): Json<StrategyPositionsRequest>,
+) -> Response {
+    match load_strategy_positions(state.gateway, request).await {
+        Ok(positions) => Json(positions).into_response(),
         Err(error) => platform_error(error).into_response(),
     }
 }
@@ -515,6 +558,61 @@ async fn load_strategy_recent_fills(
     Ok(StrategyRecentFills {
         schema_version: request.schema_version,
         fills,
+        received_at: Utc::now(),
+    })
+}
+
+async fn load_strategy_positions(
+    gateway: Arc<AdapterBackedGateway>,
+    request: StrategyPositionsRequest,
+) -> Result<StrategyPositions> {
+    let exchange_id = ExchangeId::new(&request.exchange_id)?;
+    let market_type = map_market_type(request.market_type);
+    let tenant_id = TenantId::new(&request.tenant_id)?;
+    let account_id = AccountId::new(&request.account_id)?;
+    let run_id = RunId::new(&request.run_id)?;
+    let symbol = exchange_symbol(&exchange_id, market_type, &request.symbol)?;
+    let client = GatewayExchangeClient::new(
+        Arc::new(InProcessGatewayClient::new(gateway)),
+        tenant_id.clone(),
+        Some(account_id.clone()),
+        exchange_id.clone(),
+    );
+    let mut context = RequestContext::new(request.requested_at);
+    context.tenant_id = Some(tenant_id);
+    context.account_id = Some(account_id);
+    context.run_id = Some(run_id);
+    context.request_id = Some(format!(
+        "strategy-positions-{}-{}",
+        request.exchange_id, request.symbol
+    ));
+    let response = client
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context,
+            exchange: exchange_id,
+            market_type: Some(market_type),
+            symbols: vec![symbol],
+        })
+        .await?;
+    let positions = response
+        .positions
+        .into_iter()
+        .map(|position| StrategyRuntimePosition {
+            schema_version: request.schema_version,
+            exchange_id: position.exchange_id.to_string(),
+            symbol: request.symbol.clone(),
+            market_type: request.market_type,
+            position_side: position_side_label(position.side),
+            quantity: position.quantity,
+            entry_price: position.entry_price.unwrap_or(0.0),
+            mark_price: position.mark_price.unwrap_or(0.0),
+            observed_at: position.observed_at,
+        })
+        .collect();
+    Ok(StrategyPositions {
+        schema_version: request.schema_version,
+        positions,
         received_at: Utc::now(),
     })
 }
@@ -800,6 +898,16 @@ fn margin_mode_label(mode: MarginMode) -> String {
         MarginMode::Cross => "cross",
         MarginMode::Isolated => "isolated",
         MarginMode::Unknown => "unknown",
+    }
+    .to_string()
+}
+
+fn position_side_label(side: PositionSide) -> String {
+    match side {
+        PositionSide::Long => "LONG",
+        PositionSide::Short => "SHORT",
+        PositionSide::Net => "NET",
+        PositionSide::None => "NONE",
     }
     .to_string()
 }

@@ -73,6 +73,18 @@ config/accounts.yml
 `rustcta-gateway` and `unified-arb-live` read the same env-store through systemd
 `EnvironmentFile` entries. Browser/API responses expose only masked status.
 
+## Strategy Docs
+
+- `funding_spread_expansion_maker_prompt_zh.md` - prompt pack for a
+  cross-exchange perpetual strategy that combines funding-rate carry, directed
+  spread expansion exits, maker/maker-taker slow entry, add-on sizing, and
+  close-only risk handling.
+- `multi_exchange_spot_arbitrage.md` - Spot-to-Spot arbitrage runtime overview.
+- `spot_spot_inventory_rebalance_flow.md` - inventory rebalance rules.
+- `spot_spot_inventory_rebalance_flow_zh.md` - Chinese version of the inventory
+  rebalance flow.
+- `hedged_dual_direction_grid.md` - multi-symbol hedged grid internals.
+
 ## Safety And Architecture
 
 - `architecture_module_layout.md`

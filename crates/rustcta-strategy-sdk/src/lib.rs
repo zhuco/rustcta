@@ -229,6 +229,28 @@ impl HttpStrategyPlatformClient {
             .await
             .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))
     }
+
+    pub async fn positions(&self, request: RuntimePositionsRequest) -> SdkResult<RuntimePositions> {
+        let url = format!("{}/strategy-platform/positions", self.base_url);
+        let response = self
+            .client
+            .post(url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(StrategySdkError::ExecutionRejected(format!(
+                "remote platform endpoint returned HTTP {status}: {body}"
+            )));
+        }
+        response
+            .json::<RuntimePositions>()
+            .await
+            .map_err(|error| StrategySdkError::ExecutionUnavailable(error.to_string()))
+    }
 }
 
 fn trim_base_url(mut value: String) -> String {
@@ -618,6 +640,38 @@ pub struct RuntimeAccountConfig {
     pub margin_mode: Option<String>,
     pub leverage: Option<u32>,
     pub max_leverage: Option<u32>,
+    pub received_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimePositionsRequest {
+    pub schema_version: u32,
+    pub tenant_id: String,
+    pub account_id: String,
+    pub run_id: String,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimePosition {
+    pub schema_version: u32,
+    pub exchange_id: String,
+    pub symbol: String,
+    pub market_type: MarketType,
+    pub position_side: String,
+    pub quantity: f64,
+    pub entry_price: f64,
+    pub mark_price: f64,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RuntimePositions {
+    pub schema_version: u32,
+    pub positions: Vec<RuntimePosition>,
     pub received_at: DateTime<Utc>,
 }
 

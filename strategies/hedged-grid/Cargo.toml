@@ -13,6 +13,9 @@ serde_json.workspace = true
 serde_yaml = "0.9"
 rustcta-strategy-sdk.workspace = true
 tokio.workspace = true
+reqwest.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

@@ -1849,11 +1849,14 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "futures-util",
+ "reqwest",
  "rustcta-strategy-sdk",
  "serde",
  "serde_json",
  "serde_yaml",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
